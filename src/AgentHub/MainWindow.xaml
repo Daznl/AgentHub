@@ -22,6 +22,7 @@
                 <Button x:Name="ViewGitHubBtn" Click="ViewGitHubBtn_Click" Content="🐙 GitHub Repos" FontWeight="SemiBold" />
                 <Button x:Name="ViewCockpitBtn" Click="ViewCockpitBtn_Click" Content="⚡ Cockpit (Dual Terminal)" FontWeight="SemiBold" />
                 <Border Width="1" Background="{StaticResource BorderBrush}" Margin="6,0,10,8" />
+                <Button Click="ScanFolder_Click" Content="🔍 Scan for repos" Background="#047857" FontWeight="SemiBold" ToolTip="Scan Desktop or folder to find and import existing Git repositories" />
                 <Button Click="AddExisting_Click" Content="Add existing repo" />
                 <Button Click="CloneRepo_Click" Content="Clone from GitHub" />
                 <Button Click="OpenSettings_Click" Content="Settings" />
@@ -44,7 +45,23 @@
                             <TextBlock FontWeight="SemiBold" Text="Repositories" />
                             <TextBlock Margin="0,4,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" Text="Select a local Git repository" />
                         </StackPanel>
-                        <ListBox x:Name="RepoList" SelectionChanged="RepoList_SelectionChanged" Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}" />
+                        <ListBox x:Name="RepoList" SelectionChanged="RepoList_SelectionChanged" Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Padding="4,5" Margin="0,0,0,2">
+                                        <DockPanel>
+                                            <Border DockPanel.Dock="Right" Background="{Binding StatusBadgeBrush}" CornerRadius="4" Padding="6,2" VerticalAlignment="Center" Margin="4,0,0,0">
+                                                <TextBlock Text="{Binding StatusBadgeText}" Foreground="{Binding StatusTextBrush}" FontSize="10" FontWeight="SemiBold" />
+                                            </Border>
+                                            <StackPanel DockPanel.Dock="Left">
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" Foreground="{StaticResource TextBrush}" />
+                                                <TextBlock Text="{Binding LocalPath}" FontSize="11" Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis" MaxWidth="190" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
                     </DockPanel>
                 </Border>
 
@@ -135,14 +152,21 @@
                         </StackPanel>
 
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                            <TextBox x:Name="GitHubSearchBox" Width="240" Margin="0,0,8,0" TextChanged="GitHubSearchBox_TextChanged" ToolTip="Filter by name or description..." />
-                            <ComboBox x:Name="GitHubVisibilityFilter" Width="140" Margin="0,0,8,0" SelectionChanged="GitHubVisibilityFilter_SelectionChanged">
+                            <TextBox x:Name="GitHubSearchBox" Width="180" Margin="0,0,8,0" TextChanged="GitHubSearchBox_TextChanged" ToolTip="Filter by name or description..." />
+                            <ComboBox x:Name="GitHubVisibilityFilter" Width="170" Margin="0,0,8,0" SelectionChanged="GitHubVisibilityFilter_SelectionChanged">
                                 <ComboBoxItem Content="All Repositories" IsSelected="True" />
+                                <ComboBoxItem Content="✓ Up to date" />
+                                <ComboBoxItem Content="⇣ Behind (Needs Pull)" />
+                                <ComboBoxItem Content="⇡ Ahead of Origin" />
+                                <ComboBoxItem Content="✎ Uncommitted Changes" />
+                                <ComboBoxItem Content="Not in AgentHub" />
+                                <ComboBoxItem Content="In AgentHub" />
                                 <ComboBoxItem Content="Private Only" />
                                 <ComboBoxItem Content="Public Only" />
-                                <ComboBoxItem Content="Not in AgentHub" />
                             </ComboBox>
-                            <Button Click="RefreshGitHub_Click" Content="🔄 Refresh" Margin="0" Padding="12,6" />
+                            <Button Click="AutoDetectRepos_Click" Content="🔍 Auto-Detect Local" Background="#065f46" FontWeight="SemiBold" Margin="0,0,6,0" Padding="10,6" ToolTip="Scan Desktop and project folders to auto-link existing clones" />
+                            <Button Click="CheckAllSync_Click" Content="🔄 Check Sync" Margin="0,0,6,0" Padding="10,6" ToolTip="Run git status and fetch across all linked repositories" />
+                            <Button Click="RefreshGitHub_Click" Content="Refresh" Margin="0" Padding="10,6" />
                         </StackPanel>
                     </DockPanel>
                 </Border>
@@ -180,8 +204,11 @@
                                                     <Border Background="{Binding VisibilityBadgeBrush}" CornerRadius="4" Padding="6,2" Margin="10,0,0,0" VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding VisibilityLabel}" Foreground="{Binding VisibilityTextBrush}" FontSize="11" FontWeight="SemiBold" />
                                                     </Border>
-                                                    <Border Visibility="{Binding AddedBadgeVisibility}" Background="#065f46" CornerRadius="4" Padding="6,2" Margin="8,0,0,0" VerticalAlignment="Center">
-                                                        <TextBlock Text="✓ In AgentHub" Foreground="#34d399" FontSize="11" FontWeight="SemiBold" />
+                                                    <Border Visibility="{Binding AddedBadgeVisibility}" Background="#1e293b" CornerRadius="4" Padding="6,2" Margin="8,0,0,0" VerticalAlignment="Center">
+                                                        <TextBlock Text="✓ In AgentHub" Foreground="#94a3b8" FontSize="11" FontWeight="SemiBold" />
+                                                    </Border>
+                                                    <Border Background="{Binding SyncStatusBadgeBrush}" CornerRadius="4" Padding="7,2" Margin="8,0,0,0" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding SyncStatusText}" Foreground="{Binding SyncStatusTextBrush}" FontSize="11" FontWeight="Bold" />
                                                     </Border>
                                                 </StackPanel>
 
@@ -195,6 +222,8 @@
 
                                             <!-- Actions -->
                                             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
+                                                <Button Tag="{Binding}" Visibility="{Binding PullButtonVisibility}" Click="GitHubPull_Click" Content="⬇ Pull (fast-forward)" Background="#d97706" FontWeight="SemiBold" Padding="12,7" Margin="0,0,8,0" />
+                                                <Button Tag="{Binding}" Visibility="{Binding CockpitButtonVisibility}" Click="GitHubCockpit_Click" Content="⚡ Cockpit" Background="#7c3aed" FontWeight="SemiBold" Padding="12,7" Margin="0,0,8,0" />
                                                 <Button Tag="{Binding}" Click="GitHubAction_Click" Content="{Binding ActionButtonText}" Background="{Binding ActionButtonBrush}" FontWeight="SemiBold" Padding="14,7" Margin="0,0,8,0" />
                                                 <Button Tag="{Binding Url}" Click="OpenGitHubUrl_Click" Content="🌐 GitHub" Padding="10,7" Margin="0" />
                                             </StackPanel>

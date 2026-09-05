@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private readonly AgentLauncher _agentLauncher = new();
     private readonly RepoContextService _repoContext = new();
     private readonly GitHubService _githubService;
+    private readonly RepoDiscoveryService _discovery;
     private readonly List<ShellOption> _shellOptions = new();
     private List<GitHubRepository> _allGitHubRepos = new();
     private AppSettings _settings = new();
@@ -36,6 +37,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         _git = new GitService(_runner);
         _githubService = new GitHubService(_runner);
+        _discovery = new RepoDiscoveryService(_git);
         Loaded += MainWindow_Loaded;
         AgentCombo.SelectionChanged += (_, _) => UpdateAgentPreview();
     }
@@ -44,11 +46,49 @@ public partial class MainWindow : Window
     {
         Activate();
         _settings = await _settingsService.LoadAsync();
+
+        if (_settings.Repositories.Count == 0)
+        {
+            await AutoDiscoverInitialReposAsync();
+        }
+
         RefreshRepoList();
         RefreshAgentList();
         PopulateShellOptions();
         StatusText.Text = $"Settings: {_settingsService.SettingsPath}";
+
+        _ = RefreshAllRepoSnapshotsAsync(fetchRemotes: false);
         _ = LoadGitHubReposAsync();
+    }
+
+    private async Task AutoDiscoverInitialReposAsync()
+    {
+        try
+        {
+            var desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            var discovered = await _discovery.ScanFolderAsync(desktop, maxDepth: 1);
+            foreach (var d in discovered)
+            {
+                if (!_settings.Repositories.Any(r => string.Equals(r.LocalPath, d.LocalPath, StringComparison.OrdinalIgnoreCase)))
+                {
+                    _settings.Repositories.Add(new RepositoryDefinition
+                    {
+                        Name = d.Name,
+                        LocalPath = d.LocalPath,
+                        RemoteUrl = d.RemoteUrl,
+                        CurrentBranch = d.Snapshot?.Branch,
+                        Ahead = d.Snapshot?.Ahead ?? 0,
+                        Behind = d.Snapshot?.Behind ?? 0,
+                        ChangedFiles = d.Snapshot?.ChangedFiles ?? 0
+                    });
+                }
+            }
+            if (_settings.Repositories.Count > 0)
+            {
+                await _settingsService.SaveAsync(_settings);
+            }
+        }
+        catch { }
     }
 
     private void RefreshRepoList()
@@ -115,6 +155,54 @@ public partial class MainWindow : Window
         RepoNameText.Text = _selectedRepo.Name;
         RepoPathText.Text = _selectedRepo.LocalPath;
         await RefreshGitAsync();
+    }
+
+    private async void ScanFolder_Click(object sender, RoutedEventArgs e)
+    {
+        using var dialog = new Forms.FolderBrowserDialog
+        {
+            Description = "Select a folder to scan for Git repositories (e.g. Desktop, Projects)",
+            UseDescriptionForTitle = true,
+            SelectedPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+            ShowNewFolderButton = false
+        };
+        if (dialog.ShowDialog() != Forms.DialogResult.OK) return;
+
+        StatusText.Text = $"Scanning {dialog.SelectedPath} for Git repositories…";
+        var discovered = await _discovery.ScanFolderAsync(dialog.SelectedPath, maxDepth: 2);
+
+        int addedCount = 0;
+        foreach (var d in discovered)
+        {
+            if (!_settings.Repositories.Any(r => string.Equals(r.LocalPath, d.LocalPath, StringComparison.OrdinalIgnoreCase)))
+            {
+                _settings.Repositories.Add(new RepositoryDefinition
+                {
+                    Name = d.Name,
+                    LocalPath = d.LocalPath,
+                    RemoteUrl = d.RemoteUrl,
+                    CurrentBranch = d.Snapshot?.Branch,
+                    Ahead = d.Snapshot?.Ahead ?? 0,
+                    Behind = d.Snapshot?.Behind ?? 0,
+                    ChangedFiles = d.Snapshot?.ChangedFiles ?? 0
+                });
+                addedCount++;
+            }
+        }
+
+        if (addedCount > 0)
+        {
+            await _settingsService.SaveAsync(_settings);
+            RefreshRepoList();
+            await RefreshAllRepoSnapshotsAsync();
+            MessageBox.Show($"Scanned folder:\n{dialog.SelectedPath}\n\nFound {discovered.Count} repository(ies).\nAdded {addedCount} new repository(ies) to AgentHub.", "Scan Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        else
+        {
+            MessageBox.Show($"Scanned folder:\n{dialog.SelectedPath}\n\nFound {discovered.Count} repository(ies). All are already in AgentHub.", "Scan Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        StatusText.Text = $"Scan finished. {discovered.Count} repos found, {addedCount} new added.";
     }
 
     private async void AddExisting_Click(object sender, RoutedEventArgs e)
@@ -391,25 +479,69 @@ public partial class MainWindow : Window
         }
     }
 
+    public async Task RefreshAllRepoSnapshotsAsync(bool fetchRemotes = false)
+    {
+        if (_settings.Repositories.Count == 0) return;
+
+        StatusText.Text = fetchRemotes ? "Fetching remote status for all repositories…" : "Checking status of all local repositories…";
+
+        foreach (var repo in _settings.Repositories)
+        {
+            if (!Directory.Exists(repo.LocalPath))
+                continue;
+
+            try
+            {
+                if (fetchRemotes)
+                {
+                    await _git.FetchAsync(repo.LocalPath);
+                }
+
+                var snapshot = await _git.GetSnapshotAsync(repo.LocalPath);
+                repo.CurrentBranch = snapshot.Branch;
+                repo.Ahead = snapshot.Ahead;
+                repo.Behind = snapshot.Behind;
+                repo.ChangedFiles = snapshot.ChangedFiles;
+            }
+            catch { }
+        }
+
+        RepoList.ItemsSource = null;
+        RepoList.ItemsSource = _settings.Repositories.OrderBy(r => r.Name).ToList();
+
+        UpdateGitHubAddedState();
+        ApplyGitHubFilter();
+
+        StatusText.Text = fetchRemotes ? "All repositories fetched and sync states updated." : "Repository sync states updated.";
+    }
+
     private void UpdateGitHubAddedState()
     {
         foreach (var ghRepo in _allGitHubRepos)
         {
             var match = _settings.Repositories.FirstOrDefault(r =>
-                (!string.IsNullOrWhiteSpace(r.RemoteUrl) && (
-                    string.Equals(r.RemoteUrl.TrimEnd('/'), ghRepo.Url.TrimEnd('/'), StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(r.RemoteUrl.TrimEnd('/').Replace(".git", ""), ghRepo.Url.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))) ||
+                RepoDiscoveryService.MatchesUrl(r.RemoteUrl, ghRepo.Url) ||
                 string.Equals(r.Name, ghRepo.Name, StringComparison.OrdinalIgnoreCase));
 
             if (match != null)
             {
                 ghRepo.IsAlreadyAdded = true;
                 ghRepo.LocalPath = match.LocalPath;
+                ghRepo.LocalExists = match.ExistsOnDisk;
+                ghRepo.LocalBranch = match.CurrentBranch;
+                ghRepo.AheadCount = match.Ahead;
+                ghRepo.BehindCount = match.Behind;
+                ghRepo.ChangedFilesCount = match.ChangedFiles;
             }
             else
             {
                 ghRepo.IsAlreadyAdded = false;
                 ghRepo.LocalPath = null;
+                ghRepo.LocalExists = false;
+                ghRepo.LocalBranch = null;
+                ghRepo.AheadCount = 0;
+                ghRepo.BehindCount = 0;
+                ghRepo.ChangedFilesCount = 0;
             }
         }
     }
@@ -432,9 +564,14 @@ public partial class MainWindow : Window
 
             return filterIndex switch
             {
-                1 => r.IsPrivate,
-                2 => !r.IsPrivate,
-                3 => !r.IsAlreadyAdded,
+                1 => r.IsAlreadyAdded && r.LocalExists && r.BehindCount == 0 && r.AheadCount == 0 && r.ChangedFilesCount == 0,
+                2 => r.IsAlreadyAdded && r.LocalExists && r.BehindCount > 0,
+                3 => r.IsAlreadyAdded && r.LocalExists && r.AheadCount > 0,
+                4 => r.IsAlreadyAdded && r.LocalExists && r.ChangedFilesCount > 0,
+                5 => !r.IsAlreadyAdded,
+                6 => r.IsAlreadyAdded,
+                7 => r.IsPrivate,
+                8 => !r.IsPrivate,
                 _ => true
             };
         }).ToList();
@@ -447,6 +584,87 @@ public partial class MainWindow : Window
     }
 
     private async void RefreshGitHub_Click(object sender, RoutedEventArgs e) => await LoadGitHubReposAsync(forceRefresh: true);
+
+    private async void AutoDetectRepos_Click(object sender, RoutedEventArgs e)
+    {
+        var desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+        StatusText.Text = "Scanning Desktop for local repositories…";
+        var discovered = await _discovery.ScanFolderAsync(desktop, maxDepth: 2);
+        int added = 0;
+        foreach (var d in discovered)
+        {
+            if (!_settings.Repositories.Any(r => string.Equals(r.LocalPath, d.LocalPath, StringComparison.OrdinalIgnoreCase)))
+            {
+                _settings.Repositories.Add(new RepositoryDefinition
+                {
+                    Name = d.Name,
+                    LocalPath = d.LocalPath,
+                    RemoteUrl = d.RemoteUrl,
+                    CurrentBranch = d.Snapshot?.Branch,
+                    Ahead = d.Snapshot?.Ahead ?? 0,
+                    Behind = d.Snapshot?.Behind ?? 0,
+                    ChangedFiles = d.Snapshot?.ChangedFiles ?? 0
+                });
+                added++;
+            }
+        }
+
+        if (added > 0)
+        {
+            await _settingsService.SaveAsync(_settings);
+            RefreshRepoList();
+        }
+
+        await RefreshAllRepoSnapshotsAsync(fetchRemotes: false);
+        StatusText.Text = $"Auto-detected {discovered.Count} local repos ({added} new added).";
+        MessageBox.Show($"Auto-detect complete!\n\nFound {discovered.Count} local repositories on Desktop.\nLinked with remote GitHub repositories.", "Local Repos Detected", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private async void CheckAllSync_Click(object sender, RoutedEventArgs e)
+    {
+        await RefreshAllRepoSnapshotsAsync(fetchRemotes: true);
+    }
+
+    private async void GitHubPull_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement el || el.Tag is not GitHubRepository ghRepo || string.IsNullOrWhiteSpace(ghRepo.LocalPath))
+            return;
+
+        StatusText.Text = $"Pulling fast-forward for {ghRepo.Name}…";
+        var res = await _git.PullAsync(ghRepo.LocalPath);
+        if (res.ExitCode == 0)
+        {
+            var snap = await _git.GetSnapshotAsync(ghRepo.LocalPath);
+            var local = _settings.Repositories.FirstOrDefault(r => string.Equals(r.LocalPath, ghRepo.LocalPath, StringComparison.OrdinalIgnoreCase));
+            if (local != null)
+            {
+                local.Ahead = snap.Ahead;
+                local.Behind = snap.Behind;
+                local.ChangedFiles = snap.ChangedFiles;
+                local.CurrentBranch = snap.Branch;
+            }
+            UpdateGitHubAddedState();
+            ApplyGitHubFilter();
+            StatusText.Text = $"Successfully pulled {ghRepo.Name}. Up to date!";
+        }
+        else
+        {
+            MessageBox.Show($"Pull failed:\n{res.StdErr}\n{res.StdOut}", "Pull Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+            StatusText.Text = $"Pull failed for {ghRepo.Name}.";
+        }
+    }
+
+    private void GitHubCockpit_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement el || el.Tag is not GitHubRepository ghRepo || string.IsNullOrWhiteSpace(ghRepo.LocalPath))
+            return;
+
+        ViewCockpitBtn_Click(sender, e);
+        var defaultShell = _shellOptions.FirstOrDefault(s => s.DisplayName.Contains("PowerShell")) ?? _shellOptions.FirstOrDefault();
+        var cmd = defaultShell?.Command ?? "powershell.exe -NoLogo";
+        TerminalLeft.StartSession(cmd, ghRepo.LocalPath, $"Terminal 1 · {ghRepo.Name}", ghRepo.Name);
+        StatusText.Text = $"Opened Cockpit in {ghRepo.Name} ({ghRepo.LocalPath})";
+    }
 
     private void GitHubSearchBox_TextChanged(object sender, TextChangedEventArgs e) => ApplyGitHubFilter();
 
@@ -497,7 +715,8 @@ public partial class MainWindow : Window
         using var dialog = new Forms.FolderBrowserDialog
         {
             Description = $"Choose the parent folder where '{repo.Name}' will be cloned",
-            UseDescriptionForTitle = true
+            UseDescriptionForTitle = true,
+            SelectedPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
         };
 
         if (dialog.ShowDialog() != Forms.DialogResult.OK) return;
@@ -530,10 +749,10 @@ public partial class MainWindow : Window
 
         repo.IsAlreadyAdded = true;
         repo.LocalPath = destination;
+        repo.LocalExists = true;
 
         RefreshRepoList();
-        UpdateGitHubAddedState();
-        ApplyGitHubFilter();
+        _ = RefreshAllRepoSnapshotsAsync();
 
         StatusText.Text = $"Cloned and registered {repo.Name} in AgentHub!";
 

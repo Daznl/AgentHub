@@ -7,7 +7,9 @@ AgentHub treats the **repository as the workspace** and the AI CLI as an interch
 ## What v0.1 does
 
 - Register existing local Git repositories.
-- **GitHub Repository Browser:** View, search, and filter your remote GitHub repositories in-app via your local GitHub CLI (`gh`). Filter by visibility (private/public) or unadded status, view push timestamps, and 1-click clone & register directly into AgentHub.
+- **Local Repository Auto-Discovery:** 1-click folder scanner that auto-detects existing local Git clones across your system and links them directly to their remote GitHub counterparts.
+- **Real-Time Sync Status & In-App Pull:** Checks local clone existence, branch, uncommitted changes, and ahead/behind counts with color-coded badges (`✓ Up to date`, `⇣ Behind`, `⇡ Ahead`, `✎ Modified`). Supports 1-click fast-forward pull directly from the remote repository cards.
+- **GitHub Repository Browser:** View, search, and filter your remote GitHub repositories in-app via your local GitHub CLI (`gh`). Filter by visibility (private/public) or sync status (up-to-date, needs pull, dirty), view push timestamps, and 1-click clone & register directly into AgentHub.
 - Clone GitHub repositories by HTTPS or SSH URL.
 - Show current branch, changed-file count, ahead/behind state and origin remote.
 - Run `git fetch --prune`, `git pull --ff-only`, and `git push` from the UI.
