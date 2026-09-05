@@ -20,7 +20,7 @@
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button x:Name="ViewReposBtn" Click="ViewReposBtn_Click" Content="📁 Local Repos" Background="#3b82f6" FontWeight="SemiBold" />
                 <Button x:Name="ViewGitHubBtn" Click="ViewGitHubBtn_Click" Content="🐙 GitHub Repos" FontWeight="SemiBold" />
-                <Button x:Name="ViewCockpitBtn" Click="ViewCockpitBtn_Click" Content="⚡ Cockpit (Dual Terminal)" FontWeight="SemiBold" />
+                <Button x:Name="ViewCockpitBtn" Click="ViewCockpitBtn_Click" Content="⚡ Cockpit" FontWeight="SemiBold" />
                 <Border Width="1" Background="{StaticResource BorderBrush}" Margin="6,0,10,8" />
                 <Button Click="ScanFolder_Click" Content="🔍 Scan for repos" Background="#047857" FontWeight="SemiBold" ToolTip="Scan Desktop or folder to find and import existing Git repositories" />
                 <Button Click="AddExisting_Click" Content="Add existing repo" />
