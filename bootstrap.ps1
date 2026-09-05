@@ -19,6 +19,7 @@ function Require-Command($name, $required = $true) {
 $hasDotnet = Require-Command dotnet
 $hasGit = Require-Command git
 Require-Command wt.exe $false | Out-Null
+Require-Command gh $false | Out-Null
 Require-Command codex $false | Out-Null
 Require-Command claude $false | Out-Null
 Require-Command agy $false | Out-Null

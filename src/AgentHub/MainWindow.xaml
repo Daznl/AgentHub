@@ -18,7 +18,8 @@
             </StackPanel>
 
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="ViewReposBtn" Click="ViewReposBtn_Click" Content="📁 Repositories &amp; Git" Background="#3b82f6" FontWeight="SemiBold" />
+                <Button x:Name="ViewReposBtn" Click="ViewReposBtn_Click" Content="📁 Local Repos" Background="#3b82f6" FontWeight="SemiBold" />
+                <Button x:Name="ViewGitHubBtn" Click="ViewGitHubBtn_Click" Content="🐙 GitHub Repos" FontWeight="SemiBold" />
                 <Button x:Name="ViewCockpitBtn" Click="ViewCockpitBtn_Click" Content="⚡ Cockpit (Dual Terminal)" FontWeight="SemiBold" />
                 <Border Width="1" Background="{StaticResource BorderBrush}" Margin="6,0,10,8" />
                 <Button Click="AddExisting_Click" Content="Add existing repo" />
@@ -115,7 +116,98 @@
                 </ScrollViewer>
             </Grid>
 
-            <!-- VIEW 2: MULTI-SESSION COCKPIT (DUAL-TERMINAL HOST) -->
+            <!-- VIEW 2: GITHUB REPOSITORIES BROWSER -->
+            <Grid x:Name="GitHubViewGrid" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- GitHub Top Filter & Search Bar -->
+                <Border Grid.Row="0" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,12">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="🐙 Remote Repositories" FontWeight="SemiBold" FontSize="16" Foreground="{StaticResource TextBrush}" />
+                                <TextBlock x:Name="GitHubAccountText" Text="Loading GitHub account..." Foreground="{StaticResource AccentBrush}" FontSize="13" Margin="10,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock x:Name="GitHubRepoCountText" Text="Browse, search and 1-click clone your GitHub repositories directly into AgentHub" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,2,0,0" />
+                        </StackPanel>
+
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                            <TextBox x:Name="GitHubSearchBox" Width="240" Margin="0,0,8,0" TextChanged="GitHubSearchBox_TextChanged" ToolTip="Filter by name or description..." />
+                            <ComboBox x:Name="GitHubVisibilityFilter" Width="140" Margin="0,0,8,0" SelectionChanged="GitHubVisibilityFilter_SelectionChanged">
+                                <ComboBoxItem Content="All Repositories" IsSelected="True" />
+                                <ComboBoxItem Content="Private Only" />
+                                <ComboBoxItem Content="Public Only" />
+                                <ComboBoxItem Content="Not in AgentHub" />
+                            </ComboBox>
+                            <Button Click="RefreshGitHub_Click" Content="🔄 Refresh" Margin="0" Padding="12,6" />
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <!-- GitHub Repo Content Area -->
+                <Grid Grid.Row="1">
+                    <!-- Auth Warning Banner if gh is not authenticated -->
+                    <Border x:Name="GitHubAuthWarning" Visibility="Collapsed" Background="#27272a" BorderBrush="#ef4444" BorderThickness="1" CornerRadius="8" Padding="28" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="540">
+                        <StackPanel HorizontalAlignment="Center">
+                            <TextBlock Text="⚠️ GitHub CLI Not Authenticated" FontWeight="Bold" FontSize="17" Foreground="#ef4444" HorizontalAlignment="Center" />
+                            <TextBlock Text="AgentHub uses your local GitHub CLI (`gh`) so you never have to paste personal access tokens or credentials into the app." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,16" TextAlignment="Center" />
+                            <Button Click="LoginGitHubInCockpit_Click" Content="⚡ Open Terminal &amp; Run `gh auth login`" Background="#2563eb" FontWeight="SemiBold" Padding="16,8" HorizontalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Loading Text -->
+                    <TextBlock x:Name="GitHubLoadingText" Text="Fetching your GitHub repositories via GitHub CLI..." Foreground="{StaticResource MutedBrush}" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
+
+                    <!-- Repos List -->
+                    <ScrollViewer x:Name="GitHubScrollViewer" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="GitHubRepoList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="16,12" Margin="0,0,0,10">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <!-- Details -->
+                                            <StackPanel Grid.Column="0">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding NameWithOwner}" FontWeight="Bold" FontSize="16" Foreground="{StaticResource TextBrush}" Cursor="Hand" MouseDown="GitHubRepoTitle_MouseDown" Tag="{Binding Url}" ToolTip="Click to open on GitHub" />
+                                                    <Border Background="{Binding VisibilityBadgeBrush}" CornerRadius="4" Padding="6,2" Margin="10,0,0,0" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding VisibilityLabel}" Foreground="{Binding VisibilityTextBrush}" FontSize="11" FontWeight="SemiBold" />
+                                                    </Border>
+                                                    <Border Visibility="{Binding AddedBadgeVisibility}" Background="#065f46" CornerRadius="4" Padding="6,2" Margin="8,0,0,0" VerticalAlignment="Center">
+                                                        <TextBlock Text="✓ In AgentHub" Foreground="#34d399" FontSize="11" FontWeight="SemiBold" />
+                                                    </Border>
+                                                </StackPanel>
+
+                                                <TextBlock Text="{Binding DisplayDescription}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,8" FontSize="13" />
+
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding PushedAtFormatted}" Foreground="#71717a" FontSize="11" />
+                                                    <TextBlock Text="{Binding LocalPathFormatted}" Foreground="#60a5fa" FontSize="11" Margin="14,0,0,0" />
+                                                </StackPanel>
+                                            </StackPanel>
+
+                                            <!-- Actions -->
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
+                                                <Button Tag="{Binding}" Click="GitHubAction_Click" Content="{Binding ActionButtonText}" Background="{Binding ActionButtonBrush}" FontWeight="SemiBold" Padding="14,7" Margin="0,0,8,0" />
+                                                <Button Tag="{Binding Url}" Click="OpenGitHubUrl_Click" Content="🌐 GitHub" Padding="10,7" Margin="0" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
+
+            <!-- VIEW 3: MULTI-SESSION COCKPIT (DUAL-TERMINAL HOST) -->
             <Grid x:Name="CockpitViewGrid" Visibility="Collapsed">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />

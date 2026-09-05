@@ -37,8 +37,8 @@
 - Clear confidence/source label beside every usage figure
 
 ## v0.5 — GitHub workflow
-
-- GitHub CLI (`gh`) integration
+ 
+- GitHub CLI (`gh`) integration & repository browser (Completed: remote repo search, filter, and 1-click clone)
 - PR create/view/open
 - CI status
 - Issue/task association

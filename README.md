@@ -7,6 +7,7 @@ AgentHub treats the **repository as the workspace** and the AI CLI as an interch
 ## What v0.1 does
 
 - Register existing local Git repositories.
+- **GitHub Repository Browser:** View, search, and filter your remote GitHub repositories in-app via your local GitHub CLI (`gh`). Filter by visibility (private/public) or unadded status, view push timestamps, and 1-click clone & register directly into AgentHub.
 - Clone GitHub repositories by HTTPS or SSH URL.
 - Show current branch, changed-file count, ahead/behind state and origin remote.
 - Run `git fetch --prune`, `git pull --ff-only`, and `git push` from the UI.
@@ -15,27 +16,36 @@ AgentHub treats the **repository as the workspace** and the AI CLI as an interch
 - Launch **Codex**, **Claude Code**, or **Antigravity** in Windows Terminal or embedded side-by-side terminal panes.
 - Keep agent commands configurable in `%APPDATA%\AgentHub\settings.json`.
 - Create `.agenthub/handoff.md` in a repo to carry context between agents.
-- Never stores API keys or provider credentials. Authentication remains owned by each CLI.
+- Never stores API keys or provider credentials. Authentication remains owned by each CLI, `gh`, and Git Credential Manager.
 
 ## Why this architecture
 
-The Git repository is the durable state. Claude, Codex and Gemini/Antigravity are replaceable executors. AgentHub deliberately shells out to the installed `git`, `codex`, `claude`, and `agy` commands instead of depending on provider SDKs. That keeps provider authentication and rapidly-changing CLI behavior outside the app.
+The Git repository is the durable state. Claude, Codex and Gemini/Antigravity are replaceable executors. AgentHub deliberately shells out to the installed `git`, `gh`, `codex`, `claude`, and `agy` commands instead of depending on provider SDKs. That keeps provider authentication and rapidly-changing CLI behavior outside the app.
 
 ## Requirements
 
 - Windows 10/11
 - .NET 8 SDK (to build)
 - Git on `PATH`
-- Optional but recommended: Windows Terminal (`wt.exe`)
+- Optional but recommended:
+  - GitHub CLI (`gh.exe`) — for remote repository browsing & authentication
+  - Windows Terminal (`wt.exe`) — for external tabbed launches
 - Any coding CLIs you want to use on `PATH`, initially:
   - `codex`
   - `claude`
   - `agy`
 
-## Build and run
+## Quick start
+
+Run the bootstrap script from the repository root (handles prerequisites verification, building, and launching):
+
+```cmd
+.\bootstrap.cmd
+```
+
+Or build manually:
 
 ```powershell
-cd AgentHub
 dotnet restore
 dotnet run --project .\src\AgentHub\AgentHub.csproj
 ```

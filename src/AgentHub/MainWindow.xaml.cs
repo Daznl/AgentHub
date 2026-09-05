@@ -25,7 +25,9 @@ public partial class MainWindow : Window
     private readonly GitService _git;
     private readonly AgentLauncher _agentLauncher = new();
     private readonly RepoContextService _repoContext = new();
+    private readonly GitHubService _githubService;
     private readonly List<ShellOption> _shellOptions = new();
+    private List<GitHubRepository> _allGitHubRepos = new();
     private AppSettings _settings = new();
     private RepositoryDefinition? _selectedRepo;
 
@@ -33,6 +35,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _git = new GitService(_runner);
+        _githubService = new GitHubService(_runner);
         Loaded += MainWindow_Loaded;
         AgentCombo.SelectionChanged += (_, _) => UpdateAgentPreview();
     }
@@ -44,6 +47,7 @@ public partial class MainWindow : Window
         RefreshAgentList();
         PopulateShellOptions();
         StatusText.Text = $"Settings: {_settingsService.SettingsPath}";
+        _ = LoadGitHubReposAsync();
     }
 
     private void RefreshRepoList()
@@ -64,6 +68,9 @@ public partial class MainWindow : Window
         RightRepoCombo.ItemsSource = repos;
         if (repos.Count > 1) RightRepoCombo.SelectedIndex = 1;
         else if (repos.Count > 0) RightRepoCombo.SelectedIndex = 0;
+
+        UpdateGitHubAddedState();
+        ApplyGitHubFilter();
     }
 
     private void RefreshAgentList()
@@ -296,20 +303,245 @@ public partial class MainWindow : Window
         return string.IsNullOrWhiteSpace(name) ? "repository" : name;
     }
 
+    private static readonly SolidColorBrush NavActiveBrush = new(Color.FromRgb(59, 130, 246));
+    private static readonly SolidColorBrush NavInactiveBrush = new(Color.FromRgb(42, 46, 54));
+
     private void ViewReposBtn_Click(object sender, RoutedEventArgs e)
     {
         RepoViewGrid.Visibility = Visibility.Visible;
+        GitHubViewGrid.Visibility = Visibility.Collapsed;
         CockpitViewGrid.Visibility = Visibility.Collapsed;
-        ViewReposBtn.Background = new SolidColorBrush(Color.FromRgb(59, 130, 246));
-        ViewCockpitBtn.Background = new SolidColorBrush(Color.FromRgb(42, 46, 54));
+        ViewReposBtn.Background = NavActiveBrush;
+        ViewGitHubBtn.Background = NavInactiveBrush;
+        ViewCockpitBtn.Background = NavInactiveBrush;
+    }
+
+    private async void ViewGitHubBtn_Click(object sender, RoutedEventArgs e)
+    {
+        RepoViewGrid.Visibility = Visibility.Collapsed;
+        GitHubViewGrid.Visibility = Visibility.Visible;
+        CockpitViewGrid.Visibility = Visibility.Collapsed;
+        ViewGitHubBtn.Background = NavActiveBrush;
+        ViewReposBtn.Background = NavInactiveBrush;
+        ViewCockpitBtn.Background = NavInactiveBrush;
+
+        if (_allGitHubRepos.Count == 0)
+        {
+            await LoadGitHubReposAsync();
+        }
+        else
+        {
+            ApplyGitHubFilter();
+        }
     }
 
     private void ViewCockpitBtn_Click(object sender, RoutedEventArgs e)
     {
         RepoViewGrid.Visibility = Visibility.Collapsed;
+        GitHubViewGrid.Visibility = Visibility.Collapsed;
         CockpitViewGrid.Visibility = Visibility.Visible;
-        ViewCockpitBtn.Background = new SolidColorBrush(Color.FromRgb(37, 99, 235));
-        ViewReposBtn.Background = new SolidColorBrush(Color.FromRgb(42, 46, 54));
+        ViewCockpitBtn.Background = NavActiveBrush;
+        ViewReposBtn.Background = NavInactiveBrush;
+        ViewGitHubBtn.Background = NavInactiveBrush;
+    }
+
+    private async Task LoadGitHubReposAsync(bool forceRefresh = false)
+    {
+        if (_allGitHubRepos.Count > 0 && !forceRefresh)
+        {
+            UpdateGitHubAddedState();
+            ApplyGitHubFilter();
+            return;
+        }
+
+        GitHubLoadingText.Visibility = Visibility.Visible;
+        GitHubAuthWarning.Visibility = Visibility.Collapsed;
+        GitHubScrollViewer.Visibility = Visibility.Collapsed;
+
+        var (isAuth, username) = await _githubService.GetAuthUserAsync();
+        if (!isAuth || string.IsNullOrWhiteSpace(username))
+        {
+            GitHubLoadingText.Visibility = Visibility.Collapsed;
+            GitHubAuthWarning.Visibility = Visibility.Visible;
+            GitHubAccountText.Text = "Not authenticated";
+            GitHubRepoCountText.Text = "Run gh auth login in terminal to connect your GitHub account.";
+            return;
+        }
+
+        GitHubAccountText.Text = $"@{username}";
+        GitHubAuthWarning.Visibility = Visibility.Collapsed;
+
+        try
+        {
+            var repos = await _githubService.GetRepositoriesAsync(100);
+            _allGitHubRepos = repos;
+
+            UpdateGitHubAddedState();
+
+            GitHubLoadingText.Visibility = Visibility.Collapsed;
+            GitHubScrollViewer.Visibility = Visibility.Visible;
+            ApplyGitHubFilter();
+            StatusText.Text = $"Loaded {_allGitHubRepos.Count} GitHub repositories for @{username}";
+        }
+        catch (Exception ex)
+        {
+            GitHubLoadingText.Visibility = Visibility.Collapsed;
+            StatusText.Text = "Failed to load GitHub repositories: " + ex.Message;
+        }
+    }
+
+    private void UpdateGitHubAddedState()
+    {
+        foreach (var ghRepo in _allGitHubRepos)
+        {
+            var match = _settings.Repositories.FirstOrDefault(r =>
+                (!string.IsNullOrWhiteSpace(r.RemoteUrl) && (
+                    string.Equals(r.RemoteUrl.TrimEnd('/'), ghRepo.Url.TrimEnd('/'), StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(r.RemoteUrl.TrimEnd('/').Replace(".git", ""), ghRepo.Url.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))) ||
+                string.Equals(r.Name, ghRepo.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (match != null)
+            {
+                ghRepo.IsAlreadyAdded = true;
+                ghRepo.LocalPath = match.LocalPath;
+            }
+            else
+            {
+                ghRepo.IsAlreadyAdded = false;
+                ghRepo.LocalPath = null;
+            }
+        }
+    }
+
+    private void ApplyGitHubFilter()
+    {
+        if (_allGitHubRepos == null || GitHubRepoList == null) return;
+
+        var query = GitHubSearchBox?.Text?.Trim() ?? string.Empty;
+        var filterIndex = GitHubVisibilityFilter?.SelectedIndex ?? 0;
+
+        var filtered = _allGitHubRepos.Where(r =>
+        {
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                var matchesName = r.NameWithOwner.Contains(query, StringComparison.OrdinalIgnoreCase);
+                var matchesDesc = (r.Description ?? string.Empty).Contains(query, StringComparison.OrdinalIgnoreCase);
+                if (!matchesName && !matchesDesc) return false;
+            }
+
+            return filterIndex switch
+            {
+                1 => r.IsPrivate,
+                2 => !r.IsPrivate,
+                3 => !r.IsAlreadyAdded,
+                _ => true
+            };
+        }).ToList();
+
+        GitHubRepoList.ItemsSource = null;
+        GitHubRepoList.ItemsSource = filtered;
+
+        if (GitHubRepoCountText != null)
+            GitHubRepoCountText.Text = $"{filtered.Count} repository(ies) shown ({_allGitHubRepos.Count} total remote)";
+    }
+
+    private async void RefreshGitHub_Click(object sender, RoutedEventArgs e) => await LoadGitHubReposAsync(forceRefresh: true);
+
+    private void GitHubSearchBox_TextChanged(object sender, TextChangedEventArgs e) => ApplyGitHubFilter();
+
+    private void GitHubVisibilityFilter_SelectionChanged(object sender, SelectionChangedEventArgs e) => ApplyGitHubFilter();
+
+    private void GitHubRepoTitle_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement el && el.Tag is string url && !string.IsNullOrWhiteSpace(url))
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+    }
+
+    private void OpenGitHubUrl_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement el && el.Tag is string url && !string.IsNullOrWhiteSpace(url))
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+    }
+
+    private void LoginGitHubInCockpit_Click(object sender, RoutedEventArgs e)
+    {
+        ViewCockpitBtn_Click(sender, e);
+        TerminalLeft.StartSession("gh auth login", Environment.CurrentDirectory, "Terminal 1 · GitHub CLI Login", "GitHub Auth");
+        StatusText.Text = "Follow prompts in Terminal 1 to complete GitHub authentication.";
+    }
+
+    private async void GitHubAction_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement el || el.Tag is not GitHubRepository repo) return;
+
+        if (repo.IsAlreadyAdded)
+        {
+            var local = _settings.Repositories.FirstOrDefault(r =>
+                string.Equals(r.LocalPath, repo.LocalPath, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(r.Name, repo.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (local != null)
+            {
+                ViewReposBtn_Click(sender, e);
+                RepoList.SelectedItem = local;
+                StatusText.Text = $"Selected {local.Name} in Local Repos";
+            }
+            return;
+        }
+
+        using var dialog = new Forms.FolderBrowserDialog
+        {
+            Description = $"Choose the parent folder where '{repo.Name}' will be cloned",
+            UseDescriptionForTitle = true
+        };
+
+        if (dialog.ShowDialog() != Forms.DialogResult.OK) return;
+
+        var destination = Path.Combine(dialog.SelectedPath, repo.Name);
+        if (Directory.Exists(destination))
+        {
+            MessageBox.Show($"Destination folder already exists:\n{destination}", "AgentHub", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        StatusText.Text = $"Cloning {repo.NameWithOwner}…";
+        var cloneRes = await _git.CloneAsync(repo.Url, destination);
+        if (cloneRes.ExitCode != 0)
+        {
+            MessageBox.Show($"Git clone failed:\n{cloneRes.StdErr}\n{cloneRes.StdOut}", "Clone failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            StatusText.Text = "Clone failed.";
+            return;
+        }
+
+        var newRepo = new RepositoryDefinition
+        {
+            Name = repo.Name,
+            LocalPath = destination,
+            RemoteUrl = repo.Url
+        };
+
+        _settings.Repositories.Add(newRepo);
+        await _settingsService.SaveAsync(_settings);
+
+        repo.IsAlreadyAdded = true;
+        repo.LocalPath = destination;
+
+        RefreshRepoList();
+        UpdateGitHubAddedState();
+        ApplyGitHubFilter();
+
+        StatusText.Text = $"Cloned and registered {repo.Name} in AgentHub!";
+
+        var answer = MessageBox.Show($"Successfully cloned {repo.Name}!\n\nWould you like to open it in Local Repositories?", "Repository Cloned", MessageBoxButton.YesNo, MessageBoxImage.Information);
+        if (answer == MessageBoxResult.Yes)
+        {
+            ViewReposBtn_Click(sender, e);
+            RepoList.SelectedItem = newRepo;
+        }
     }
 
     private void LaunchCockpitLeft_Click(object sender, RoutedEventArgs e)
