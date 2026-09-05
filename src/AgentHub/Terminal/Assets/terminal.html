@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="xterm.css" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background-color: #18181b;
+      overflow: hidden;
+    }
+    #terminal-container {
+      width: 100%;
+      height: 100%;
+      padding: 4px;
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+<body>
+  <div id="terminal-container"></div>
+  <script src="xterm.js"></script>
+  <script src="xterm-addon-fit.js"></script>
+  <script>
+    const term = new Terminal({
+      cursorBlink: true,
+      cursorStyle: 'bar',
+      fontSize: 13,
+      fontFamily: 'Consolas, "Cascadia Code", "Courier New", monospace',
+      theme: {
+        background: '#18181b',
+        foreground: '#f4f4f5',
+        cursor: '#a1a1aa',
+        selectionBackground: '#3f3f46',
+        black: '#18181b',
+        red: '#ef4444',
+        green: '#22c55e',
+        yellow: '#eab308',
+        blue: '#3b82f6',
+        magenta: '#a855f7',
+        cyan: '#06b6d4',
+        white: '#f4f4f5',
+        brightBlack: '#71717a',
+        brightRed: '#f87171',
+        brightGreen: '#4ade80',
+        brightYellow: '#fde047',
+        brightBlue: '#60a5fa',
+        brightMagenta: '#c084fc',
+        brightCyan: '#22d3ee',
+        brightWhite: '#ffffff'
+      }
+    });
+
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(document.getElementById('terminal-container'));
+
+    function notifyResize() {
+      try {
+        fitAddon.fit();
+        if (window.chrome && window.chrome.webview) {
+          window.chrome.webview.postMessage(JSON.stringify({
+            type: 'resize',
+            cols: term.cols,
+            rows: term.rows
+          }));
+        }
+      } catch (e) {}
+    }
+
+    window.addEventListener('resize', () => {
+      notifyResize();
+    });
+
+    term.onData(data => {
+      if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage(JSON.stringify({
+          type: 'input',
+          data: data
+        }));
+      }
+    });
+
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.addEventListener('message', event => {
+        const msg = event.data;
+        if (typeof msg === 'string') {
+          term.write(msg);
+        } else if (msg && msg.type === 'write') {
+          term.write(msg.data);
+        }
+      });
+
+      // Initial fit and notify host
+      setTimeout(() => {
+        notifyResize();
+        window.chrome.webview.postMessage(JSON.stringify({
+          type: 'ready',
+          cols: term.cols,
+          rows: term.rows
+        }));
+      }, 50);
+    }
+  </script>
+</body>
+</html>

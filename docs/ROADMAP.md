@@ -44,10 +44,16 @@
 - Issue/task association
 - Branch protection awareness
 
+## Multi-Session Cockpit Stages (Active)
+
+- **Stage 1 (Completed):** Embedded dual-terminal multiplexer via Windows ConPTY + WebView2/xterm.js. Side-by-side terminal panes for concurrent interactive sessions.
+- **Stage 2 (Next):** Interactive CLI compatibility testing & ANSI escape sequence verification across Antigravity, Claude Code, and Codex.
+- **Stage 3:** Attention detector & alerting engine (flashing badges, bell chime, and input-idle detection when an agent awaits user confirmation).
+- **Stage 4:** Automated Git worktree isolation per task with cross-agent handoff orchestration.
+
 ## Later
 
-- Embedded terminal via Windows ConPTY
-- Notifications when an agent exits or needs attention
+- Notifications when an agent exits or needs attention via Windows Toast
 - Repository templates and bootstrap rules
 - Multiple agent profiles per provider (e.g. conservative vs autonomous)
 - Model selection metadata where a CLI exposes a stable interface

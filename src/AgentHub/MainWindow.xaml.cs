@@ -3,10 +3,20 @@ using System.Windows;
 using System.Windows.Controls;
 using AgentHub.Models;
 using AgentHub.Services;
+using AgentHub.Terminal;
+using Color = System.Windows.Media.Color;
 using Forms = System.Windows.Forms;
 using MessageBox = System.Windows.MessageBox;
+using SolidColorBrush = System.Windows.Media.SolidColorBrush;
 
 namespace AgentHub;
+
+public sealed class ShellOption
+{
+    public required string DisplayName { get; init; }
+    public required string Command { get; init; }
+    public override string ToString() => DisplayName;
+}
 
 public partial class MainWindow : Window
 {
@@ -15,6 +25,7 @@ public partial class MainWindow : Window
     private readonly GitService _git;
     private readonly AgentLauncher _agentLauncher = new();
     private readonly RepoContextService _repoContext = new();
+    private readonly List<ShellOption> _shellOptions = new();
     private AppSettings _settings = new();
     private RepositoryDefinition? _selectedRepo;
 
@@ -31,22 +42,56 @@ public partial class MainWindow : Window
         _settings = await _settingsService.LoadAsync();
         RefreshRepoList();
         RefreshAgentList();
+        PopulateShellOptions();
         StatusText.Text = $"Settings: {_settingsService.SettingsPath}";
     }
 
     private void RefreshRepoList()
     {
         var selectedId = _selectedRepo?.Id;
+        var repos = _settings.Repositories.OrderBy(r => r.Name).ToList();
+
         RepoList.ItemsSource = null;
-        RepoList.ItemsSource = _settings.Repositories.OrderBy(r => r.Name).ToList();
+        RepoList.ItemsSource = repos;
         if (selectedId is not null)
-            RepoList.SelectedItem = _settings.Repositories.FirstOrDefault(r => r.Id == selectedId);
+            RepoList.SelectedItem = repos.FirstOrDefault(r => r.Id == selectedId);
+
+        LeftRepoCombo.ItemsSource = null;
+        LeftRepoCombo.ItemsSource = repos;
+        if (repos.Count > 0) LeftRepoCombo.SelectedIndex = 0;
+
+        RightRepoCombo.ItemsSource = null;
+        RightRepoCombo.ItemsSource = repos;
+        if (repos.Count > 1) RightRepoCombo.SelectedIndex = 1;
+        else if (repos.Count > 0) RightRepoCombo.SelectedIndex = 0;
     }
 
     private void RefreshAgentList()
     {
         AgentCombo.ItemsSource = _settings.Agents.Where(a => a.Enabled).ToList();
         if (AgentCombo.Items.Count > 0) AgentCombo.SelectedIndex = 0;
+        PopulateShellOptions();
+    }
+
+    private void PopulateShellOptions()
+    {
+        _shellOptions.Clear();
+        _shellOptions.Add(new ShellOption { DisplayName = "PowerShell", Command = "powershell.exe -NoLogo" });
+        _shellOptions.Add(new ShellOption { DisplayName = "Command Prompt", Command = "cmd.exe" });
+        foreach (var agent in _settings.Agents.Where(a => a.Enabled))
+        {
+            var cmd = string.IsNullOrWhiteSpace(agent.Arguments) ? agent.Command : $"{agent.Command} {agent.Arguments}";
+            _shellOptions.Add(new ShellOption { DisplayName = agent.Name, Command = cmd });
+        }
+
+        LeftShellCombo.ItemsSource = null;
+        LeftShellCombo.ItemsSource = _shellOptions;
+        if (_shellOptions.Count > 0) LeftShellCombo.SelectedIndex = 0;
+
+        RightShellCombo.ItemsSource = null;
+        RightShellCombo.ItemsSource = _shellOptions;
+        if (_shellOptions.Count > 1) RightShellCombo.SelectedIndex = 1;
+        else if (_shellOptions.Count > 0) RightShellCombo.SelectedIndex = 0;
     }
 
     private async void RepoList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -249,5 +294,95 @@ public partial class MainWindow : Window
         var name = slash >= 0 ? value[(slash + 1)..] : value;
         if (name.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) name = name[..^4];
         return string.IsNullOrWhiteSpace(name) ? "repository" : name;
+    }
+
+    private void ViewReposBtn_Click(object sender, RoutedEventArgs e)
+    {
+        RepoViewGrid.Visibility = Visibility.Visible;
+        CockpitViewGrid.Visibility = Visibility.Collapsed;
+        ViewReposBtn.Background = new SolidColorBrush(Color.FromRgb(59, 130, 246));
+        ViewCockpitBtn.Background = new SolidColorBrush(Color.FromRgb(42, 46, 54));
+    }
+
+    private void ViewCockpitBtn_Click(object sender, RoutedEventArgs e)
+    {
+        RepoViewGrid.Visibility = Visibility.Collapsed;
+        CockpitViewGrid.Visibility = Visibility.Visible;
+        ViewCockpitBtn.Background = new SolidColorBrush(Color.FromRgb(37, 99, 235));
+        ViewReposBtn.Background = new SolidColorBrush(Color.FromRgb(42, 46, 54));
+    }
+
+    private void LaunchCockpitLeft_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedRepo is null || AgentCombo.SelectedItem is not AgentDefinition agent) return;
+        ViewCockpitBtn_Click(sender, e);
+        var cmd = string.IsNullOrWhiteSpace(agent.Arguments) ? agent.Command : $"{agent.Command} {agent.Arguments}";
+        TerminalLeft.StartSession(cmd, _selectedRepo.LocalPath, $"Terminal 1 · {agent.Name}", _selectedRepo.Name);
+        StatusText.Text = $"Launched {agent.Name} in Terminal 1 (Left)";
+    }
+
+    private void LaunchCockpitRight_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedRepo is null || AgentCombo.SelectedItem is not AgentDefinition agent) return;
+        ViewCockpitBtn_Click(sender, e);
+        var cmd = string.IsNullOrWhiteSpace(agent.Arguments) ? agent.Command : $"{agent.Command} {agent.Arguments}";
+        TerminalRight.StartSession(cmd, _selectedRepo.LocalPath, $"Terminal 2 · {agent.Name}", _selectedRepo.Name);
+        StatusText.Text = $"Launched {agent.Name} in Terminal 2 (Right)";
+    }
+
+    private void LaunchLeft_Click(object sender, RoutedEventArgs e)
+    {
+        var repo = LeftRepoCombo.SelectedItem as RepositoryDefinition;
+        var dir = repo?.LocalPath ?? Directory.GetCurrentDirectory();
+        var repoName = repo?.Name ?? "Workspace";
+        var shell = LeftShellCombo.SelectedItem as ShellOption;
+        var cmd = shell?.Command ?? "powershell.exe -NoLogo";
+        var title = shell?.DisplayName ?? "Shell";
+        TerminalLeft.StartSession(cmd, dir, $"Terminal 1 · {title}", repoName);
+        StatusText.Text = $"Terminal 1: Started {title} in {repoName}";
+    }
+
+    private void LaunchRight_Click(object sender, RoutedEventArgs e)
+    {
+        var repo = RightRepoCombo.SelectedItem as RepositoryDefinition;
+        var dir = repo?.LocalPath ?? Directory.GetCurrentDirectory();
+        var repoName = repo?.Name ?? "Workspace";
+        var shell = RightShellCombo.SelectedItem as ShellOption;
+        var cmd = shell?.Command ?? "powershell.exe -NoLogo";
+        var title = shell?.DisplayName ?? "Shell";
+        TerminalRight.StartSession(cmd, dir, $"Terminal 2 · {title}", repoName);
+        StatusText.Text = $"Terminal 2: Started {title} in {repoName}";
+    }
+
+    private void LaunchDualDemo_Click(object sender, RoutedEventArgs e)
+    {
+        ViewCockpitBtn_Click(sender, e);
+
+        var repo1 = LeftRepoCombo.SelectedItem as RepositoryDefinition ?? _settings.Repositories.FirstOrDefault();
+        var dir1 = repo1?.LocalPath ?? Directory.GetCurrentDirectory();
+        var name1 = repo1?.Name ?? "Workspace 1";
+
+        var repo2 = RightRepoCombo.SelectedItem as RepositoryDefinition ?? _settings.Repositories.Skip(1).FirstOrDefault() ?? repo1;
+        var dir2 = repo2?.LocalPath ?? Directory.GetCurrentDirectory();
+        var name2 = repo2?.Name ?? "Workspace 2";
+
+        TerminalLeft.StartSession("powershell.exe -NoLogo", dir1, "Terminal 1 · PowerShell", name1);
+        TerminalRight.StartSession("powershell.exe -NoLogo", dir2, "Terminal 2 · PowerShell", name2);
+
+        StatusText.Text = "Demonstrating Stage 1: Dual concurrent ConPTY terminals launched side-by-side!";
+    }
+
+    private void ClearBothTerminals_Click(object sender, RoutedEventArgs e)
+    {
+        TerminalLeft.Dispose();
+        TerminalRight.Dispose();
+        StatusText.Text = "Terminals reset.";
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        TerminalLeft.Dispose();
+        TerminalRight.Dispose();
+        base.OnClosed(e);
     }
 }
