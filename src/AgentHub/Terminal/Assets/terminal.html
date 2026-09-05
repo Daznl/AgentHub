@@ -88,7 +88,13 @@
       window.chrome.webview.addEventListener('message', event => {
         const msg = event.data;
         if (typeof msg === 'string') {
+          if (msg.startsWith('{') && msg.includes('"type":"clear"')) {
+            term.reset();
+            return;
+          }
           term.write(msg);
+        } else if (msg && msg.type === 'clear') {
+          term.reset();
         } else if (msg && msg.type === 'write') {
           term.write(msg.data);
         }

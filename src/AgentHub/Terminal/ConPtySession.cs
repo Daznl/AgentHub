@@ -58,14 +58,12 @@ public sealed class ConPtySession : IDisposable
 
         var hr = ConPtyNative.CreatePseudoConsole(coord, hPipeInRead, hPipeOutWrite, 0, out _hPC);
 
-        // PseudoConsole takes ownership of read-in and write-out handles
-        ConPtyNative.CloseHandle(hPipeInRead);
-        ConPtyNative.CloseHandle(hPipeOutWrite);
-
         if (hr != 0)
         {
+            ConPtyNative.CloseHandle(hPipeInRead);
             ConPtyNative.CloseHandle(hPipeInWrite);
             ConPtyNative.CloseHandle(hPipeOutRead);
+            ConPtyNative.CloseHandle(hPipeOutWrite);
             throw new Win32Exception(hr, $"CreatePseudoConsole failed with HRESULT 0x{hr:X8}");
         }
 
@@ -97,25 +95,34 @@ public sealed class ConPtySession : IDisposable
             var processSa = new ConPtyNative.SECURITY_ATTRIBUTES { nLength = Marshal.SizeOf<ConPtyNative.SECURITY_ATTRIBUTES>() };
             var threadSa = new ConPtyNative.SECURITY_ATTRIBUTES { nLength = Marshal.SizeOf<ConPtyNative.SECURITY_ATTRIBUTES>() };
 
-            if (!ConPtyNative.CreateProcess(
-                null,
-                commandLine,
-                ref processSa,
-                ref threadSa,
-                false,
-                ConPtyNative.EXTENDED_STARTUPINFO_PRESENT,
-                IntPtr.Zero,
-                string.IsNullOrWhiteSpace(workingDirectory) ? null : workingDirectory,
-                ref startupInfo,
-                out var processInfo))
+            try
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), $"CreateProcess failed for command '{commandLine}'");
-            }
+                if (!ConPtyNative.CreateProcess(
+                    null,
+                    commandLine,
+                    ref processSa,
+                    ref threadSa,
+                    false,
+                    ConPtyNative.EXTENDED_STARTUPINFO_PRESENT,
+                    IntPtr.Zero,
+                    string.IsNullOrWhiteSpace(workingDirectory) ? null : workingDirectory,
+                    ref startupInfo,
+                    out var processInfo))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), $"CreateProcess failed for command '{commandLine}'");
+                }
 
-            _hProcess = processInfo.hProcess;
-            _hThread = processInfo.hThread;
-            ProcessId = processInfo.dwProcessId;
-            IsRunning = true;
+                _hProcess = processInfo.hProcess;
+                _hThread = processInfo.hThread;
+                ProcessId = processInfo.dwProcessId;
+                IsRunning = true;
+            }
+            finally
+            {
+                // Close the pseudoconsole's ends of the pipes now that the child process is created
+                ConPtyNative.CloseHandle(hPipeInRead);
+                ConPtyNative.CloseHandle(hPipeOutWrite);
+            }
         }
         finally
         {

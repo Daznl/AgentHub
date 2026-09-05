@@ -22,6 +22,9 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     private int _cols = 100;
     private int _rows = 30;
 
+    private bool _isInitialized;
+    private bool _isInitializing;
+
     public event Action? SessionExited;
 
     public EmbeddedTerminalControl()
@@ -50,8 +53,14 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
 
     private async void EmbeddedTerminalControl_Loaded(object sender, RoutedEventArgs e)
     {
-        if (WebView.CoreWebView2 != null) return;
+        if (_isInitialized || _isInitializing) return;
+        if (WebView.CoreWebView2 != null)
+        {
+            _isInitialized = true;
+            return;
+        }
 
+        _isInitializing = true;
         try
         {
             var env = await GetSharedEnvironmentAsync();
@@ -61,6 +70,9 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
 
             WebView.CoreWebView2.Settings.AreDevToolsEnabled = false;
             WebView.CoreWebView2.Settings.IsStatusBarEnabled = false;
+
+            // Ensure event handler is subscribed strictly once to avoid duplicate keystroke events
+            WebView.CoreWebView2.WebMessageReceived -= CoreWebView2_WebMessageReceived;
             WebView.CoreWebView2.WebMessageReceived += CoreWebView2_WebMessageReceived;
 
             var htmlPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Terminal", "Assets", "terminal.html");
@@ -68,10 +80,17 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
             {
                 WebView.CoreWebView2.Navigate(new Uri(htmlPath).AbsoluteUri);
             }
+
+            _isInitialized = true;
+            Loaded -= EmbeddedTerminalControl_Loaded;
         }
         catch (Exception ex)
         {
             SubtitleText.Text = "Failed to initialize terminal: " + ex.Message;
+        }
+        finally
+        {
+            _isInitializing = false;
         }
     }
 
@@ -106,12 +125,19 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     {
         _pendingStart = false;
         _session?.Dispose();
+        _session = null;
 
         try
         {
             StatusDot.Fill = RunningBrush;
             RestartBtn.Visibility = Visibility.Collapsed;
             StopBtn.Visibility = Visibility.Visible;
+
+            try
+            {
+                WebView.CoreWebView2?.PostWebMessageAsString(JsonSerializer.Serialize(new { type = "clear" }));
+            }
+            catch { }
 
             _session = ConPtySession.Start(_commandLine, _workingDirectory, _cols, _rows);
             _session.OutputDataReceived += text =>
@@ -207,6 +233,15 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
 
     public void Dispose()
     {
+        Loaded -= EmbeddedTerminalControl_Loaded;
+        if (WebView.CoreWebView2 != null)
+        {
+            try
+            {
+                WebView.CoreWebView2.WebMessageReceived -= CoreWebView2_WebMessageReceived;
+            }
+            catch { }
+        }
         _session?.Dispose();
         _session = null;
     }

@@ -909,9 +909,14 @@ public partial class MainWindow : Window
         if (_selectedRepo is null || AgentCombo.SelectedItem is not AgentDefinition agent) return;
         ViewCockpitBtn_Click(this, new RoutedEventArgs());
 
+        bool added = false;
         while (_panes.Count <= paneIndex && _panes.Count < 6)
         {
             _panes.Add(CreateTerminalPane(_panes.Count, 0));
+            added = true;
+        }
+        if (added)
+        {
             RebuildTerminalLayout();
         }
 

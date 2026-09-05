@@ -78,6 +78,14 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     public void StartSession(string commandLine, string workingDirectory, string title, string repoName)
     {
+        if (!string.IsNullOrEmpty(workingDirectory) && RepoCombo.ItemsSource is IEnumerable<RepositoryDefinition> repos)
+        {
+            var match = repos.FirstOrDefault(r => string.Equals(r.LocalPath, workingDirectory, StringComparison.OrdinalIgnoreCase));
+            if (match != null)
+            {
+                RepoCombo.SelectedItem = match;
+            }
+        }
         Terminal.StartSession(commandLine, workingDirectory, title, repoName);
     }
 
