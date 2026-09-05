@@ -34,4 +34,10 @@ dotnet restore .\AgentHub.sln
 dotnet build .\AgentHub.sln -c Debug --no-restore
 
 Write-Host "`nStarting AgentHub..." -ForegroundColor Cyan
-dotnet run --project .\src\AgentHub\AgentHub.csproj --no-build
+$exePath = Join-Path $PSScriptRoot "src\AgentHub\bin\Debug\net8.0-windows\AgentHub.exe"
+if (Test-Path $exePath) {
+    Start-Process -FilePath $exePath -WorkingDirectory $PSScriptRoot
+    Write-Host "  [OK] AgentHub launched successfully! Window opened on your desktop." -ForegroundColor Green
+} else {
+    dotnet run --project .\src\AgentHub\AgentHub.csproj --no-build
+}

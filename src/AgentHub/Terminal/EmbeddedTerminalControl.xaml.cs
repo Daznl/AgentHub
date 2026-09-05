@@ -31,15 +31,30 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         Unloaded += EmbeddedTerminalControl_Unloaded;
     }
 
+    private static Task<CoreWebView2Environment>? _sharedEnvTask;
+    private static readonly object _envLock = new();
+
+    private static Task<CoreWebView2Environment> GetSharedEnvironmentAsync()
+    {
+        lock (_envLock)
+        {
+            if (_sharedEnvTask == null)
+            {
+                var userData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AgentHub", "WebView2");
+                Directory.CreateDirectory(userData);
+                _sharedEnvTask = CoreWebView2Environment.CreateAsync(null, userData);
+            }
+            return _sharedEnvTask;
+        }
+    }
+
     private async void EmbeddedTerminalControl_Loaded(object sender, RoutedEventArgs e)
     {
         if (WebView.CoreWebView2 != null) return;
 
         try
         {
-            var userData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AgentHub", "WebView2");
-            Directory.CreateDirectory(userData);
-            var env = await CoreWebView2Environment.CreateAsync(null, userData);
+            var env = await GetSharedEnvironmentAsync();
             await WebView.EnsureCoreWebView2Async(env);
 
             if (WebView.CoreWebView2 == null) return;
