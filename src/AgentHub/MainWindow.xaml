@@ -1,0 +1,111 @@
+<Window x:Class="AgentHub.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AgentHub" Height="820" Width="1240" MinHeight="650" MinWidth="980">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" Margin="0,0,0,16">
+            <StackPanel DockPanel.Dock="Left">
+                <TextBlock FontSize="28" FontWeight="SemiBold" Text="AgentHub" />
+                <TextBlock Foreground="{StaticResource MutedBrush}" Text="Repos, GitHub and coding agents in one place" />
+            </StackPanel>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Click="AddExisting_Click" Content="Add existing repo" />
+                <Button Click="CloneRepo_Click" Content="Clone from GitHub" />
+                <Button Click="OpenSettings_Click" Content="Open settings" />
+            </StackPanel>
+        </DockPanel>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="310" />
+                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Margin="4,4,4,10">
+                        <TextBlock FontWeight="SemiBold" Text="Repositories" />
+                        <TextBlock Margin="0,4,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" Text="Select a local Git repository" />
+                    </StackPanel>
+                    <ListBox x:Name="RepoList" SelectionChanged="RepoList_SelectionChanged" Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}" />
+                </DockPanel>
+            </Border>
+
+            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="RepoDetail" Visibility="Collapsed">
+                    <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="18" Margin="0,0,0,12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock x:Name="RepoNameText" FontSize="24" FontWeight="SemiBold" />
+                                <TextBlock x:Name="RepoPathText" Margin="0,5,0,0" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                <Button Click="OpenFolder_Click" Content="Open folder" />
+                                <Button Click="OpenGitHub_Click" Content="GitHub" />
+                                <Button Click="RemoveRepo_Click" Content="Remove" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="18" Margin="0,0,0,12">
+                        <StackPanel>
+                            <DockPanel Margin="0,0,0,12">
+                                <TextBlock DockPanel.Dock="Left" FontSize="18" FontWeight="SemiBold" Text="Git status" />
+                                <Button DockPanel.Dock="Right" Click="RefreshGit_Click" Content="Refresh" />
+                            </DockPanel>
+                            <UniformGrid Columns="4" Margin="0,0,0,10">
+                                <StackPanel><TextBlock Foreground="{StaticResource MutedBrush}" Text="Branch"/><TextBlock x:Name="BranchText" FontSize="18"/></StackPanel>
+                                <StackPanel><TextBlock Foreground="{StaticResource MutedBrush}" Text="Changes"/><TextBlock x:Name="ChangesText" FontSize="18"/></StackPanel>
+                                <StackPanel><TextBlock Foreground="{StaticResource MutedBrush}" Text="Ahead"/><TextBlock x:Name="AheadText" FontSize="18"/></StackPanel>
+                                <StackPanel><TextBlock Foreground="{StaticResource MutedBrush}" Text="Behind"/><TextBlock x:Name="BehindText" FontSize="18"/></StackPanel>
+                            </UniformGrid>
+                            <TextBlock x:Name="RemoteText" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,12" />
+                            <WrapPanel>
+                                <Button Click="Fetch_Click" Content="Fetch" />
+                                <Button Click="Pull_Click" Content="Pull (fast-forward)" />
+                                <Button Click="Push_Click" Content="Push" />
+                            </WrapPanel>
+                            <TextBox x:Name="GitOutput" Height="120" Margin="0,6,0,0" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12" TextWrapping="NoWrap" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="18" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock FontSize="18" FontWeight="SemiBold" Text="Coding agent" />
+                            <TextBlock Margin="0,4,0,12" Foreground="{StaticResource MutedBrush}" Text="Launch the selected CLI in this repository. Each launch gets the same working tree and handoff file." TextWrapping="Wrap" />
+                            <StackPanel Orientation="Horizontal">
+                                <ComboBox x:Name="AgentCombo" Width="240" DisplayMemberPath="Name" />
+                                <Button Click="LaunchAgent_Click" Content="Launch agent" Padding="18,7" />
+                                <Button Click="OpenHandoff_Click" Content="Open handoff" />
+                            </StackPanel>
+                            <TextBlock x:Name="AgentCommandPreview" Margin="0,4,0,0" Foreground="{StaticResource MutedBrush}" FontFamily="Consolas" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="18">
+                        <StackPanel>
+                            <TextBlock FontSize="18" FontWeight="SemiBold" Text="Agent handoff" />
+                            <TextBlock Margin="0,4,0,0" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"
+                                       Text="AgentHub keeps .agenthub/handoff.md inside each repository. Use it to record the current task, completed work, next steps and relevant files before swapping agents. Automatic handoff summaries and worktree-per-task orchestration are planned next." />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <Border Grid.Row="2" Margin="0,14,0,0" Padding="10,6" Background="{StaticResource PanelBrush}" CornerRadius="6">
+            <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedBrush}" Text="Ready" />
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,37 @@
+<Application x:Class="AgentHub.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <SolidColorBrush x:Key="PanelBrush" Color="#17191D" />
+        <SolidColorBrush x:Key="CardBrush" Color="#202329" />
+        <SolidColorBrush x:Key="BorderBrush" Color="#343841" />
+        <SolidColorBrush x:Key="TextBrush" Color="#F3F4F6" />
+        <SolidColorBrush x:Key="MutedBrush" Color="#9CA3AF" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#7C9CFF" />
+
+        <Style TargetType="Window">
+            <Setter Property="Background" Value="#111317" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontFamily" Value="Segoe UI" />
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Background" Value="#2A2E36" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="Padding" Value="12,7" />
+            <Setter Property="Margin" Value="0,0,8,8" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Background" Value="#181B20" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="Padding" Value="8" />
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Padding" Value="6" />
+            <Setter Property="Margin" Value="0,0,8,8" />
+        </Style>
+    </Application.Resources>
+</Application>

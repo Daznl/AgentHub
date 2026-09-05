@@ -1,0 +1,10 @@
+.vs/
+.idea/
+.vscode/
+**/bin/
+**/obj/
+*.user
+*.suo
+*.log
+artifacts/
+.agenthub/session-local.json
