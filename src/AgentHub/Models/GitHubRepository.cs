@@ -110,6 +110,7 @@ public sealed class GitHubRepository
     public SolidColorBrush ActionButtonBrush => IsAlreadyAdded ? AddedBtnBg : CloneBtnBg;
 
     public Visibility PullButtonVisibility => (IsAlreadyAdded && LocalExists && BehindCount > 0) ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility PushButtonVisibility => (IsAlreadyAdded && LocalExists && AheadCount > 0) ? Visibility.Visible : Visibility.Collapsed;
     public Visibility CockpitButtonVisibility => (IsAlreadyAdded && LocalExists) ? Visibility.Visible : Visibility.Collapsed;
 
     public string LocalPathFormatted => IsAlreadyAdded && !string.IsNullOrWhiteSpace(LocalPath)

@@ -654,6 +654,35 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void GitHubPush_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement el || el.Tag is not GitHubRepository ghRepo || string.IsNullOrWhiteSpace(ghRepo.LocalPath))
+            return;
+
+        StatusText.Text = $"Pushing commits for {ghRepo.Name} to GitHub…";
+        var res = await _git.PushAsync(ghRepo.LocalPath);
+        if (res.ExitCode == 0)
+        {
+            var snap = await _git.GetSnapshotAsync(ghRepo.LocalPath);
+            var local = _settings.Repositories.FirstOrDefault(r => string.Equals(r.LocalPath, ghRepo.LocalPath, StringComparison.OrdinalIgnoreCase));
+            if (local != null)
+            {
+                local.Ahead = snap.Ahead;
+                local.Behind = snap.Behind;
+                local.ChangedFiles = snap.ChangedFiles;
+                local.CurrentBranch = snap.Branch;
+            }
+            UpdateGitHubAddedState();
+            ApplyGitHubFilter();
+            StatusText.Text = $"Successfully pushed {ghRepo.Name} to GitHub!";
+        }
+        else
+        {
+            MessageBox.Show($"Push failed:\n{res.StdErr}\n{res.StdOut}", "Push Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+            StatusText.Text = $"Push failed for {ghRepo.Name}.";
+        }
+    }
+
     private void GitHubCockpit_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement el || el.Tag is not GitHubRepository ghRepo || string.IsNullOrWhiteSpace(ghRepo.LocalPath))

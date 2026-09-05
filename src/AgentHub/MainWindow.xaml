@@ -223,6 +223,7 @@
                                             <!-- Actions -->
                                             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
                                                 <Button Tag="{Binding}" Visibility="{Binding PullButtonVisibility}" Click="GitHubPull_Click" Content="⬇ Pull (fast-forward)" Background="#d97706" FontWeight="SemiBold" Padding="12,7" Margin="0,0,8,0" />
+                                                <Button Tag="{Binding}" Visibility="{Binding PushButtonVisibility}" Click="GitHubPush_Click" Content="⬆ Push" Background="#2563eb" FontWeight="SemiBold" Padding="12,7" Margin="0,0,8,0" />
                                                 <Button Tag="{Binding}" Visibility="{Binding CockpitButtonVisibility}" Click="GitHubCockpit_Click" Content="⚡ Cockpit" Background="#7c3aed" FontWeight="SemiBold" Padding="12,7" Margin="0,0,8,0" />
                                                 <Button Tag="{Binding}" Click="GitHubAction_Click" Content="{Binding ActionButtonText}" Background="{Binding ActionButtonBrush}" FontWeight="SemiBold" Padding="14,7" Margin="0,0,8,0" />
                                                 <Button Tag="{Binding Url}" Click="OpenGitHubUrl_Click" Content="🌐 GitHub" Padding="10,7" Margin="0" />
