@@ -113,8 +113,9 @@
                                 <TextBlock Margin="0,4,0,12" Foreground="{StaticResource MutedBrush}" Text="Launch an interchangeable CLI directly in this repo or inside the embedded dual-terminal cockpit." TextWrapping="Wrap" />
                                 <WrapPanel VerticalAlignment="Center">
                                     <ComboBox x:Name="AgentCombo" Width="200" DisplayMemberPath="Name" />
-                                    <Button Click="LaunchCockpitLeft_Click" Content="⚡ Launch in Cockpit (Left)" Background="#2563eb" FontWeight="SemiBold" />
-                                    <Button Click="LaunchCockpitRight_Click" Content="⚡ Launch in Cockpit (Right)" Background="#7c3aed" FontWeight="SemiBold" />
+                                    <Button Click="LaunchCockpit1_Click" Content="⚡ Launch in T1" Background="#2563eb" FontWeight="SemiBold" ToolTip="Launch in Terminal 1" />
+                                    <Button Click="LaunchCockpit2_Click" Content="⚡ Launch in T2" Background="#7c3aed" FontWeight="SemiBold" ToolTip="Launch in Terminal 2" />
+                                    <Button Click="LaunchCockpit3_Click" Content="⚡ Launch in T3" Background="#059669" FontWeight="SemiBold" ToolTip="Launch in Terminal 3" />
                                     <Button Click="LaunchAgent_Click" Content="External Window" />
                                     <Button Click="OpenHandoff_Click" Content="Open handoff" />
                                 </WrapPanel>
@@ -237,7 +238,7 @@
                 </Grid>
             </Grid>
 
-            <!-- VIEW 3: MULTI-SESSION COCKPIT (DUAL-TERMINAL HOST) -->
+            <!-- VIEW 3: MULTI-SESSION COCKPIT (DYNAMIC MULTI-TERMINAL HOST) -->
             <Grid x:Name="CockpitViewGrid" Visibility="Collapsed">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -249,76 +250,23 @@
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="⚡ Dual-Terminal Host (ConPTY Stage 1)" FontWeight="SemiBold" FontSize="15" Foreground="{StaticResource TextBrush}" />
+                                <TextBlock Text="⚡ Multi-Terminal Cockpit" FontWeight="SemiBold" FontSize="15" Foreground="{StaticResource TextBrush}" />
                                 <Border Background="#065f46" CornerRadius="4" Margin="10,0,0,0" Padding="6,2" VerticalAlignment="Center">
-                                    <TextBlock Text="STAGE 1 ACTIVE" Foreground="#34d399" FontSize="10" FontWeight="Bold" />
+                                    <TextBlock x:Name="TerminalCountBadge" Text="3 SESSIONS" Foreground="#34d399" FontSize="10" FontWeight="Bold" />
                                 </Border>
                             </StackPanel>
-                            <TextBlock Text="Zero external window sprawl: interactive ConPTY sessions running side-by-side with full ANSI/VT support" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,2,0,0" />
+                            <TextBlock Text="Side-by-side interactive ConPTY sessions with dynamic split panes, ANSI/VT support, and fast terminal switching" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,2,0,0" />
                         </StackPanel>
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                            <Button Click="LaunchDualDemo_Click" Content="▶ Quick Demo: Launch Dual Sessions" Background="#059669" FontWeight="SemiBold" Padding="14,6" Margin="0,0,8,0" />
-                            <Button Click="ClearBothTerminals_Click" Content="Reset Both" Padding="10,6" Margin="0" />
+                            <Button Click="AddTerminal_Click" Content="➕ Add Terminal" Background="#2563eb" FontWeight="SemiBold" Padding="12,6" Margin="0,0,8,0" ToolTip="Add another side-by-side terminal session" />
+                            <Button Click="LaunchAllDemo_Click" Content="▶ Launch Demo (All)" Background="#059669" FontWeight="SemiBold" Padding="12,6" Margin="0,0,8,0" />
+                            <Button Click="ResetAllTerminals_Click" Content="Reset All" Padding="10,6" Margin="0" />
                         </StackPanel>
                     </DockPanel>
                 </Border>
 
-                <!-- Dual Terminal Split Grid -->
-                <Grid Grid.Row="1">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" MinWidth="300" />
-                        <ColumnDefinition Width="8" />
-                        <ColumnDefinition Width="*" MinWidth="300" />
-                    </Grid.ColumnDefinitions>
-
-                    <!-- Left Terminal Pane -->
-                    <Border Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" ClipToBounds="True">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" />
-                            </Grid.RowDefinitions>
-
-                            <Border Grid.Row="0" Background="#1f2937" BorderBrush="#374151" BorderThickness="0,0,0,1" Padding="8,6">
-                                <DockPanel>
-                                    <TextBlock DockPanel.Dock="Left" Text="Terminal 1 (Left)" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0" Foreground="#60a5fa" />
-                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                                        <ComboBox x:Name="LeftRepoCombo" Width="160" Margin="0,0,6,0" DisplayMemberPath="Name" ToolTip="Select working repository" />
-                                        <ComboBox x:Name="LeftShellCombo" Width="140" Margin="0,0,6,0" ToolTip="Select agent CLI or shell" />
-                                        <Button Click="LaunchLeft_Click" Content="Launch" Margin="0" Padding="10,3" FontWeight="SemiBold" Background="#2563eb" />
-                                    </StackPanel>
-                                </DockPanel>
-                            </Border>
-
-                            <terminal:EmbeddedTerminalControl Grid.Row="1" x:Name="TerminalLeft" />
-                        </Grid>
-                    </Border>
-
-                    <!-- Splitter -->
-                    <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="#27272a" Cursor="SizeWE" />
-
-                    <!-- Right Terminal Pane -->
-                    <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" ClipToBounds="True">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" />
-                            </Grid.RowDefinitions>
-
-                            <Border Grid.Row="0" Background="#1f2937" BorderBrush="#374151" BorderThickness="0,0,0,1" Padding="8,6">
-                                <DockPanel>
-                                    <TextBlock DockPanel.Dock="Left" Text="Terminal 2 (Right)" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0" Foreground="#c084fc" />
-                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                                        <ComboBox x:Name="RightRepoCombo" Width="160" Margin="0,0,6,0" DisplayMemberPath="Name" ToolTip="Select working repository" />
-                                        <ComboBox x:Name="RightShellCombo" Width="140" Margin="0,0,6,0" ToolTip="Select agent CLI or shell" />
-                                        <Button Click="LaunchRight_Click" Content="Launch" Margin="0" Padding="10,3" FontWeight="SemiBold" Background="#7c3aed" />
-                                    </StackPanel>
-                                </DockPanel>
-                            </Border>
-
-                            <terminal:EmbeddedTerminalControl Grid.Row="1" x:Name="TerminalRight" />
-                        </Grid>
-                    </Border>
+                <!-- Dynamic Multi-Terminal Split Grid -->
+                <Grid Grid.Row="1" x:Name="TerminalsContainerGrid">
                 </Grid>
             </Grid>
         </Grid>

@@ -1,0 +1,88 @@
+using System.IO;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using AgentHub.Models;
+using UserControl = System.Windows.Controls.UserControl;
+
+namespace AgentHub.Terminal;
+
+public partial class TerminalPaneControl : UserControl, IDisposable
+{
+    public event Action<TerminalPaneControl>? CloseRequested;
+    private int _paneIndex = 1;
+
+    public EmbeddedTerminalControl TerminalControl => Terminal;
+    public int PaneIndex => _paneIndex;
+
+    public TerminalPaneControl()
+    {
+        InitializeComponent();
+    }
+
+    public void SetIndex(int index, SolidColorBrush accent)
+    {
+        _paneIndex = index;
+        PaneTitleText.Text = $"Terminal {index}";
+        PaneTitleText.Foreground = accent;
+    }
+
+    public void UpdateRepositories(List<RepositoryDefinition> repos, int defaultIndex = 0)
+    {
+        var prevSelected = RepoCombo.SelectedItem as RepositoryDefinition;
+        RepoCombo.ItemsSource = null;
+        RepoCombo.ItemsSource = repos;
+        if (prevSelected != null && repos.Any(r => r.Id == prevSelected.Id))
+        {
+            RepoCombo.SelectedItem = repos.First(r => r.Id == prevSelected.Id);
+        }
+        else if (repos.Count > 0)
+        {
+            var idx = Math.Clamp(defaultIndex, 0, repos.Count - 1);
+            RepoCombo.SelectedIndex = idx;
+        }
+    }
+
+    public void UpdateShellOptions(List<ShellOption> shells, int defaultIndex = 0)
+    {
+        var prevSelected = ShellCombo.SelectedItem as ShellOption;
+        ShellCombo.ItemsSource = null;
+        ShellCombo.ItemsSource = shells;
+        if (prevSelected != null && shells.Any(s => s.DisplayName == prevSelected.DisplayName))
+        {
+            ShellCombo.SelectedItem = shells.First(s => s.DisplayName == prevSelected.DisplayName);
+        }
+        else if (shells.Count > 0)
+        {
+            var idx = Math.Clamp(defaultIndex, 0, shells.Count - 1);
+            ShellCombo.SelectedIndex = idx;
+        }
+    }
+
+    private void Launch_Click(object sender, RoutedEventArgs e)
+    {
+        var repo = RepoCombo.SelectedItem as RepositoryDefinition;
+        var dir = repo?.LocalPath ?? Directory.GetCurrentDirectory();
+        var repoName = repo?.Name ?? "Workspace";
+        var shell = ShellCombo.SelectedItem as ShellOption;
+        var cmd = shell?.Command ?? "powershell.exe -NoLogo";
+        var title = shell?.DisplayName ?? "Shell";
+
+        Terminal.StartSession(cmd, dir, $"Terminal {_paneIndex} · {title}", repoName);
+    }
+
+    private void Close_Click(object sender, RoutedEventArgs e)
+    {
+        CloseRequested?.Invoke(this);
+    }
+
+    public void StartSession(string commandLine, string workingDirectory, string title, string repoName)
+    {
+        Terminal.StartSession(commandLine, workingDirectory, title, repoName);
+    }
+
+    public void Dispose()
+    {
+        Terminal.Dispose();
+    }
+}

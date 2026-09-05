@@ -28,6 +28,17 @@ public partial class MainWindow : Window
     private readonly GitHubService _githubService;
     private readonly RepoDiscoveryService _discovery;
     private readonly List<ShellOption> _shellOptions = new();
+    private readonly List<TerminalPaneControl> _panes = new();
+    private static readonly SolidColorBrush[] PaneAccentBrushes =
+    [
+        new(Color.FromRgb(96, 165, 250)),  // Blue (Terminal 1)
+        new(Color.FromRgb(192, 132, 252)), // Purple (Terminal 2)
+        new(Color.FromRgb(52, 211, 153)),  // Emerald (Terminal 3)
+        new(Color.FromRgb(251, 191, 36)),  // Amber (Terminal 4)
+        new(Color.FromRgb(56, 189, 248)),  // Sky (Terminal 5)
+        new(Color.FromRgb(244, 114, 182))  // Pink (Terminal 6)
+    ];
+
     private List<GitHubRepository> _allGitHubRepos = new();
     private AppSettings _settings = new();
     private RepositoryDefinition? _selectedRepo;
@@ -52,9 +63,10 @@ public partial class MainWindow : Window
             await AutoDiscoverInitialReposAsync();
         }
 
+        PopulateShellOptions();
+        InitDefaultTerminalPanes(3);
         RefreshRepoList();
         RefreshAgentList();
-        PopulateShellOptions();
         StatusText.Text = $"Settings: {_settingsService.SettingsPath}";
 
         _ = RefreshAllRepoSnapshotsAsync(fetchRemotes: false);
@@ -101,14 +113,10 @@ public partial class MainWindow : Window
         if (selectedId is not null)
             RepoList.SelectedItem = repos.FirstOrDefault(r => r.Id == selectedId);
 
-        LeftRepoCombo.ItemsSource = null;
-        LeftRepoCombo.ItemsSource = repos;
-        if (repos.Count > 0) LeftRepoCombo.SelectedIndex = 0;
-
-        RightRepoCombo.ItemsSource = null;
-        RightRepoCombo.ItemsSource = repos;
-        if (repos.Count > 1) RightRepoCombo.SelectedIndex = 1;
-        else if (repos.Count > 0) RightRepoCombo.SelectedIndex = 0;
+        for (int i = 0; i < _panes.Count; i++)
+        {
+            _panes[i].UpdateRepositories(repos, i);
+        }
 
         UpdateGitHubAddedState();
         ApplyGitHubFilter();
@@ -132,14 +140,105 @@ public partial class MainWindow : Window
             _shellOptions.Add(new ShellOption { DisplayName = agent.Name, Command = cmd });
         }
 
-        LeftShellCombo.ItemsSource = null;
-        LeftShellCombo.ItemsSource = _shellOptions;
-        if (_shellOptions.Count > 0) LeftShellCombo.SelectedIndex = 0;
+        for (int i = 0; i < _panes.Count; i++)
+        {
+            _panes[i].UpdateShellOptions(_shellOptions, i);
+        }
+    }
 
-        RightShellCombo.ItemsSource = null;
-        RightShellCombo.ItemsSource = _shellOptions;
-        if (_shellOptions.Count > 1) RightShellCombo.SelectedIndex = 1;
-        else if (_shellOptions.Count > 0) RightShellCombo.SelectedIndex = 0;
+    private TerminalPaneControl CreateTerminalPane(int defaultRepoIndex = 0, int defaultShellIndex = 0)
+    {
+        var pane = new TerminalPaneControl();
+        pane.CloseRequested += OnPaneCloseRequested;
+        pane.UpdateRepositories(_settings.Repositories, defaultRepoIndex);
+        pane.UpdateShellOptions(_shellOptions, defaultShellIndex);
+        return pane;
+    }
+
+    private void InitDefaultTerminalPanes(int count = 3)
+    {
+        foreach (var p in _panes) p.Dispose();
+        _panes.Clear();
+
+        for (int i = 0; i < count; i++)
+        {
+            _panes.Add(CreateTerminalPane(defaultRepoIndex: i, defaultShellIndex: 0));
+        }
+
+        RebuildTerminalLayout();
+    }
+
+    private void RebuildTerminalLayout()
+    {
+        TerminalsContainerGrid.Children.Clear();
+        TerminalsContainerGrid.ColumnDefinitions.Clear();
+
+        if (_panes.Count == 0) return;
+
+        for (int i = 0; i < _panes.Count; i++)
+        {
+            var pane = _panes[i];
+            var accent = PaneAccentBrushes[i % PaneAccentBrushes.Length];
+            pane.SetIndex(i + 1, accent);
+
+            TerminalsContainerGrid.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(1, GridUnitType.Star),
+                MinWidth = 200
+            });
+
+            Grid.SetColumn(pane, TerminalsContainerGrid.ColumnDefinitions.Count - 1);
+            TerminalsContainerGrid.Children.Add(pane);
+
+            if (i < _panes.Count - 1)
+            {
+                TerminalsContainerGrid.ColumnDefinitions.Add(new ColumnDefinition
+                {
+                    Width = new GridLength(6, GridUnitType.Pixel)
+                });
+
+                var splitter = new GridSplitter
+                {
+                    HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
+                    Background = new SolidColorBrush(Color.FromRgb(39, 39, 42)),
+                    Cursor = System.Windows.Input.Cursors.SizeWE
+                };
+
+                Grid.SetColumn(splitter, TerminalsContainerGrid.ColumnDefinitions.Count - 1);
+                TerminalsContainerGrid.Children.Add(splitter);
+            }
+        }
+
+        if (TerminalCountBadge != null)
+            TerminalCountBadge.Text = $"{_panes.Count} SESSION{(_panes.Count == 1 ? "" : "S")}";
+    }
+
+    private void AddTerminal_Click(object sender, RoutedEventArgs e)
+    {
+        if (_panes.Count >= 6)
+        {
+            MessageBox.Show("Maximum of 6 side-by-side terminal sessions supported.", "AgentHub", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var newPane = CreateTerminalPane(defaultRepoIndex: _panes.Count, defaultShellIndex: 0);
+        _panes.Add(newPane);
+        RebuildTerminalLayout();
+        StatusText.Text = $"Added Terminal {_panes.Count}.";
+    }
+
+    private void OnPaneCloseRequested(TerminalPaneControl pane)
+    {
+        if (_panes.Count <= 1)
+        {
+            MessageBox.Show("At least one terminal session must remain open in the Cockpit.", "AgentHub", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        pane.Dispose();
+        _panes.Remove(pane);
+        RebuildTerminalLayout();
+        StatusText.Text = $"Terminal closed. {_panes.Count} session(s) active.";
     }
 
     private async void RepoList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -689,9 +788,12 @@ public partial class MainWindow : Window
             return;
 
         ViewCockpitBtn_Click(sender, e);
+        var target = _panes.FirstOrDefault() ?? CreateTerminalPane();
+        if (!_panes.Contains(target)) { _panes.Add(target); RebuildTerminalLayout(); }
+
         var defaultShell = _shellOptions.FirstOrDefault(s => s.DisplayName.Contains("PowerShell")) ?? _shellOptions.FirstOrDefault();
         var cmd = defaultShell?.Command ?? "powershell.exe -NoLogo";
-        TerminalLeft.StartSession(cmd, ghRepo.LocalPath, $"Terminal 1 · {ghRepo.Name}", ghRepo.Name);
+        target.StartSession(cmd, ghRepo.LocalPath, $"Terminal {target.PaneIndex} · {ghRepo.Name}", ghRepo.Name);
         StatusText.Text = $"Opened Cockpit in {ghRepo.Name} ({ghRepo.LocalPath})";
     }
 
@@ -718,8 +820,11 @@ public partial class MainWindow : Window
     private void LoginGitHubInCockpit_Click(object sender, RoutedEventArgs e)
     {
         ViewCockpitBtn_Click(sender, e);
-        TerminalLeft.StartSession("gh auth login", Environment.CurrentDirectory, "Terminal 1 · GitHub CLI Login", "GitHub Auth");
-        StatusText.Text = "Follow prompts in Terminal 1 to complete GitHub authentication.";
+        var target = _panes.FirstOrDefault() ?? CreateTerminalPane();
+        if (!_panes.Contains(target)) { _panes.Add(target); RebuildTerminalLayout(); }
+
+        target.StartSession("gh auth login", Environment.CurrentDirectory, $"Terminal {target.PaneIndex} · GitHub CLI Login", "GitHub Auth");
+        StatusText.Text = $"Follow prompts in Terminal {target.PaneIndex} to complete GitHub authentication.";
     }
 
     private async void GitHubAction_Click(object sender, RoutedEventArgs e)
@@ -793,77 +898,66 @@ public partial class MainWindow : Window
         }
     }
 
-    private void LaunchCockpitLeft_Click(object sender, RoutedEventArgs e)
+    private void LaunchCockpit1_Click(object sender, RoutedEventArgs e) => LaunchCockpitAtPane(0);
+    private void LaunchCockpit2_Click(object sender, RoutedEventArgs e) => LaunchCockpitAtPane(1);
+    private void LaunchCockpit3_Click(object sender, RoutedEventArgs e) => LaunchCockpitAtPane(2);
+    private void LaunchCockpitLeft_Click(object sender, RoutedEventArgs e) => LaunchCockpitAtPane(0);
+    private void LaunchCockpitRight_Click(object sender, RoutedEventArgs e) => LaunchCockpitAtPane(1);
+
+    private void LaunchCockpitAtPane(int paneIndex)
     {
         if (_selectedRepo is null || AgentCombo.SelectedItem is not AgentDefinition agent) return;
-        ViewCockpitBtn_Click(sender, e);
+        ViewCockpitBtn_Click(this, new RoutedEventArgs());
+
+        while (_panes.Count <= paneIndex && _panes.Count < 6)
+        {
+            _panes.Add(CreateTerminalPane(_panes.Count, 0));
+            RebuildTerminalLayout();
+        }
+
+        var target = _panes[Math.Min(paneIndex, _panes.Count - 1)];
         var cmd = string.IsNullOrWhiteSpace(agent.Arguments) ? agent.Command : $"{agent.Command} {agent.Arguments}";
-        TerminalLeft.StartSession(cmd, _selectedRepo.LocalPath, $"Terminal 1 · {agent.Name}", _selectedRepo.Name);
-        StatusText.Text = $"Launched {agent.Name} in Terminal 1 (Left)";
+        target.StartSession(cmd, _selectedRepo.LocalPath, $"Terminal {target.PaneIndex} · {agent.Name}", _selectedRepo.Name);
+        StatusText.Text = $"Launched {agent.Name} in Terminal {target.PaneIndex}";
     }
 
-    private void LaunchCockpitRight_Click(object sender, RoutedEventArgs e)
-    {
-        if (_selectedRepo is null || AgentCombo.SelectedItem is not AgentDefinition agent) return;
-        ViewCockpitBtn_Click(sender, e);
-        var cmd = string.IsNullOrWhiteSpace(agent.Arguments) ? agent.Command : $"{agent.Command} {agent.Arguments}";
-        TerminalRight.StartSession(cmd, _selectedRepo.LocalPath, $"Terminal 2 · {agent.Name}", _selectedRepo.Name);
-        StatusText.Text = $"Launched {agent.Name} in Terminal 2 (Right)";
-    }
-
-    private void LaunchLeft_Click(object sender, RoutedEventArgs e)
-    {
-        var repo = LeftRepoCombo.SelectedItem as RepositoryDefinition;
-        var dir = repo?.LocalPath ?? Directory.GetCurrentDirectory();
-        var repoName = repo?.Name ?? "Workspace";
-        var shell = LeftShellCombo.SelectedItem as ShellOption;
-        var cmd = shell?.Command ?? "powershell.exe -NoLogo";
-        var title = shell?.DisplayName ?? "Shell";
-        TerminalLeft.StartSession(cmd, dir, $"Terminal 1 · {title}", repoName);
-        StatusText.Text = $"Terminal 1: Started {title} in {repoName}";
-    }
-
-    private void LaunchRight_Click(object sender, RoutedEventArgs e)
-    {
-        var repo = RightRepoCombo.SelectedItem as RepositoryDefinition;
-        var dir = repo?.LocalPath ?? Directory.GetCurrentDirectory();
-        var repoName = repo?.Name ?? "Workspace";
-        var shell = RightShellCombo.SelectedItem as ShellOption;
-        var cmd = shell?.Command ?? "powershell.exe -NoLogo";
-        var title = shell?.DisplayName ?? "Shell";
-        TerminalRight.StartSession(cmd, dir, $"Terminal 2 · {title}", repoName);
-        StatusText.Text = $"Terminal 2: Started {title} in {repoName}";
-    }
-
-    private void LaunchDualDemo_Click(object sender, RoutedEventArgs e)
+    private void LaunchAllDemo_Click(object sender, RoutedEventArgs e)
     {
         ViewCockpitBtn_Click(sender, e);
 
-        var repo1 = LeftRepoCombo.SelectedItem as RepositoryDefinition ?? _settings.Repositories.FirstOrDefault();
-        var dir1 = repo1?.LocalPath ?? Directory.GetCurrentDirectory();
-        var name1 = repo1?.Name ?? "Workspace 1";
+        while (_panes.Count < 3)
+        {
+            _panes.Add(CreateTerminalPane(_panes.Count, 0));
+        }
+        RebuildTerminalLayout();
 
-        var repo2 = RightRepoCombo.SelectedItem as RepositoryDefinition ?? _settings.Repositories.Skip(1).FirstOrDefault() ?? repo1;
-        var dir2 = repo2?.LocalPath ?? Directory.GetCurrentDirectory();
-        var name2 = repo2?.Name ?? "Workspace 2";
+        for (int i = 0; i < _panes.Count; i++)
+        {
+            var repo = _settings.Repositories.Skip(i).FirstOrDefault() ?? _settings.Repositories.FirstOrDefault();
+            var dir = repo?.LocalPath ?? Directory.GetCurrentDirectory();
+            var name = repo?.Name ?? $"Workspace {i + 1}";
+            _panes[i].StartSession("powershell.exe -NoLogo", dir, $"Terminal {i + 1} · PowerShell", name);
+        }
 
-        TerminalLeft.StartSession("powershell.exe -NoLogo", dir1, "Terminal 1 · PowerShell", name1);
-        TerminalRight.StartSession("powershell.exe -NoLogo", dir2, "Terminal 2 · PowerShell", name2);
-
-        StatusText.Text = "Demonstrating Stage 1: Dual concurrent ConPTY terminals launched side-by-side!";
+        StatusText.Text = $"Launched demo in all {_panes.Count} side-by-side terminal sessions!";
     }
 
-    private void ClearBothTerminals_Click(object sender, RoutedEventArgs e)
+    private void ResetAllTerminals_Click(object sender, RoutedEventArgs e)
     {
-        TerminalLeft.Dispose();
-        TerminalRight.Dispose();
-        StatusText.Text = "Terminals reset.";
+        foreach (var pane in _panes)
+        {
+            pane.Dispose();
+        }
+        InitDefaultTerminalPanes(3);
+        StatusText.Text = "Cockpit reset to default 3 terminal sessions.";
     }
 
     protected override void OnClosed(EventArgs e)
     {
-        TerminalLeft.Dispose();
-        TerminalRight.Dispose();
+        foreach (var pane in _panes)
+        {
+            pane.Dispose();
+        }
         base.OnClosed(e);
     }
 }

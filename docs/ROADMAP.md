@@ -46,7 +46,7 @@
 
 ## Multi-Session Cockpit Stages (Active)
 
-- **Stage 1 (Completed):** Embedded dual-terminal multiplexer via Windows ConPTY + WebView2/xterm.js. Side-by-side terminal panes for concurrent interactive sessions.
+- **Stage 1 (Completed):** Embedded dynamic multi-terminal multiplexer via Windows ConPTY + WebView2/xterm.js. Side-by-side terminal panes for concurrent interactive sessions with 3+ default terminals, dynamic "➕ Add Terminal" pane creation, individual "✕ Close" controls, and draggable splitters.
 - **Stage 2 (Next):** Interactive CLI compatibility testing & ANSI escape sequence verification across Antigravity, Claude Code, and Codex.
 - **Stage 3:** Attention detector & alerting engine (flashing badges, bell chime, and input-idle detection when an agent awaits user confirmation).
 - **Stage 4:** Automated Git worktree isolation per task with cross-agent handoff orchestration.
