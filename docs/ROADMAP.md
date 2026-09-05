@@ -29,7 +29,13 @@
 
 ## v0.4 — Usage + budget dashboard
 
-- Pluggable usage adapters
+- [x] Configurable Codex, Claude and Gemini CLI usage commands
+- [x] Background pseudoconsole (ConPTY) terminal probe for interactive slash commands (`/status`)
+- [x] Native headless Antigravity expansion (`agy -p /usage`) with multi-model limit tracking
+- [x] Normalized remaining-limit dashboard with reset times, progress bars, refresh state and isolated provider failures
+- [x] Dynamic adaptive polling engine based on active Cockpit terminal sessions (1m - 15m)
+- [x] Collapsible raw terminal feed panel for live output verification
+- Pluggable non-CLI usage adapters
 - Record observed CLI/session consumption where available
 - Manual remaining-quota override when providers expose no machine-readable balance
 - Session burn-rate estimates

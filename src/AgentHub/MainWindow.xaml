@@ -11,28 +11,37 @@
         </Grid.RowDefinitions>
 
         <!-- Top Navigation & Action Header -->
-        <DockPanel Grid.Row="0" Margin="0,0,0,14">
-            <StackPanel DockPanel.Dock="Left">
-                <TextBlock FontSize="26" FontWeight="SemiBold" Text="AgentHub" />
-                <TextBlock Foreground="{StaticResource MutedBrush}" Text="Repos, GitHub and interchangeable coding agents in one cockpit" />
-            </StackPanel>
+        <StackPanel Grid.Row="0" Margin="0,0,0,14">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Left">
+                    <TextBlock FontSize="26" FontWeight="SemiBold" Text="AgentHub" />
+                    <TextBlock Foreground="{StaticResource MutedBrush}" Text="Repos, GitHub and interchangeable coding agents in one cockpit" />
+                </StackPanel>
 
-            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="ViewReposBtn" Click="ViewReposBtn_Click" Content="📁 Local Repos" Background="#3b82f6" FontWeight="SemiBold" />
-                <Button x:Name="ViewGitHubBtn" Click="ViewGitHubBtn_Click" Content="🐙 GitHub Repos" FontWeight="SemiBold" />
-                <Button x:Name="ViewCockpitBtn" Click="ViewCockpitBtn_Click" Content="⚡ Cockpit" FontWeight="SemiBold" />
-                <Border Width="1" Background="{StaticResource BorderBrush}" Margin="6,0,10,8" />
-                <Button Click="ScanFolder_Click" Content="🔍 Scan for repos" Background="#047857" FontWeight="SemiBold" ToolTip="Scan Desktop or folder to find and import existing Git repositories" />
-                <Button Click="AddExisting_Click" Content="Add existing repo" />
-                <Button Click="CloneRepo_Click" Content="Clone from GitHub" />
-                <Button Click="OpenSettings_Click" Content="Settings" />
-            </StackPanel>
-        </DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="ViewCockpitBtn" Click="ViewCockpitBtn_Click" Content="⚡ Cockpit" FontWeight="SemiBold" />
+                    <Button x:Name="ManageReposBtn" Click="ManageReposBtn_Click" Content="🔧 Manage GitHub Repos" FontWeight="SemiBold" />
+                    <Button Click="OpenSettings_Click" Content="Settings" />
+                </StackPanel>
+            </DockPanel>
+
+            <!-- Secondary management toolbar (only visible inside the Manage GitHub Repos area) -->
+            <Border x:Name="ManageBar" Visibility="Collapsed" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="8,8,8,0" Margin="0,12,0,0">
+                <WrapPanel Orientation="Horizontal">
+                    <Button x:Name="ViewReposBtn" Click="ViewReposBtn_Click" Content="📁 Local Repos" Background="#3b82f6" FontWeight="SemiBold" />
+                    <Button x:Name="ViewGitHubBtn" Click="ViewGitHubBtn_Click" Content="🐙 GitHub Repos" FontWeight="SemiBold" />
+                    <Border Width="1" Background="{StaticResource BorderBrush}" Margin="6,0,10,8" />
+                    <Button Click="ScanFolder_Click" Content="🔍 Scan for repos" Background="#047857" FontWeight="SemiBold" ToolTip="Scan Desktop or folder to find and import existing Git repositories" />
+                    <Button Click="AddExisting_Click" Content="Add existing repo" />
+                    <Button Click="CloneRepo_Click" Content="Clone from GitHub" />
+                </WrapPanel>
+            </Border>
+        </StackPanel>
 
         <!-- Main Content Area: View 1 (Repositories) or View 2 (Cockpit) -->
         <Grid Grid.Row="1">
             <!-- VIEW 1: REPOSITORIES & GIT -->
-            <Grid x:Name="RepoViewGrid" Visibility="Visible">
+            <Grid x:Name="RepoViewGrid" Visibility="Collapsed">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="310" />
                     <ColumnDefinition Width="16" />
@@ -239,8 +248,9 @@
             </Grid>
 
             <!-- VIEW 3: MULTI-SESSION COCKPIT (DYNAMIC MULTI-TERMINAL HOST) -->
-            <Grid x:Name="CockpitViewGrid" Visibility="Collapsed">
+            <Grid x:Name="CockpitViewGrid" Visibility="Visible">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
@@ -252,21 +262,127 @@
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="⚡ Multi-Terminal Cockpit" FontWeight="SemiBold" FontSize="15" Foreground="{StaticResource TextBrush}" />
                                 <Border Background="#065f46" CornerRadius="4" Margin="10,0,0,0" Padding="6,2" VerticalAlignment="Center">
-                                    <TextBlock x:Name="TerminalCountBadge" Text="3 SESSIONS" Foreground="#34d399" FontSize="10" FontWeight="Bold" />
+                                    <TextBlock x:Name="TerminalCountBadge" Text="1 SESSION" Foreground="#34d399" FontSize="10" FontWeight="Bold" />
                                 </Border>
                             </StackPanel>
                             <TextBlock Text="Side-by-side interactive ConPTY sessions with dynamic split panes, ANSI/VT support, and fast terminal switching" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,2,0,0" />
                         </StackPanel>
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                            <Button Click="AddTerminal_Click" Content="➕ Add Terminal" Background="#2563eb" FontWeight="SemiBold" Padding="12,6" Margin="0,0,8,0" ToolTip="Add another side-by-side terminal session" />
-                            <Button Click="LaunchAllDemo_Click" Content="▶ Launch Demo (All)" Background="#059669" FontWeight="SemiBold" Padding="12,6" Margin="0,0,8,0" />
-                            <Button Click="ResetAllTerminals_Click" Content="Reset All" Padding="10,6" Margin="0" />
+                            <Button Click="AddTerminal_Click" Content="➕ Add Terminal" Background="#2563eb" FontWeight="SemiBold" Padding="12,6" Margin="0" ToolTip="Add another side-by-side terminal session" />
                         </StackPanel>
                     </DockPanel>
                 </Border>
 
+                <!-- Provider usage limits -->
+                <Grid Grid.Row="1" Margin="0,0,0,10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <DockPanel Margin="2,0,0,5">
+                        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="Usage limits" FontWeight="SemiBold" FontSize="13" />
+                            <Border Background="#1e293b" CornerRadius="4" Margin="10,0,0,0" Padding="6,2" VerticalAlignment="Center">
+                                <TextBlock x:Name="UsagePollingBadge" Text="IDLE · POLLING EVERY 15M" Foreground="#94a3b8" FontSize="10" FontWeight="Bold" />
+                            </Border>
+                            <TextBlock x:Name="UsageRefreshStatusText" Text="Waiting for refresh" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="10,1,0,0" />
+                        </StackPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button x:Name="ToggleRawOutputBtn" Click="ToggleRawOutput_Click" Content="Terminal Feed ▾" Padding="9,4" Margin="0,0,8,0" FontSize="11" ToolTip="Inspect raw CLI terminal capture output" />
+                            <Button x:Name="UsageRefreshButton" Click="RefreshUsage_Click" Content="Refresh usage" Padding="9,4" Margin="0" FontSize="11" />
+                        </StackPanel>
+                    </DockPanel>
+
+                    <ItemsControl x:Name="UsageCards" Grid.Row="1">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Rows="1" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="11,8" Margin="0,0,8,0" MinHeight="150">
+                                    <StackPanel>
+                                        <DockPanel Margin="0,0,0,5">
+                                            <Border DockPanel.Dock="Left" Width="3" Height="16" Background="{Binding AccentBrush}" Margin="0,0,7,0" />
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" Foreground="{StaticResource TextBrush}" />
+                                            <TextBlock DockPanel.Dock="Right" Text="{Binding StatusText}" Foreground="{StaticResource MutedBrush}" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                        </DockPanel>
+                                        <ItemsControl ItemsSource="{Binding Limits}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid Margin="0,1">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="108" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="62" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="{Binding Name}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{StaticResource TextBrush}" />
+                                                        <ProgressBar Grid.Column="1" Height="6" Margin="6,0" Minimum="0" Maximum="100" Value="{Binding UsedPercent}" Foreground="{Binding BarBrush}" Background="#343841" BorderThickness="0" />
+                                                        <TextBlock Grid.Column="2" Text="{Binding ValueText}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Right" Foreground="{StaticResource TextBrush}" />
+                                                        <TextBlock Grid.Column="3" Text="{Binding ResetText}" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="8,0,0,0" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <TextBlock Text="{Binding SourceText}" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,5,0,0" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Border x:Name="UsageEmptyNotice" Grid.Row="1" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="14,10" Visibility="Collapsed">
+                        <TextBlock Foreground="{StaticResource MutedBrush}" FontSize="11" Text="No usage providers are currently active. You can configure custom usage acquisition commands or scripts in Settings &gt; settings.json." />
+                    </Border>
+
+                    <!-- Collapsible Split Terminal Output Panel (Per-Provider Feeds) -->
+                    <Border x:Name="RawOutputPanel" Grid.Row="2" Background="#111317" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12,10" Margin="0,8,0,0" Visibility="Collapsed">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <!-- Tab selector header & controls -->
+                            <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="Terminal Feeds:" FontWeight="SemiBold" FontSize="11" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                    <Button x:Name="FeedTabAntigravity" Click="FeedTab_Click" Tag="gemini" Content="✦ Antigravity" Padding="10,3" Margin="0,0,6,0" FontSize="11" FontWeight="SemiBold" Background="#2563eb" Foreground="White" />
+                                    <Button x:Name="FeedTabCodex" Click="FeedTab_Click" Tag="codex" Content="⚡ Codex" Padding="10,3" Margin="0,0,6,0" FontSize="11" FontWeight="SemiBold" Background="#27272a" Foreground="#a1a1aa" />
+                                    <Button x:Name="FeedTabClaude" Click="FeedTab_Click" Tag="claude" Content="✻ Claude Code" Padding="10,3" Margin="0,0,6,0" FontSize="11" FontWeight="SemiBold" Background="#27272a" Foreground="#a1a1aa" />
+                                </StackPanel>
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Click="CopyCurrentFeed_Click" Content="📋 Copy" Padding="7,2" Margin="0,0,6,0" FontSize="10" ToolTip="Copy active terminal output to clipboard" />
+                                    <Button x:Name="RawAnsiToggleBtn" Click="ToggleRawAnsi_Click" Content="Sanitized" Padding="7,2" Margin="0,0,8,0" FontSize="10" ToolTip="Toggle between clean sanitized output and raw ANSI bytes" />
+                                    <Button Click="ToggleRawOutput_Click" Content="✕ Close" Padding="7,2" Margin="0" FontSize="10" />
+                                </StackPanel>
+                            </DockPanel>
+
+                            <!-- Active Provider Feed Details & Monospace Output -->
+                            <Border Grid.Row="1" Background="#090a0f" BorderBrush="#27272a" BorderThickness="1" CornerRadius="4" Padding="10">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <DockPanel Grid.Row="0" Margin="0,0,0,6">
+                                        <TextBlock x:Name="FeedHeaderMeta" Text="Provider: Antigravity | Source: agy -p /usage" Foreground="{StaticResource MutedBrush}" FontSize="11" FontFamily="Consolas, Cascadia Code, monospace" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                        <Border DockPanel.Dock="Right" x:Name="FeedStatusBadgeBorder" Background="#065f46" CornerRadius="3" Padding="6,1" Margin="8,0,0,0">
+                                            <TextBlock x:Name="FeedStatusBadge" Text="AVAILABLE" Foreground="#34d399" FontSize="9" FontWeight="Bold" />
+                                        </Border>
+                                    </DockPanel>
+                                    <TextBox x:Name="ActiveFeedTextBox" Grid.Row="1" Background="Transparent" Foreground="#e4e4e7" FontFamily="Consolas, Cascadia Code, monospace" FontSize="11" TextWrapping="NoWrap" AcceptsReturn="True" IsReadOnly="True" MaxHeight="180" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" BorderThickness="0" Text="No terminal capture data yet. Click 'Refresh usage' to capture." />
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </Grid>
+
                 <!-- Dynamic Multi-Terminal Split Grid -->
-                <Grid Grid.Row="1" x:Name="TerminalsContainerGrid">
+                <Grid Grid.Row="2" x:Name="TerminalsContainerGrid">
                 </Grid>
             </Grid>
         </Grid>

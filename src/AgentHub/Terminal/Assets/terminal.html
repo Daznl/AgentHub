@@ -18,6 +18,22 @@
       padding: 4px;
       box-sizing: border-box;
     }
+    /* Give the xterm scrollbar an explicit width so the FitAddon reserves
+       space for it and text is never rendered underneath the scrollbar. */
+    .xterm-viewport::-webkit-scrollbar {
+      width: 12px;
+    }
+    .xterm-viewport::-webkit-scrollbar-track {
+      background: #18181b;
+    }
+    .xterm-viewport::-webkit-scrollbar-thumb {
+      background: #3f3f46;
+      border-radius: 6px;
+      border: 2px solid #18181b;
+    }
+    .xterm-viewport::-webkit-scrollbar-thumb:hover {
+      background: #52525b;
+    }
   </style>
 </head>
 <body>
@@ -58,9 +74,22 @@
     term.loadAddon(fitAddon);
     term.open(document.getElementById('terminal-container'));
 
+    // Write output while keeping the view pinned to the latest content.
+    // We only auto-scroll when the user was already at the bottom, so
+    // scrolling up to read earlier output is preserved.
+    function writeToTerminal(data) {
+      const buffer = term.buffer.active;
+      const wasAtBottom = buffer.viewportY >= buffer.baseY;
+      term.write(data, () => {
+        if (wasAtBottom) term.scrollToBottom();
+      });
+    }
+
     function notifyResize() {
       try {
+        const wasAtBottom = term.buffer.active.viewportY >= term.buffer.active.baseY;
         fitAddon.fit();
+        if (wasAtBottom) term.scrollToBottom();
         if (window.chrome && window.chrome.webview) {
           window.chrome.webview.postMessage(JSON.stringify({
             type: 'resize',
@@ -71,9 +100,24 @@
       } catch (e) {}
     }
 
-    window.addEventListener('resize', () => {
-      notifyResize();
-    });
+    // Coalesce multiple size changes into a single fit per frame.
+    let resizeScheduled = false;
+    function scheduleFit() {
+      if (resizeScheduled) return;
+      resizeScheduled = true;
+      requestAnimationFrame(() => {
+        resizeScheduled = false;
+        notifyResize();
+      });
+    }
+
+    window.addEventListener('resize', scheduleFit);
+
+    // Refit whenever the container's actual size changes. This covers the case
+    // where WebView2 finishes its layout after the initial timed fit, which
+    // otherwise leaves the terminal too short and cuts off the bottom rows.
+    const resizeObserver = new ResizeObserver(scheduleFit);
+    resizeObserver.observe(document.getElementById('terminal-container'));
 
     term.onData(data => {
       if (window.chrome && window.chrome.webview) {
@@ -92,11 +136,11 @@
             term.reset();
             return;
           }
-          term.write(msg);
+          writeToTerminal(msg);
         } else if (msg && msg.type === 'clear') {
           term.reset();
         } else if (msg && msg.type === 'write') {
-          term.write(msg.data);
+          writeToTerminal(msg.data);
         }
       });
 

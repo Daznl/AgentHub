@@ -1,13 +1,17 @@
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using AgentHub.Models;
 using AgentHub.Services;
+using AgentHub.Services.Usage;
 using AgentHub.Terminal;
 using Color = System.Windows.Media.Color;
 using Forms = System.Windows.Forms;
 using MessageBox = System.Windows.MessageBox;
 using SolidColorBrush = System.Windows.Media.SolidColorBrush;
+using Button = System.Windows.Controls.Button;
+using Clipboard = System.Windows.Clipboard;
 
 namespace AgentHub;
 
@@ -27,6 +31,8 @@ public partial class MainWindow : Window
     private readonly RepoContextService _repoContext = new();
     private readonly GitHubService _githubService;
     private readonly RepoDiscoveryService _discovery;
+    private readonly UsageService _usageService;
+    private readonly DispatcherTimer _usageRefreshTimer = new();
     private readonly List<ShellOption> _shellOptions = new();
     private readonly List<TerminalPaneControl> _panes = new();
     private static readonly SolidColorBrush[] PaneAccentBrushes =
@@ -42,6 +48,14 @@ public partial class MainWindow : Window
     private List<GitHubRepository> _allGitHubRepos = new();
     private AppSettings _settings = new();
     private RepositoryDefinition? _selectedRepo;
+    private readonly Dictionary<string, UsageSnapshot> _lastSuccessfulUsage =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, UsageSnapshot> _latestSnapshots =
+        new(StringComparer.OrdinalIgnoreCase);
+    private string _selectedFeedProviderId = "gemini";
+    private bool _showRawAnsi;
+    private DateTimeOffset? _lastUsageRefresh;
+    private bool _usageRefreshInProgress;
 
     public MainWindow()
     {
@@ -49,6 +63,8 @@ public partial class MainWindow : Window
         _git = new GitService(_runner);
         _githubService = new GitHubService(_runner);
         _discovery = new RepoDiscoveryService(_git);
+        _usageService = new UsageService(_runner);
+        _usageRefreshTimer.Tick += async (_, _) => await RefreshUsageAsync();
         Loaded += MainWindow_Loaded;
         AgentCombo.SelectionChanged += (_, _) => UpdateAgentPreview();
     }
@@ -64,10 +80,15 @@ public partial class MainWindow : Window
         }
 
         PopulateShellOptions();
-        InitDefaultTerminalPanes(3);
+        InitDefaultTerminalPanes(1);
         RefreshRepoList();
         RefreshAgentList();
+        ViewCockpitBtn_Click(this, new RoutedEventArgs());
         StatusText.Text = $"Settings: {_settingsService.SettingsPath}";
+
+        UpdateUsagePollingInterval();
+        _usageRefreshTimer.Start();
+        _ = RefreshUsageAsync();
 
         _ = RefreshAllRepoSnapshotsAsync(fetchRemotes: false);
         _ = LoadGitHubReposAsync();
@@ -150,6 +171,8 @@ public partial class MainWindow : Window
     {
         var pane = new TerminalPaneControl();
         pane.CloseRequested += OnPaneCloseRequested;
+        pane.MoveRequested += OnPaneMoveRequested;
+        pane.SessionStateChanged += UpdateUsagePollingInterval;
         pane.UpdateRepositories(_settings.Repositories, defaultRepoIndex);
         pane.UpdateShellOptions(_shellOptions, defaultShellIndex);
         return pane;
@@ -224,6 +247,7 @@ public partial class MainWindow : Window
         var newPane = CreateTerminalPane(defaultRepoIndex: _panes.Count, defaultShellIndex: 0);
         _panes.Add(newPane);
         RebuildTerminalLayout();
+        UpdateUsagePollingInterval();
         StatusText.Text = $"Added Terminal {_panes.Count}.";
     }
 
@@ -238,7 +262,19 @@ public partial class MainWindow : Window
         pane.Dispose();
         _panes.Remove(pane);
         RebuildTerminalLayout();
+        UpdateUsagePollingInterval();
         StatusText.Text = $"Terminal closed. {_panes.Count} session(s) active.";
+    }
+
+    private void OnPaneMoveRequested(TerminalPaneControl pane, int offset)
+    {
+        var currentIndex = _panes.IndexOf(pane);
+        var targetIndex = currentIndex + offset;
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= _panes.Count) return;
+
+        (_panes[currentIndex], _panes[targetIndex]) = (_panes[targetIndex], _panes[currentIndex]);
+        RebuildTerminalLayout();
+        StatusText.Text = $"Moved terminal to position {targetIndex + 1}.";
     }
 
     private async void RepoList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -494,14 +530,19 @@ public partial class MainWindow : Window
     private static readonly SolidColorBrush NavActiveBrush = new(Color.FromRgb(59, 130, 246));
     private static readonly SolidColorBrush NavInactiveBrush = new(Color.FromRgb(42, 46, 54));
 
+    // Opens the dedicated repo/GitHub management area, defaulting to the Local Repos sub-view.
+    private void ManageReposBtn_Click(object sender, RoutedEventArgs e) => ViewReposBtn_Click(sender, e);
+
     private void ViewReposBtn_Click(object sender, RoutedEventArgs e)
     {
         RepoViewGrid.Visibility = Visibility.Visible;
         GitHubViewGrid.Visibility = Visibility.Collapsed;
         CockpitViewGrid.Visibility = Visibility.Collapsed;
+        ManageBar.Visibility = Visibility.Visible;
+        ManageReposBtn.Background = NavActiveBrush;
+        ViewCockpitBtn.Background = NavInactiveBrush;
         ViewReposBtn.Background = NavActiveBrush;
         ViewGitHubBtn.Background = NavInactiveBrush;
-        ViewCockpitBtn.Background = NavInactiveBrush;
     }
 
     private async void ViewGitHubBtn_Click(object sender, RoutedEventArgs e)
@@ -509,9 +550,11 @@ public partial class MainWindow : Window
         RepoViewGrid.Visibility = Visibility.Collapsed;
         GitHubViewGrid.Visibility = Visibility.Visible;
         CockpitViewGrid.Visibility = Visibility.Collapsed;
+        ManageBar.Visibility = Visibility.Visible;
+        ManageReposBtn.Background = NavActiveBrush;
+        ViewCockpitBtn.Background = NavInactiveBrush;
         ViewGitHubBtn.Background = NavActiveBrush;
         ViewReposBtn.Background = NavInactiveBrush;
-        ViewCockpitBtn.Background = NavInactiveBrush;
 
         if (_allGitHubRepos.Count == 0)
         {
@@ -528,10 +571,283 @@ public partial class MainWindow : Window
         RepoViewGrid.Visibility = Visibility.Collapsed;
         GitHubViewGrid.Visibility = Visibility.Collapsed;
         CockpitViewGrid.Visibility = Visibility.Visible;
+        ManageBar.Visibility = Visibility.Collapsed;
         ViewCockpitBtn.Background = NavActiveBrush;
-        ViewReposBtn.Background = NavInactiveBrush;
-        ViewGitHubBtn.Background = NavInactiveBrush;
+        ManageReposBtn.Background = NavInactiveBrush;
+
+        if (_lastUsageRefresh is null || DateTimeOffset.Now - _lastUsageRefresh > _usageRefreshTimer.Interval)
+            _ = RefreshUsageAsync();
     }
+
+    private async void RefreshUsage_Click(object sender, RoutedEventArgs e) => await RefreshUsageAsync();
+
+    private async Task RefreshUsageAsync()
+    {
+        if (_usageRefreshInProgress) return;
+
+        _usageRefreshInProgress = true;
+        UsageRefreshButton.IsEnabled = false;
+        UsageRefreshStatusText.Text = "Refreshing...";
+
+        var activeProviders = _settings.UsageProviders.Where(p => p.Enabled).ToList();
+        if (activeProviders.Count == 0)
+        {
+            UsageCards.ItemsSource = null;
+            UsageCards.Visibility = Visibility.Collapsed;
+            UsageEmptyNotice.Visibility = Visibility.Visible;
+            UsageRefreshStatusText.Text = "No active providers configured";
+            UsageRefreshButton.IsEnabled = true;
+            _usageRefreshInProgress = false;
+            return;
+        }
+
+        UsageCards.Visibility = Visibility.Visible;
+        UsageEmptyNotice.Visibility = Visibility.Collapsed;
+
+        if (UsageCards.ItemsSource is null)
+        {
+            UsageCards.ItemsSource = activeProviders
+                .Select(provider => ToUsageDisplay(new UsageSnapshot(
+                    provider.Id, provider.Name, DateTimeOffset.Now, [], provider.Command,
+                    UsageCollectionStatus.Failed, "Refreshing usage...")))
+                .ToList();
+        }
+
+        try
+        {
+            var snapshots = await _usageService.RefreshAsync(activeProviders);
+            var displaySnapshots = snapshots.Select(snapshot =>
+            {
+                if (snapshot.Status == UsageCollectionStatus.Available)
+                {
+                    _lastSuccessfulUsage[snapshot.ProviderId] = snapshot;
+                    return snapshot;
+                }
+
+                if (!_lastSuccessfulUsage.TryGetValue(snapshot.ProviderId, out var previous))
+                    return snapshot;
+
+                return previous with
+                {
+                    Status = UsageCollectionStatus.Stale,
+                    Error = $"Last refresh failed: {snapshot.Error}"
+                };
+            }).ToList();
+
+            UsageCards.ItemsSource = displaySnapshots.Select(ToUsageDisplay).ToList();
+            _lastUsageRefresh = DateTimeOffset.Now;
+
+            var available = snapshots.Count(snapshot => snapshot.Status == UsageCollectionStatus.Available);
+            UsageRefreshStatusText.Text = $"Updated {_lastUsageRefresh:t} | {available}/{snapshots.Count} available";
+
+            foreach (var s in snapshots)
+            {
+                _latestSnapshots[s.ProviderId] = s;
+            }
+            UpdateActiveFeedView();
+        }
+        catch (Exception ex)
+        {
+            UsageRefreshStatusText.Text = $"Refresh failed: {ex.Message}";
+        }
+        finally
+        {
+            UsageRefreshButton.IsEnabled = true;
+            _usageRefreshInProgress = false;
+        }
+    }
+
+    private void ToggleRawOutput_Click(object sender, RoutedEventArgs e)
+    {
+        RawOutputPanel.Visibility = RawOutputPanel.Visibility == Visibility.Visible
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        if (RawOutputPanel.Visibility == Visibility.Visible)
+        {
+            UpdateActiveFeedView();
+        }
+    }
+
+    private void FeedTab_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string providerId)
+        {
+            _selectedFeedProviderId = providerId;
+            UpdateActiveFeedView();
+        }
+    }
+
+    private void CopyCurrentFeed_Click(object sender, RoutedEventArgs e)
+    {
+        if (!string.IsNullOrEmpty(ActiveFeedTextBox?.Text))
+        {
+            Clipboard.SetText(ActiveFeedTextBox.Text);
+            StatusText.Text = $"Copied {_selectedFeedProviderId} terminal feed to clipboard.";
+        }
+    }
+
+    private void ToggleRawAnsi_Click(object sender, RoutedEventArgs e)
+    {
+        _showRawAnsi = !_showRawAnsi;
+        if (RawAnsiToggleBtn != null)
+        {
+            RawAnsiToggleBtn.Content = _showRawAnsi ? "Raw ANSI" : "Sanitized";
+        }
+        UpdateActiveFeedView();
+    }
+
+    private void UpdateActiveFeedView()
+    {
+        if (ActiveFeedTextBox == null) return;
+
+        var tabButtons = new[]
+        {
+            (FeedTabAntigravity, "gemini", Color.FromRgb(37, 99, 235)),
+            (FeedTabCodex, "codex", Color.FromRgb(16, 185, 129)),
+            (FeedTabClaude, "claude", Color.FromRgb(249, 115, 22))
+        };
+
+        foreach (var (btn, id, activeColor) in tabButtons)
+        {
+            if (btn == null) continue;
+            var isSelected = string.Equals(_selectedFeedProviderId, id, StringComparison.OrdinalIgnoreCase);
+            btn.Background = isSelected
+                ? new SolidColorBrush(activeColor)
+                : new SolidColorBrush(Color.FromRgb(39, 39, 42));
+            btn.Foreground = isSelected
+                ? new SolidColorBrush(Color.FromRgb(255, 255, 255))
+                : new SolidColorBrush(Color.FromRgb(161, 161, 170));
+        }
+
+        if (_latestSnapshots.TryGetValue(_selectedFeedProviderId, out var snap))
+        {
+            FeedHeaderMeta.Text = $"Provider: {snap.ProviderName} | Source: {snap.Source} | Captured: {snap.CapturedAt:HH:mm:ss}";
+            if (!string.IsNullOrWhiteSpace(snap.Error))
+            {
+                FeedHeaderMeta.Text += $" | Error: {snap.Error}";
+            }
+
+            var (badgeText, badgeBg, badgeFg) = snap.Status switch
+            {
+                UsageCollectionStatus.Available => ("AVAILABLE", Color.FromRgb(6, 95, 70), Color.FromRgb(52, 211, 153)),
+                UsageCollectionStatus.Stale => ("STALE", Color.FromRgb(120, 53, 15), Color.FromRgb(251, 191, 36)),
+                UsageCollectionStatus.TimedOut => ("TIMED OUT", Color.FromRgb(127, 29, 29), Color.FromRgb(248, 113, 113)),
+                UsageCollectionStatus.UnsupportedOutput => ("OUTPUT CHANGED", Color.FromRgb(120, 53, 15), Color.FromRgb(251, 191, 36)),
+                _ => ("FAILED", Color.FromRgb(127, 29, 29), Color.FromRgb(248, 113, 113))
+            };
+
+            FeedStatusBadge.Text = badgeText;
+            FeedStatusBadge.Foreground = new SolidColorBrush(badgeFg);
+            FeedStatusBadgeBorder.Background = new SolidColorBrush(badgeBg);
+
+            if (!string.IsNullOrWhiteSpace(snap.RawOutput))
+            {
+                ActiveFeedTextBox.Text = _showRawAnsi
+                    ? snap.RawOutput.Trim()
+                    : UsageOutputParser.ExtractRelevantScreen(snap.RawOutput, _selectedFeedProviderId);
+            }
+            else
+            {
+                ActiveFeedTextBox.Text = "(No terminal output captured for this provider yet)";
+            }
+        }
+        else
+        {
+            FeedHeaderMeta.Text = $"Provider: {_selectedFeedProviderId} | Waiting for capture...";
+            FeedStatusBadge.Text = "WAITING";
+            FeedStatusBadge.Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184));
+            FeedStatusBadgeBorder.Background = new SolidColorBrush(Color.FromRgb(30, 41, 59));
+            ActiveFeedTextBox.Text = "No capture data for this provider yet. Click 'Refresh usage' to run collection.";
+        }
+    }
+
+    private void UpdateUsagePollingInterval()
+    {
+        var activeCount = _panes.Count(p => p.IsRunning);
+        var minutes = activeCount switch
+        {
+            >= 3 => 1,
+            2 => 2,
+            1 => 5,
+            _ => 15
+        };
+
+        _usageRefreshTimer.Interval = TimeSpan.FromMinutes(minutes);
+
+        if (UsagePollingBadge != null)
+        {
+            UsagePollingBadge.Text = activeCount > 0
+                ? $"⚡ {activeCount} ACTIVE · EVERY {minutes}M"
+                : $"IDLE · EVERY {minutes}M";
+        }
+
+        if (activeCount > 0 && (_lastUsageRefresh == null || DateTimeOffset.Now - _lastUsageRefresh > TimeSpan.FromMinutes(minutes)))
+        {
+            _ = RefreshUsageAsync();
+        }
+    }
+
+    private static UsageProviderDisplay ToUsageDisplay(UsageSnapshot snapshot)
+    {
+        var accent = snapshot.ProviderId.ToLowerInvariant() switch
+        {
+            "codex" => new SolidColorBrush(Color.FromRgb(52, 211, 153)),
+            "claude" => new SolidColorBrush(Color.FromRgb(251, 146, 60)),
+            "gemini" => new SolidColorBrush(Color.FromRgb(96, 165, 250)),
+            _ => new SolidColorBrush(Color.FromRgb(156, 163, 175))
+        };
+
+        var limits = snapshot.Limits.Select(limit =>
+        {
+            // Show percentage USED to match each CLI's own /status screen (bar fills as consumed).
+            var used = Math.Clamp(100d - limit.RemainingFraction * 100d, 0d, 100d);
+            var barBrush = used switch
+            {
+                >= 85 => new SolidColorBrush(Color.FromRgb(239, 68, 68)),
+                >= 65 => new SolidColorBrush(Color.FromRgb(245, 158, 11)),
+                _ => new SolidColorBrush(Color.FromRgb(34, 197, 94))
+            };
+            var reset = limit.ResetsAt?.ToLocalTime().ToString("ddd h:mm tt")
+                        ?? (string.IsNullOrWhiteSpace(limit.ResetText) ? "" : $"Reset {limit.ResetText}");
+            return new UsageLimitDisplay
+            {
+                Name = limit.Name,
+                UsedPercent = used,
+                ValueText = $"{used:0}% used",
+                ResetText = reset,
+                BarBrush = barBrush
+            };
+        }).ToList();
+
+        var status = snapshot.Status == UsageCollectionStatus.Available
+            ? "Current"
+            : snapshot.Status switch
+            {
+                UsageCollectionStatus.Stale => "Stale",
+                UsageCollectionStatus.NotInstalled => "Not installed",
+                UsageCollectionStatus.TimedOut => "Timed out",
+                UsageCollectionStatus.UnsupportedOutput => "Output changed",
+                UsageCollectionStatus.Failed => "Failed",
+                _ => "Unavailable"
+            };
+        var detail = snapshot.Status is UsageCollectionStatus.Available
+            ? $"Source: {snapshot.Source} | updated {snapshot.CapturedAt:t}"
+            : snapshot.Status == UsageCollectionStatus.Stale
+                ? $"Updated {snapshot.CapturedAt:t} | {Truncate(snapshot.Error ?? "Refresh failed.", 90)}"
+            : Truncate(snapshot.Error ?? "Usage refresh failed.", 140);
+
+        return new UsageProviderDisplay
+        {
+            Name = snapshot.ProviderName,
+            StatusText = status,
+            SourceText = detail,
+            AccentBrush = accent,
+            Limits = limits
+        };
+    }
+
+    private static string Truncate(string value, int maxLength) =>
+        value.Length <= maxLength ? value : value[..(maxLength - 3)] + "...";
 
     private async Task LoadGitHubReposAsync(bool forceRefresh = false)
     {
@@ -926,39 +1242,9 @@ public partial class MainWindow : Window
         StatusText.Text = $"Launched {agent.Name} in Terminal {target.PaneIndex}";
     }
 
-    private void LaunchAllDemo_Click(object sender, RoutedEventArgs e)
-    {
-        ViewCockpitBtn_Click(sender, e);
-
-        while (_panes.Count < 3)
-        {
-            _panes.Add(CreateTerminalPane(_panes.Count, 0));
-        }
-        RebuildTerminalLayout();
-
-        for (int i = 0; i < _panes.Count; i++)
-        {
-            var repo = _settings.Repositories.Skip(i).FirstOrDefault() ?? _settings.Repositories.FirstOrDefault();
-            var dir = repo?.LocalPath ?? Directory.GetCurrentDirectory();
-            var name = repo?.Name ?? $"Workspace {i + 1}";
-            _panes[i].StartSession("powershell.exe -NoLogo", dir, $"Terminal {i + 1} · PowerShell", name);
-        }
-
-        StatusText.Text = $"Launched demo in all {_panes.Count} side-by-side terminal sessions!";
-    }
-
-    private void ResetAllTerminals_Click(object sender, RoutedEventArgs e)
-    {
-        foreach (var pane in _panes)
-        {
-            pane.Dispose();
-        }
-        InitDefaultTerminalPanes(3);
-        StatusText.Text = "Cockpit reset to default 3 terminal sessions.";
-    }
-
     protected override void OnClosed(EventArgs e)
     {
+        _usageRefreshTimer.Stop();
         foreach (var pane in _panes)
         {
             pane.Dispose();

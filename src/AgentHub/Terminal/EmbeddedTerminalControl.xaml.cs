@@ -25,7 +25,9 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     private bool _isInitialized;
     private bool _isInitializing;
 
+    public event Action? SessionStarted;
     public event Action? SessionExited;
+    public bool IsRunning => _session?.IsRunning == true;
 
     public EmbeddedTerminalControl()
     {
@@ -165,6 +167,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
             };
 
             SubtitleText.Text = $"PID {_session.ProcessId} · {_workingDirectory}";
+            SessionStarted?.Invoke();
         }
         catch (Exception ex)
         {
@@ -221,6 +224,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         SubtitleText.Text = "Stopped by user";
         RestartBtn.Visibility = Visibility.Visible;
         StopBtn.Visibility = Visibility.Collapsed;
+        SessionExited?.Invoke();
     }
 
     private void RestartBtn_Click(object sender, RoutedEventArgs e)

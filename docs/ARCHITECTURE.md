@@ -15,6 +15,7 @@ MainWindow (WPF)
     +-- GitService ------------ git.exe (status, fetch, pull --ff-only, push)
     +-- GitHubService --------- gh.exe (auth status, remote repo query, cloning)
     +-- RepoDiscoveryService -- local folder scanner & auto-detection
+    +-- UsageService --------- configurable CLI usage commands + normalized parsers
     +-- AgentLauncher --------- wt.exe / powershell.exe external launcher
     +-- RepoContextService ---- .agenthub/handoff.md + Explorer/browser
     |
@@ -89,14 +90,31 @@ Different tasks should get different worktrees. Multiple agents should not concu
 
 ## Usage monitoring
 
-Provider quota APIs are inconsistent or absent. AgentHub should use adapters with confidence labels:
+AgentHub monitors provider rate limits without burning prompt quota or storing API keys:
 
 ```text
-IUsageProvider
-- GetUsageAsync()
-- source: official API | CLI output | local log | manual
-- timestamp
-- confidence
+Cockpit usage dashboard
+    |
+    +-- UsagePollingBadge (adaptive interval: 1m - 15m based on active terminals)
+    +-- ToggleRawOutputBtn / RawOutputPanel (inspect raw captured text)
+    |
+    +-- UsageService (parallel collection, isolated provider failures)
+         |
+         +-- ProcessRunner (native headless CLI execution: agy -p /usage)
+         |
+         +-- BackgroundTerminalCollector (background ConPTY probe: codex /status, claude /status)
+         |
+         +-- UsageOutputParser (ANSI strip, regex parsing, tab delimiter extraction)
+              |
+              +-- UsageSnapshot[] -> WPF display models (cards, progress bars, reset timestamps)
 ```
 
-The app must never present inferred usage as an exact provider balance.
+1. **Native Headless Execution:** Google Antigravity (`agy`) supports native non-interactive slash command expansion via `agy -p /usage`, returning tab-separated live limits for Gemini and Claude/GPT models (weekly and 5-hour limits) in ~1s without prompting the LLM.
+2. **Background Pseudoconsole Probes:** Codex and Claude Code require genuine TTYs for slash commands (`/status`). `BackgroundTerminalCollector` starts an isolated background ConPTY session, sends sequential keystrokes (`/status`, Left-Arrow tab navigation for Claude session usage), captures raw terminal streams, and parses progress bars and reset times safely.
+3. **Adaptive Polling Engine:** Polling frequency scales dynamically with the number of active interactive sessions running in Cockpit:
+   - 0 active terminals: 15 minutes (`IDLE · EVERY 15M`)
+   - 1 active terminal: 5 minutes (`⚡ 1 ACTIVE · EVERY 5M`)
+   - 2 active terminals: 2 minutes (`⚡ 2 ACTIVE · EVERY 2M`)
+   - 3+ active terminals: 1 minute (`⚡ {N} ACTIVE · EVERY 1M`)
+4. **Terminal Feed Panel:** A collapsible "Terminal Feed ▾" panel displays the raw terminal output captured from each CLI for verification.
+5. **Safety:** AgentHub stores no API keys or provider credentials. Every displayed value identifies the local CLI command that supplied it, and parser failures are surfaced instead of being presented as a balance. Default providers are preconfigured in `settings.json` and automatically migrated on launch.

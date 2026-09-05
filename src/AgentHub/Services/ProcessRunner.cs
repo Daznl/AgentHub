@@ -9,10 +9,11 @@ public sealed class ProcessRunner
         string fileName,
         IEnumerable<string> arguments,
         string? workingDirectory = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        TimeSpan? timeout = null)
     {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        linkedCts.CancelAfter(TimeSpan.FromSeconds(30));
+        linkedCts.CancelAfter(timeout ?? TimeSpan.FromSeconds(30));
 
         var psi = new ProcessStartInfo
         {
@@ -47,7 +48,8 @@ public sealed class ProcessRunner
         catch (OperationCanceledException)
         {
             try { process.Kill(entireProcessTree: true); } catch { }
-            return (-1, stdout.ToString(), "Process execution timed out after 30 seconds.");
+            var timeoutText = timeout ?? TimeSpan.FromSeconds(30);
+            return (-1, stdout.ToString(), $"Process execution timed out after {timeoutText.TotalSeconds:g} seconds.");
         }
     }
 }

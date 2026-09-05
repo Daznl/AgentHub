@@ -16,6 +16,7 @@ AgentHub treats the **repository as the workspace** and the AI CLI as an interch
 - Open the repository folder or GitHub remote.
 - **Embedded Dynamic Multi-Terminal Cockpit:** Run multiple interactive CLI sessions (Antigravity, Claude Code, Codex, PowerShell, Cmd) side-by-side inside the app using Windows ConPTY + xterm.js. Supports 3+ concurrent terminal panes with draggable splitters, a 1-click **➕ Add Terminal** button, individual **✕ Close** buttons, synchronized working directory selection, and clean ConPTY lifecycle management without duplicated keystrokes or external window sprawl.
 - Launch **Codex**, **Claude Code**, or **Antigravity** in Windows Terminal or directly into specific Cockpit terminal panes (T1, T2, T3).
+- Display current Codex, Claude and Gemini CLI usage limits in the Cockpit. AgentHub runs configurable local usage commands concurrently and shows remaining percentage, reset time, source and refresh state without storing provider credentials.
 - Keep agent commands configurable in `%APPDATA%\AgentHub\settings.json`.
 - Create `.agenthub/handoff.md` in a repo to carry context between agents.
 - Never stores API keys or provider credentials. Authentication remains owned by each CLI, `gh`, and Git Credential Manager.
@@ -75,11 +76,19 @@ Default agent definitions:
     { "id": "claude", "name": "Claude Code", "command": "claude", "arguments": "", "enabled": true },
     { "id": "antigravity", "name": "Antigravity", "command": "agy", "arguments": "", "enabled": true }
   ],
+  "usageProviders": [
+    { "id": "gemini", "name": "Antigravity", "command": "agy", "arguments": ["-p", "/usage"], "enabled": true },
+    { "id": "codex", "name": "Codex", "command": "codex", "arguments": ["/status"], "enabled": true, "unqualifiedPercentagesAreRemaining": true },
+    { "id": "claude", "name": "Claude Code", "command": "claude", "arguments": ["/status"], "enabled": true }
+  ],
+  "usageRefreshMinutes": 5,
   "preferWindowsTerminal": true
 }
 ```
 
 You can add flags in `arguments`. For example, if you deliberately want an Antigravity profile that skips permission prompts, create a second agent definition rather than hard-coding it into AgentHub.
+
+Usage providers are disabled by default because coding CLIs such as Codex and Claude Code currently expose quota and usage via interactive slash commands (`/status` and `/usage`) rather than non-interactive headless commands. Executing bare CLI calls would consume user token quota or fail with terminal errors. To enable usage tracking, supply a custom script or wrapper command in `settings.json` that outputs quota text and percentages. A successful command prints quota labels and percentages; explicit `left`/`remaining` or `used`/`consumed` wording overrides `unqualifiedPercentagesAreRemaining`.
 
 ## Handoff convention
 

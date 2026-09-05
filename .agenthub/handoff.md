@@ -45,6 +45,19 @@ AgentHub is a Windows-first personal control centre built with **.NET 8 WPF** th
   - **Root Cause:** WPF `Loaded` events fired multiple times during tab switching and pane layout re-evaluations while `EnsureCoreWebView2Async` was completing. This resulted in duplicate subscriptions to `WebView.CoreWebView2.WebMessageReceived`, causing each character sent via `term.onData` to be dispatched multiple times to `_session.Write(data)`.
   - **Resolution:** Added `_isInitialized` and `_isInitializing` guards, enforced single-subscription idempotency (`-= CoreWebView2_WebMessageReceived; += CoreWebView2_WebMessageReceived;`), and cleaned up pseudoconsole pipe handles safely in `ConPtySession.cs`.
 - **Repo Combo Synchronization:** When a session is launched into a terminal pane from the main repo detail view, the pane's repository combobox now automatically syncs with the launched repository.
+- **Provider Usage Limits & Adaptive Background Monitoring:** Added automated usage limit monitoring to Cockpit.
+  - **Native Headless Invocations:** Antigravity (`agy`) supports native non-interactive slash command expansion via `agy -p /usage`, returning tab-separated live limits for Gemini and Claude/GPT models (weekly and 5-hour limits) in ~1s without token consumption or prompts.
+  - **Background Terminal Collector (`BackgroundTerminalCollector`):** Codex and Claude Code require interactive TTY environments for slash commands (`/status`). Built a dedicated background ConPTY worker that spawns an isolated pseudoconsole, delivers sequential keystrokes (`/status`, Left-Arrow tab navigation for Claude session usage), captures raw terminal streams, and parses progress bars and reset times safely.
+  - **Adaptive Polling Engine:** Polling frequency scales dynamically with the number of active interactive sessions running in Cockpit:
+    - 0 active terminals: 15 minutes (`IDLE · EVERY 15M`)
+    - 1 active terminal: 5 minutes (`⚡ 1 ACTIVE · EVERY 5M`)
+    - 2 active terminals: 2 minutes (`⚡ 2 ACTIVE · EVERY 2M`)
+    - 3+ active terminals: 1 minute (`⚡ {N} ACTIVE · EVERY 1M`)
+  - **Terminal Feed Inspection & Split Provider Tabs:** Added a collapsible "Terminal Feed ▾" panel to Cockpit with dedicated tabs for each provider (`✦ Antigravity`, `⚡ Codex`, `✻ Claude Code`), 1-click clipboard copy (`📋 Copy`), and a `Sanitized / Raw ANSI` view toggle.
+  - **Cursor Positioning & Whitespace Preservation:** Standard ANSI strippers erase VT cursor forward (`\x1b[<n>C`) and horizontal absolute (`\x1b[<n>G`) sequences, causing styled words in TUI frameworks like Ink to smash together (`Run/inittocreateaCLAUDE.md...`). Updated `UsageOutputParser.StripAnsi` to translate cursor forward commands into equivalent whitespace, keeping columns aligned and readable.
+  - **Active Screen Extraction (`ExtractRelevantScreen`):** Background terminal collectors record the entire process lifecycle (including startup banners, tips, and what's-new messages). Added `ExtractRelevantScreen` in `UsageOutputParser` to isolate the active usage frame (e.g. `Current session` / `Current week` for Claude; `5h limit` / `Weekly limit` for Codex) so users see clean, focused usage data without clutter.
+  - **Claude API Latency Handling & Keystroke Sequencing:** Claude Code's `/status` Usage tab fetches limits asynchronously from Anthropic's stats API, showing `✶ Loading your Claude Code stats…` while in flight. Extended probe timeout to 16 seconds and sequenced individual keystrokes (`/status\r`, 800ms delay, `\x1b[D`, 800ms delay, `\x1b[D`) so network latency across international regions (e.g. Australia) resolves completely before capture.
+  - **Automatic Settings Migration:** `SettingsService.LoadAsync()` automatically populates default usage providers if an existing `settings.json` lacked them.
 
 ---
 

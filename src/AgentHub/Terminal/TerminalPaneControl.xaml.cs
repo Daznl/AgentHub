@@ -10,14 +10,19 @@ namespace AgentHub.Terminal;
 public partial class TerminalPaneControl : UserControl, IDisposable
 {
     public event Action<TerminalPaneControl>? CloseRequested;
+    public event Action<TerminalPaneControl, int>? MoveRequested;
     private int _paneIndex = 1;
 
     public EmbeddedTerminalControl TerminalControl => Terminal;
     public int PaneIndex => _paneIndex;
+    public bool IsRunning => Terminal.IsRunning;
+    public event Action? SessionStateChanged;
 
     public TerminalPaneControl()
     {
         InitializeComponent();
+        Terminal.SessionStarted += () => SessionStateChanged?.Invoke();
+        Terminal.SessionExited += () => SessionStateChanged?.Invoke();
     }
 
     public void SetIndex(int index, SolidColorBrush accent)
@@ -75,6 +80,10 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     {
         CloseRequested?.Invoke(this);
     }
+
+    private void MoveLeft_Click(object sender, RoutedEventArgs e) => MoveRequested?.Invoke(this, -1);
+
+    private void MoveRight_Click(object sender, RoutedEventArgs e) => MoveRequested?.Invoke(this, 1);
 
     public void StartSession(string commandLine, string workingDirectory, string title, string repoName)
     {

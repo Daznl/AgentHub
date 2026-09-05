@@ -11,5 +11,29 @@ public sealed class AppSettings
         new() { Id = "antigravity", Name = "Antigravity", Command = "agy", Notes = "Google Antigravity CLI" }
     ];
 
+    public List<UsageProviderDefinition> UsageProviders { get; set; } =
+    [
+        new()
+        {
+            Id = "gemini", Name = "Antigravity", Command = "agy",
+            Arguments = ["-p", "/usage"],
+            Enabled = true
+        },
+        new()
+        {
+            Id = "codex", Name = "Codex", Command = "codex",
+            Arguments = ["/status"], UnqualifiedPercentagesAreRemaining = true,
+            Enabled = true
+        },
+        new()
+        {
+            Id = "claude", Name = "Claude Code", Command = "claude",
+            Arguments = ["/status"],
+            Enabled = true
+        }
+    ];
+
+    public int UsageRefreshMinutes { get; set; } = 5;
+
     public bool PreferWindowsTerminal { get; set; } = true;
 }

@@ -30,8 +30,14 @@ public sealed class SettingsService
         try
         {
             await using var stream = File.OpenRead(SettingsPath);
-            return await JsonSerializer.DeserializeAsync<AppSettings>(stream, JsonOptions)
+            var settings = await JsonSerializer.DeserializeAsync<AppSettings>(stream, JsonOptions)
                    ?? new AppSettings();
+            if (settings.UsageProviders.Count == 0)
+            {
+                settings.UsageProviders = new AppSettings().UsageProviders;
+                await SaveAsync(settings);
+            }
+            return settings;
         }
         catch
         {
