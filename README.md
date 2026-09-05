@@ -8,13 +8,13 @@ AgentHub treats the **repository as the workspace** and the AI CLI as an interch
 
 - Register existing local Git repositories.
 - **Local Repository Auto-Discovery:** 1-click folder scanner that auto-detects existing local Git clones across your system and links them directly to their remote GitHub counterparts.
-- **Real-Time Sync Status & In-App Pull:** Checks local clone existence, branch, uncommitted changes, and ahead/behind counts with color-coded badges (`✓ Up to date`, `⇣ Behind`, `⇡ Ahead`, `✎ Modified`). Supports 1-click fast-forward pull directly from the remote repository cards.
+- **Real-Time Sync Status, In-App Pull & Push:** Checks local clone existence, branch, uncommitted changes, and ahead/behind counts with color-coded badges (`✓ Up to date`, `⇣ Behind`, `⇡ Ahead`, `✎ Modified`). Supports 1-click fast-forward pull (`⇣ Pull`) and 1-click push (`⬆ Push`) directly from the remote repository cards.
 - **GitHub Repository Browser:** View, search, and filter your remote GitHub repositories in-app via your local GitHub CLI (`gh`). Filter by visibility (private/public) or sync status (up-to-date, needs pull, dirty), view push timestamps, and 1-click clone & register directly into AgentHub.
 - Clone GitHub repositories by HTTPS or SSH URL.
 - Show current branch, changed-file count, ahead/behind state and origin remote.
 - Run `git fetch --prune`, `git pull --ff-only`, and `git push` from the UI.
 - Open the repository folder or GitHub remote.
-- **Embedded Dynamic Multi-Terminal Cockpit:** Run multiple interactive CLI sessions (Antigravity, Claude Code, Codex, PowerShell) side-by-side inside the app using Windows ConPTY + xterm.js. Supports 3+ concurrent terminal panes with draggable splitters, a 1-click **➕ Add Terminal** button, and individual **✕ Close** buttons for dynamic pane management without external window sprawl.
+- **Embedded Dynamic Multi-Terminal Cockpit:** Run multiple interactive CLI sessions (Antigravity, Claude Code, Codex, PowerShell, Cmd) side-by-side inside the app using Windows ConPTY + xterm.js. Supports 3+ concurrent terminal panes with draggable splitters, a 1-click **➕ Add Terminal** button, individual **✕ Close** buttons, synchronized working directory selection, and clean ConPTY lifecycle management without duplicated keystrokes or external window sprawl.
 - Launch **Codex**, **Claude Code**, or **Antigravity** in Windows Terminal or directly into specific Cockpit terminal panes (T1, T2, T3).
 - Keep agent commands configurable in `%APPDATA%\AgentHub\settings.json`.
 - Create `.agenthub/handoff.md` in a repo to carry context between agents.
