@@ -168,6 +168,11 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
 
             SubtitleText.Text = $"PID {_session.ProcessId} · {_workingDirectory}";
             SessionStarted?.Invoke();
+
+            // A freshly-launched TUI (e.g. Claude Code) reads the terminal size at
+            // startup. Force a couple of re-fits so it gets the true current size and
+            // its bottom input/mode line isn't rendered below the visible area.
+            ScheduleRefit();
         }
         catch (Exception ex)
         {
@@ -176,6 +181,20 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
             RestartBtn.Visibility = Visibility.Visible;
             StopBtn.Visibility = Visibility.Collapsed;
         }
+    }
+
+    private void ScheduleRefit()
+    {
+        _ = Dispatcher.InvokeAsync(async () =>
+        {
+            // Two passes: one right after launch, one after the CLI's initial paint settles.
+            foreach (var delayMs in new[] { 150, 600 })
+            {
+                await Task.Delay(delayMs);
+                try { WebView.CoreWebView2?.PostWebMessageAsString("{\"type\":\"refit\"}"); }
+                catch { }
+            }
+        });
     }
 
     private void CoreWebView2_WebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)

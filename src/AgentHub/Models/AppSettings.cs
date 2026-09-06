@@ -33,7 +33,7 @@ public sealed class AppSettings
         }
     ];
 
-    public int UsageRefreshMinutes { get; set; } = 5;
+    public double UsageRefreshMinutes { get; set; } = 2;
 
     public bool PreferWindowsTerminal { get; set; } = true;
 }

@@ -14,9 +14,9 @@ public sealed class UsageProviderDisplay
 public sealed class UsageLimitDisplay
 {
     public required string Name { get; init; }
-    // Matches the CLIs' own /status convention: percentage USED (bar fills as you consume).
+    // Percentage of the limit still LEFT (bar is full when you have lots remaining).
     public required string ValueText { get; init; }
     public required string ResetText { get; init; }
-    public required double UsedPercent { get; init; }
+    public required double RemainingPercent { get; init; }
     public required MediaBrush BarBrush { get; init; }
 }

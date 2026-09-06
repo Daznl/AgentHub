@@ -289,6 +289,9 @@
                             <TextBlock x:Name="UsageRefreshStatusText" Text="Waiting for refresh" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="10,1,0,0" />
                         </StackPanel>
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <TextBlock Text="Refresh every" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,5,0" />
+                            <TextBox x:Name="UsageIntervalBox" Width="46" Padding="4,2" Margin="0,0,3,0" FontSize="11" VerticalContentAlignment="Center" TextAlignment="Center" KeyDown="UsageIntervalBox_KeyDown" LostFocus="UsageIntervalBox_LostFocus" ToolTip="How often to refresh usage, in minutes (e.g. 2, 0.5). Cheap now — no terminal scraping." />
+                            <TextBlock Text="min" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,10,0" />
                             <Button x:Name="ToggleRawOutputBtn" Click="ToggleRawOutput_Click" Content="Terminal Feed ▾" Padding="9,4" Margin="0,0,8,0" FontSize="11" ToolTip="Inspect raw CLI terminal capture output" />
                             <Button x:Name="UsageRefreshButton" Click="RefreshUsage_Click" Content="Refresh usage" Padding="9,4" Margin="0" FontSize="11" />
                         </StackPanel>
@@ -320,7 +323,7 @@
                                                             <ColumnDefinition Width="Auto" />
                                                         </Grid.ColumnDefinitions>
                                                         <TextBlock Text="{Binding Name}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{StaticResource TextBrush}" />
-                                                        <ProgressBar Grid.Column="1" Height="6" Margin="6,0" Minimum="0" Maximum="100" Value="{Binding UsedPercent}" Foreground="{Binding BarBrush}" Background="#343841" BorderThickness="0" />
+                                                        <ProgressBar Grid.Column="1" Height="6" Margin="6,0" Minimum="0" Maximum="100" Value="{Binding RemainingPercent}" Foreground="{Binding BarBrush}" Background="#343841" BorderThickness="0" />
                                                         <TextBlock Grid.Column="2" Text="{Binding ValueText}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Right" Foreground="{StaticResource TextBrush}" />
                                                         <TextBlock Grid.Column="3" Text="{Binding ResetText}" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="8,0,0,0" />
                                                     </Grid>

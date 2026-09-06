@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using AgentHub.Models;
 
@@ -22,26 +23,79 @@ public static class CodexUsageReader
         if (!Directory.Exists(sessionsDir))
             return Fail(provider, UsageCollectionStatus.NotInstalled, "No Codex session data found on disk.");
 
-        FileInfo? newest;
+        List<FileInfo> files;
         try
         {
-            newest = new DirectoryInfo(sessionsDir)
+            files = new DirectoryInfo(sessionsDir)
                 .EnumerateFiles("rollout-*.jsonl", SearchOption.AllDirectories)
                 .OrderByDescending(file => file.LastWriteTimeUtc)
-                .FirstOrDefault();
+                .ToList();
         }
         catch (Exception ex)
         {
             return Fail(provider, UsageCollectionStatus.Failed, ex.Message);
         }
 
-        if (newest is null)
+        if (files.Count == 0)
             return Fail(provider, UsageCollectionStatus.NotInstalled, "No Codex session files found.");
 
+        // The freshest reading is NOT necessarily in the newest-by-mtime file: any write
+        // bumps a file's mtime, and several Codex sessions can be open at once. So pick the
+        // reading whose own recorded timestamp is newest. Files are sorted mtime-descending
+        // and a reading's timestamp can't be later than its file's mtime, so once a candidate
+        // exists we can stop as soon as a file's mtime can no longer beat it.
+        RateLimitReading? best = null;
+        foreach (var file in files)
+        {
+            if (best is not null && new DateTimeOffset(file.LastWriteTimeUtc) <= best.Timestamp)
+                break;
+
+            var reading = TryReadLastRateLimits(file);
+            if (reading is null) continue;
+
+            if (best is null || reading.Timestamp > best.Timestamp)
+                best = reading;
+        }
+
+        if (best is null)
+            return Fail(provider, UsageCollectionStatus.UnsupportedOutput,
+                "No rate-limit data recorded in Codex session files yet. Run Codex once to populate.");
+
+        var limits = new List<UsageLimit>();
+        AddLimit(limits, best.RateLimits, "primary");
+        AddLimit(limits, best.RateLimits, "secondary");
+
+        if (limits.Count == 0)
+            return Fail(provider, UsageCollectionStatus.UnsupportedOutput, "Codex rate-limit block had no windows.");
+
+        return new UsageSnapshot(
+            provider.Id,
+            provider.Name,
+            best.Timestamp.LocalDateTime,
+            limits,
+            Source,
+            UsageCollectionStatus.Available,
+            RawOutput: best.RateLimits.GetRawText());
+    }
+
+    /// <summary>The last rate-limit block found in one session file, tagged with the block's own
+    /// recorded UTC timestamp (falling back to the file's write time when none is present).</summary>
+    private sealed record RateLimitReading(JsonElement RateLimits, DateTimeOffset Timestamp);
+
+    private static RateLimitReading? TryReadLastRateLimits(FileInfo file)
+    {
         JsonElement? lastRateLimits = null;
+        DateTimeOffset lastTimestamp = default;
         try
         {
-            foreach (var line in File.ReadLines(newest.FullName))
+            using var stream = new FileStream(
+                file.FullName,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+
+            while (reader.ReadLine() is { } line)
             {
                 if (!line.Contains("\"rate_limits\"", StringComparison.Ordinal)) continue;
                 try
@@ -51,35 +105,37 @@ public static class CodexUsageReader
                         element.TryGetProperty("primary", out _))
                     {
                         lastRateLimits = element.Clone();
+                        lastTimestamp = TryReadTimestamp(doc.RootElement)
+                                        ?? new DateTimeOffset(file.LastWriteTimeUtc);
                     }
                 }
                 catch (JsonException) { /* skip malformed lines */ }
             }
         }
-        catch (Exception ex)
+        catch (IOException)
         {
-            return Fail(provider, UsageCollectionStatus.Failed, ex.Message);
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
         }
 
-        if (lastRateLimits is null)
-            return Fail(provider, UsageCollectionStatus.UnsupportedOutput,
-                "No rate-limit data recorded in latest Codex session yet. Run Codex once to populate.");
+        return lastRateLimits is null ? null : new RateLimitReading(lastRateLimits.Value, lastTimestamp);
+    }
 
-        var limits = new List<UsageLimit>();
-        AddLimit(limits, lastRateLimits.Value, "primary");
-        AddLimit(limits, lastRateLimits.Value, "secondary");
+    private static DateTimeOffset? TryReadTimestamp(JsonElement root)
+    {
+        if (root.ValueKind == JsonValueKind.Object &&
+            root.TryGetProperty("timestamp", out var ts) &&
+            ts.ValueKind == JsonValueKind.String &&
+            DateTimeOffset.TryParse(ts.GetString(), CultureInfo.InvariantCulture,
+                DateTimeStyles.AdjustToUniversal, out var parsed))
+        {
+            return parsed;
+        }
 
-        if (limits.Count == 0)
-            return Fail(provider, UsageCollectionStatus.UnsupportedOutput, "Codex rate-limit block had no windows.");
-
-        return new UsageSnapshot(
-            provider.Id,
-            provider.Name,
-            newest.LastWriteTime,
-            limits,
-            Source,
-            UsageCollectionStatus.Available,
-            RawOutput: lastRateLimits.Value.GetRawText());
+        return null;
     }
 
     private static void AddLimit(List<UsageLimit> limits, JsonElement rateLimits, string key)

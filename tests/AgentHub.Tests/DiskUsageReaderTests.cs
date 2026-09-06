@@ -67,6 +67,72 @@ public class DiskUsageReaderTests
     }
 
     [Fact]
+    public void CodexReader_SkipsNewestSessionWithoutRateLimits()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "agenthub-codex-" + Guid.NewGuid().ToString("N"));
+        var nested = Path.Combine(dir, "2026", "09", "05");
+        Directory.CreateDirectory(nested);
+        try
+        {
+            var usablePath = Path.Combine(nested, "rollout-usable.jsonl");
+            File.WriteAllText(usablePath,
+                "{\"payload\":{\"info\":{\"rate_limits\":{\"primary\":{\"used_percent\":40.0,\"window_minutes\":300},\"secondary\":{\"used_percent\":20.0,\"window_minutes\":10080}}}}}\n");
+            File.SetLastWriteTimeUtc(usablePath, DateTime.UtcNow);
+
+            var newestPath = Path.Combine(nested, "rollout-new-without-limits.jsonl");
+            File.WriteAllText(newestPath,
+                "{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"C:\\\\Users\\\\danie\\\\Desktop\\\\AgentHub\"}}\n");
+            File.SetLastWriteTimeUtc(newestPath, DateTime.UtcNow.AddMinutes(5));
+
+            var snapshot = CodexUsageReader.Read(CodexProvider(), dir);
+
+            Assert.Equal(UsageCollectionStatus.Available, snapshot.Status);
+            Assert.Equal(2, snapshot.Limits.Count);
+            Assert.True(Math.Abs(snapshot.Limits.Single(l => l.Name == "5-Hour").RemainingFraction - 0.60) < 0.001);
+            Assert.True(Math.Abs(snapshot.Limits.Single(l => l.Name == "Weekly").RemainingFraction - 0.80) < 0.001);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CodexReader_PrefersNewestReadingTimestampOverFileMtime()
+    {
+        // A session file can have a newer mtime (any write bumps it) yet an OLDER rate-limit
+        // reading than a concurrently-open session. Selection must follow the reading's own
+        // recorded timestamp, not the file's last-write time.
+        var dir = Path.Combine(Path.GetTempPath(), "agenthub-codex-" + Guid.NewGuid().ToString("N"));
+        var nested = Path.Combine(dir, "2026", "09", "05");
+        Directory.CreateDirectory(nested);
+        try
+        {
+            // Newer mtime, but its reading was recorded EARLIER (stale 46% used).
+            var newerMtimePath = Path.Combine(nested, "rollout-newer-mtime.jsonl");
+            File.WriteAllText(newerMtimePath,
+                "{\"timestamp\":\"2026-09-05T10:00:00.000Z\",\"payload\":{\"info\":{\"rate_limits\":{\"primary\":{\"used_percent\":46.0,\"window_minutes\":300},\"secondary\":{\"used_percent\":20.0,\"window_minutes\":10080}}}}}\n");
+            File.SetLastWriteTimeUtc(newerMtimePath, new DateTime(2026, 9, 5, 10, 10, 0, DateTimeKind.Utc));
+
+            // Older mtime, but the FRESHER reading (85% used) — this one must win.
+            var fresherReadingPath = Path.Combine(nested, "rollout-fresher-reading.jsonl");
+            File.WriteAllText(fresherReadingPath,
+                "{\"timestamp\":\"2026-09-05T10:05:00.000Z\",\"payload\":{\"info\":{\"rate_limits\":{\"primary\":{\"used_percent\":85.0,\"window_minutes\":300},\"secondary\":{\"used_percent\":50.0,\"window_minutes\":10080}}}}}\n");
+            File.SetLastWriteTimeUtc(fresherReadingPath, new DateTime(2026, 9, 5, 10, 6, 0, DateTimeKind.Utc));
+
+            var snapshot = CodexUsageReader.Read(CodexProvider(), dir);
+
+            Assert.Equal(UsageCollectionStatus.Available, snapshot.Status);
+            Assert.True(Math.Abs(snapshot.Limits.Single(l => l.Name == "5-Hour").RemainingFraction - 0.15) < 0.001); // 85% used
+            Assert.True(Math.Abs(snapshot.Limits.Single(l => l.Name == "Weekly").RemainingFraction - 0.50) < 0.001); // 50% used
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ClaudeReader_ParsesFiveHourAndSevenDayFromApiResponse()
     {
         // Trimmed shape of GET https://api.anthropic.com/api/oauth/usage

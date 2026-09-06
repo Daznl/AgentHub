@@ -32,9 +32,10 @@
 - [x] Configurable Codex, Claude and Gemini CLI usage commands
 - [x] Background pseudoconsole (ConPTY) terminal probe for interactive slash commands (`/status`)
 - [x] Native headless Antigravity expansion (`agy -p /usage`) with multi-model limit tracking
-- [x] Normalized remaining-limit dashboard with reset times, progress bars, refresh state and isolated provider failures
-- [x] Dynamic adaptive polling engine based on active Cockpit terminal sessions (1m - 15m)
-- [x] Collapsible raw terminal feed panel for live output verification
+- [x] Normalized remaining-limit dashboard (percentage **left**) with reset times, progress bars, refresh state and isolated provider failures
+- [x] Clean per-provider usage sources instead of TUI scraping: Codex on-disk `rate_limits` (newest reading across concurrent sessions), Claude usage endpoint, Antigravity `agy -p /usage`
+- [x] User-configurable, persisted usage polling interval (15s - 120m) replacing the earlier adaptive engine
+- [x] Collapsible raw source feed panel for live output verification
 - Pluggable non-CLI usage adapters
 - Record observed CLI/session consumption where available
 - Manual remaining-quota override when providers expose no machine-readable balance

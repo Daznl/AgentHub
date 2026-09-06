@@ -16,7 +16,7 @@ AgentHub treats the **repository as the workspace** and the AI CLI as an interch
 - Open the repository folder or GitHub remote.
 - **Embedded Dynamic Multi-Terminal Cockpit:** Run multiple interactive CLI sessions (Antigravity, Claude Code, Codex, PowerShell, Cmd) side-by-side inside the app using Windows ConPTY + xterm.js. Supports 3+ concurrent terminal panes with draggable splitters, a 1-click **➕ Add Terminal** button, individual **✕ Close** buttons, synchronized working directory selection, and clean ConPTY lifecycle management without duplicated keystrokes or external window sprawl.
 - Launch **Codex**, **Claude Code**, or **Antigravity** in Windows Terminal or directly into specific Cockpit terminal panes (T1, T2, T3).
-- Display current Codex, Claude and Gemini CLI usage limits in the Cockpit. AgentHub runs configurable local usage commands concurrently and shows remaining percentage, reset time, source and refresh state without storing provider credentials.
+- Display current Codex, Claude and Antigravity usage limits in the Cockpit. AgentHub reads each provider from its cleanest local source — Codex from its on-disk session `rate_limits`, Claude from its usage endpoint, Antigravity from `agy -p /usage` — rather than scraping interactive TUIs. Cards show **percentage left**, reset time, source and refresh state on a user-set polling interval, without storing provider credentials.
 - Keep agent commands configurable in `%APPDATA%\AgentHub\settings.json`.
 - Create `.agenthub/handoff.md` in a repo to carry context between agents.
 - Never stores API keys or provider credentials. Authentication remains owned by each CLI, `gh`, and Git Credential Manager.
@@ -81,7 +81,7 @@ Default agent definitions:
     { "id": "codex", "name": "Codex", "command": "codex", "arguments": ["/status"], "enabled": true, "unqualifiedPercentagesAreRemaining": true },
     { "id": "claude", "name": "Claude Code", "command": "claude", "arguments": ["/status"], "enabled": true }
   ],
-  "usageRefreshMinutes": 5,
+  "usageRefreshMinutes": 2,
   "preferWindowsTerminal": true
 }
 ```

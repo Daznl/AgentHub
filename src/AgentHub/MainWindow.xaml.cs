@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Threading;
 using AgentHub.Models;
 using AgentHub.Services;
@@ -12,6 +14,7 @@ using MessageBox = System.Windows.MessageBox;
 using SolidColorBrush = System.Windows.Media.SolidColorBrush;
 using Button = System.Windows.Controls.Button;
 using Clipboard = System.Windows.Clipboard;
+using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 
 namespace AgentHub;
 
@@ -86,6 +89,7 @@ public partial class MainWindow : Window
         ViewCockpitBtn_Click(this, new RoutedEventArgs());
         StatusText.Text = $"Settings: {_settingsService.SettingsPath}";
 
+        UsageIntervalBox.Text = _settings.UsageRefreshMinutes.ToString("0.##", CultureInfo.InvariantCulture);
         UpdateUsagePollingInterval();
         _usageRefreshTimer.Start();
         _ = RefreshUsageAsync();
@@ -761,30 +765,70 @@ public partial class MainWindow : Window
         }
     }
 
+    // Usage refresh interval is user-controlled (minutes) and persisted to settings.
+    // 0.25 min (15s) floor protects the provider APIs; 120 min ceiling keeps it sane.
+    private const double MinUsageIntervalMinutes = 0.25;
+    private const double MaxUsageIntervalMinutes = 120;
+
     private void UpdateUsagePollingInterval()
     {
-        var activeCount = _panes.Count(p => p.IsRunning);
-        var minutes = activeCount switch
-        {
-            >= 3 => 1,
-            2 => 2,
-            1 => 5,
-            _ => 15
-        };
-
+        var minutes = Math.Clamp(_settings.UsageRefreshMinutes, MinUsageIntervalMinutes, MaxUsageIntervalMinutes);
         _usageRefreshTimer.Interval = TimeSpan.FromMinutes(minutes);
 
         if (UsagePollingBadge != null)
         {
+            var activeCount = _panes.Count(p => p.IsRunning);
             UsagePollingBadge.Text = activeCount > 0
-                ? $"⚡ {activeCount} ACTIVE · EVERY {minutes}M"
-                : $"IDLE · EVERY {minutes}M";
+                ? $"⚡ {activeCount} ACTIVE · EVERY {FormatInterval(minutes)}"
+                : $"EVERY {FormatInterval(minutes)}";
+        }
+    }
+
+    private void UsageIntervalBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) ApplyUsageInterval();
+    }
+
+    private void UsageIntervalBox_LostFocus(object sender, RoutedEventArgs e) => ApplyUsageInterval();
+
+    private void ApplyUsageInterval()
+    {
+        if (UsageIntervalBox == null) return;
+
+        var minutes = double.TryParse(UsageIntervalBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+            ? Math.Clamp(parsed, MinUsageIntervalMinutes, MaxUsageIntervalMinutes)
+            : _settings.UsageRefreshMinutes;
+
+        _settings.UsageRefreshMinutes = minutes;
+        UsageIntervalBox.Text = minutes.ToString("0.##", CultureInfo.InvariantCulture);
+
+        UpdateUsagePollingInterval();
+        _ = _settingsService.SaveAsync(_settings);
+        _ = RefreshUsageAsync();
+    }
+
+    private static string FormatInterval(double minutes) =>
+        minutes < 1 ? $"{minutes * 60:0}S" : $"{minutes:0.##}M";
+
+    // Human-friendly "when does this limit reset" text. Near-term windows (e.g. the 5-hour
+    // limit) show a countdown; further-out ones show the day and clock time.
+    private static string FormatReset(UsageLimit limit)
+    {
+        if (limit.ResetsAt is { } resetsAt)
+        {
+            var remaining = resetsAt - DateTimeOffset.Now;
+            if (remaining <= TimeSpan.Zero) return "resets now";
+            if (remaining < TimeSpan.FromHours(24))
+            {
+                var hours = (int)remaining.TotalHours;
+                var mins = remaining.Minutes;
+                var span = hours > 0 ? $"{hours}h {mins}m" : $"{mins}m";
+                return $"resets in {span}";
+            }
+            return $"resets {resetsAt.ToLocalTime():ddd h:mm tt}";
         }
 
-        if (activeCount > 0 && (_lastUsageRefresh == null || DateTimeOffset.Now - _lastUsageRefresh > TimeSpan.FromMinutes(minutes)))
-        {
-            _ = RefreshUsageAsync();
-        }
+        return string.IsNullOrWhiteSpace(limit.ResetText) ? "" : $"resets {limit.ResetText}";
     }
 
     private static UsageProviderDisplay ToUsageDisplay(UsageSnapshot snapshot)
@@ -799,21 +843,20 @@ public partial class MainWindow : Window
 
         var limits = snapshot.Limits.Select(limit =>
         {
-            // Show percentage USED to match each CLI's own /status screen (bar fills as consumed).
-            var used = Math.Clamp(100d - limit.RemainingFraction * 100d, 0d, 100d);
-            var barBrush = used switch
+            // Show percentage LEFT (bar full = plenty remaining, red as it runs low).
+            var remaining = Math.Clamp(limit.RemainingFraction * 100d, 0d, 100d);
+            var barBrush = remaining switch
             {
-                >= 85 => new SolidColorBrush(Color.FromRgb(239, 68, 68)),
-                >= 65 => new SolidColorBrush(Color.FromRgb(245, 158, 11)),
+                <= 15 => new SolidColorBrush(Color.FromRgb(239, 68, 68)),
+                <= 35 => new SolidColorBrush(Color.FromRgb(245, 158, 11)),
                 _ => new SolidColorBrush(Color.FromRgb(34, 197, 94))
             };
-            var reset = limit.ResetsAt?.ToLocalTime().ToString("ddd h:mm tt")
-                        ?? (string.IsNullOrWhiteSpace(limit.ResetText) ? "" : $"Reset {limit.ResetText}");
+            var reset = FormatReset(limit);
             return new UsageLimitDisplay
             {
                 Name = limit.Name,
-                UsedPercent = used,
-                ValueText = $"{used:0}% used",
+                RemainingPercent = remaining,
+                ValueText = $"{remaining:0}% left",
                 ResetText = reset,
                 BarBrush = barBrush
             };

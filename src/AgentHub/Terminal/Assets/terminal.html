@@ -136,6 +136,13 @@
             term.reset();
             return;
           }
+          // Host asks for a fresh fit (e.g. just after a CLI launched) so the
+          // process is told the real terminal size and its bottom status/mode
+          // line isn't laid out below the visible area.
+          if (msg.startsWith('{') && msg.includes('"type":"refit"')) {
+            scheduleFit();
+            return;
+          }
           writeToTerminal(msg);
         } else if (msg && msg.type === 'clear') {
           term.reset();

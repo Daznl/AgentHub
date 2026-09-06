@@ -15,7 +15,7 @@ MainWindow (WPF)
     +-- GitService ------------ git.exe (status, fetch, pull --ff-only, push)
     +-- GitHubService --------- gh.exe (auth status, remote repo query, cloning)
     +-- RepoDiscoveryService -- local folder scanner & auto-detection
-    +-- UsageService --------- configurable CLI usage commands + normalized parsers
+    +-- UsageService --------- clean per-provider usage readers + normalized snapshots
     +-- AgentLauncher --------- wt.exe / powershell.exe external launcher
     +-- RepoContextService ---- .agenthub/handoff.md + Explorer/browser
     |
@@ -90,31 +90,44 @@ Different tasks should get different worktrees. Multiple agents should not concu
 
 ## Usage monitoring
 
-AgentHub monitors provider rate limits without burning prompt quota or storing API keys:
+AgentHub monitors provider rate limits without burning prompt quota or storing API keys. The
+guiding principle (learned the hard way): **prefer clean structured sources over scraping redrawn
+terminal frames.** Each provider is read from the cleanest signal it exposes:
 
 ```text
 Cockpit usage dashboard
     |
-    +-- UsagePollingBadge (adaptive interval: 1m - 15m based on active terminals)
-    +-- ToggleRawOutputBtn / RawOutputPanel (inspect raw captured text)
+    +-- UsagePollingBadge (user-set interval, persisted to settings.json)
+    +-- Usage interval box (0.25m - 120m; Enter / focus-out applies + refreshes)
+    +-- ToggleRawOutputBtn / RawOutputPanel (inspect the raw source text)
     |
-    +-- UsageService (parallel collection, isolated provider failures)
+    +-- UsageService (parallel collection, isolated per-provider failures)
          |
-         +-- ProcessRunner (native headless CLI execution: agy -p /usage)
-         |
-         +-- BackgroundTerminalCollector (background ConPTY probe: codex /status, claude /status)
-         |
-         +-- UsageOutputParser (ANSI strip, regex parsing, tab delimiter extraction)
+         +-- CodexUsageReader  ---- ~/.codex/sessions/**/rollout-*.jsonl (on-disk rate_limits)
+         +-- ClaudeUsageReader ---- Anthropic OAuth usage endpoint (JSON)
+         +-- ProcessRunner + UsageOutputParser -- agy -p /usage (non-interactive stdout)
               |
-              +-- UsageSnapshot[] -> WPF display models (cards, progress bars, reset timestamps)
+              +-- UsageSnapshot[] -> WPF display models (cards, % left bars, reset timestamps)
 ```
 
-1. **Native Headless Execution:** Google Antigravity (`agy`) supports native non-interactive slash command expansion via `agy -p /usage`, returning tab-separated live limits for Gemini and Claude/GPT models (weekly and 5-hour limits) in ~1s without prompting the LLM.
-2. **Background Pseudoconsole Probes:** Codex and Claude Code require genuine TTYs for slash commands (`/status`). `BackgroundTerminalCollector` starts an isolated background ConPTY session, sends sequential keystrokes (`/status`, Left-Arrow tab navigation for Claude session usage), captures raw terminal streams, and parses progress bars and reset times safely.
-3. **Adaptive Polling Engine:** Polling frequency scales dynamically with the number of active interactive sessions running in Cockpit:
-   - 0 active terminals: 15 minutes (`IDLE · EVERY 15M`)
-   - 1 active terminal: 5 minutes (`⚡ 1 ACTIVE · EVERY 5M`)
-   - 2 active terminals: 2 minutes (`⚡ 2 ACTIVE · EVERY 2M`)
-   - 3+ active terminals: 1 minute (`⚡ {N} ACTIVE · EVERY 1M`)
-4. **Terminal Feed Panel:** A collapsible "Terminal Feed ▾" panel displays the raw terminal output captured from each CLI for verification.
-5. **Safety:** AgentHub stores no API keys or provider credentials. Every displayed value identifies the local CLI command that supplied it, and parser failures are surfaced instead of being presented as a balance. Default providers are preconfigured in `settings.json` and automatically migrated on launch.
+1. **Codex — on-disk rate limits (no CLI call):** Codex records the latest server-reported
+   `rate_limits` block (primary = 5-hour, secondary = weekly) into its session rollout JSONL files
+   as an API side effect. `CodexUsageReader` reads these directly. Because any write bumps a file's
+   mtime and several sessions can be open at once, it selects the reading with the newest **recorded
+   timestamp** across recent files (not the newest file mtime), and tolerates files locked by a live
+   Codex session (shared read).
+2. **Claude — OAuth usage endpoint:** `ClaudeUsageReader` reads Claude's structured usage JSON
+   (session/5-hour and weekly utilization + reset times) rather than driving the interactive
+   `/status` TUI.
+3. **Antigravity — native headless expansion:** `agy -p /usage` prints tab-separated live limits for
+   Gemini and Claude/GPT models in ~1s without prompting the LLM; `UsageOutputParser` strips ANSI and
+   extracts the limits.
+4. **User-controlled polling:** A single refresh interval (minutes) is user-set, persisted to
+   `settings.json`, and clamped to a 15-second floor / 120-minute ceiling. The badge shows the active
+   terminal count and the current cadence; editing the interval box applies and refreshes immediately.
+5. **Presentation:** Bars show percentage **left** (full = plenty remaining, amber ≤ 35%, red ≤ 15%),
+   with human-friendly reset text (near-term windows count down; further-out ones show day + clock).
+6. **Safety:** AgentHub stores no API keys or provider credentials. Every displayed value identifies
+   the local source that supplied it, and parser/read failures are surfaced per-provider instead of
+   being presented as a balance. Default providers are preconfigured in `settings.json` and migrated
+   on launch.
