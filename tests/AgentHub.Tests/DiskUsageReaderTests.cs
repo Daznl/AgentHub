@@ -25,16 +25,24 @@ public class DiskUsageReaderTests
         var dir = Path.Combine(Path.GetTempPath(), "agenthub-codex-" + Guid.NewGuid().ToString("N"));
         var nested = Path.Combine(dir, "2026", "09", "05");
         Directory.CreateDirectory(nested);
+        // Live (future) reset times so this stays a pure parsing test and doesn't trip the
+        // expired-window replenishment path.
+        var fiveHourReset = DateTimeOffset.UtcNow.AddHours(3).ToUnixTimeSeconds();
+        var weeklyReset = DateTimeOffset.UtcNow.AddDays(4).ToUnixTimeSeconds();
         try
         {
             // An older file with different numbers, plus the newest with the real values.
             File.WriteAllText(Path.Combine(nested, "rollout-old.jsonl"),
-                "{\"type\":\"event\",\"payload\":{\"rate_limits\":{\"primary\":{\"used_percent\":10.0,\"window_minutes\":300,\"resets_at\":1788600000},\"secondary\":{\"used_percent\":5.0,\"window_minutes\":10080,\"resets_at\":1789000000}}}}\n");
+                "{\"type\":\"event\",\"payload\":{\"rate_limits\":{" +
+                "\"primary\":{\"used_percent\":10.0,\"window_minutes\":300,\"resets_at\":" + fiveHourReset + "}," +
+                "\"secondary\":{\"used_percent\":5.0,\"window_minutes\":10080,\"resets_at\":" + weeklyReset + "}}}}\n");
 
             var newestPath = Path.Combine(nested, "rollout-new.jsonl");
             File.WriteAllText(newestPath,
                 "{\"type\":\"turn\"}\n" +
-                "{\"payload\":{\"info\":{\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":98.0,\"window_minutes\":300,\"resets_at\":1788616339},\"secondary\":{\"used_percent\":31.0,\"window_minutes\":10080,\"resets_at\":1789178892}}}}}\n");
+                "{\"payload\":{\"info\":{\"rate_limits\":{\"limit_id\":\"codex\"," +
+                "\"primary\":{\"used_percent\":98.0,\"window_minutes\":300,\"resets_at\":" + fiveHourReset + "}," +
+                "\"secondary\":{\"used_percent\":31.0,\"window_minutes\":10080,\"resets_at\":" + weeklyReset + "}}}}}\n");
             // Ensure the "new" file is genuinely newest.
             File.SetLastWriteTimeUtc(newestPath, DateTime.UtcNow.AddMinutes(5));
 
@@ -125,6 +133,45 @@ public class DiskUsageReaderTests
             Assert.Equal(UsageCollectionStatus.Available, snapshot.Status);
             Assert.True(Math.Abs(snapshot.Limits.Single(l => l.Name == "5-Hour").RemainingFraction - 0.15) < 0.001); // 85% used
             Assert.True(Math.Abs(snapshot.Limits.Single(l => l.Name == "Weekly").RemainingFraction - 0.50) < 0.001); // 50% used
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CodexReader_TreatsExpiredWindowAsFullyReplenished()
+    {
+        // Codex only writes a new reading on an API call. When a window's resets_at has already
+        // passed with no fresher reading, the recorded usage is stale — the window has rolled over
+        // and is fully available again. (Real symptom: card showed "9% left" hours after the
+        // 5-hour window had actually reset to full.)
+        var dir = Path.Combine(Path.GetTempPath(), "agenthub-codex-" + Guid.NewGuid().ToString("N"));
+        var nested = Path.Combine(dir, "2026", "09", "05");
+        Directory.CreateDirectory(nested);
+        try
+        {
+            var pastReset = DateTimeOffset.UtcNow.AddHours(-3).ToUnixTimeSeconds();     // 5-hour: expired
+            var futureReset = DateTimeOffset.UtcNow.AddDays(4).ToUnixTimeSeconds();     // weekly: still live
+
+            var path = Path.Combine(nested, "rollout-stale.jsonl");
+            File.WriteAllText(path,
+                "{\"payload\":{\"info\":{\"rate_limits\":{" +
+                "\"primary\":{\"used_percent\":91.0,\"window_minutes\":300,\"resets_at\":" + pastReset + "}," +
+                "\"secondary\":{\"used_percent\":45.0,\"window_minutes\":10080,\"resets_at\":" + futureReset + "}}}}}\n");
+
+            var snapshot = CodexUsageReader.Read(CodexProvider(), dir);
+
+            Assert.Equal(UsageCollectionStatus.Available, snapshot.Status);
+
+            var fiveHour = snapshot.Limits.Single(l => l.Name == "5-Hour");
+            Assert.Equal(1.0, fiveHour.RemainingFraction, 3);      // window reset -> full
+            Assert.NotNull(fiveHour.ResetsAt);
+            Assert.True(fiveHour.ResetsAt > DateTimeOffset.Now);    // advanced to next boundary
+
+            var weekly = snapshot.Limits.Single(l => l.Name == "Weekly");
+            Assert.True(Math.Abs(weekly.RemainingFraction - 0.55) < 0.001); // still-live window unchanged
         }
         finally
         {

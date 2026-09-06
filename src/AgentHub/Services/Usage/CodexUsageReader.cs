@@ -164,6 +164,26 @@ public static class CodexUsageReader
         }
 
         var remaining = Math.Clamp((100d - used) / 100d, 0d, 1d);
+
+        // Codex only records a new rate_limits reading when it makes an API call. If this window's
+        // reset time has already passed, the recorded usage is stale: the window has rolled over and
+        // is fully available again (zero usage until the next call). Show it as full, and advance the
+        // reset to the next window boundary as a best-effort estimate.
+        if (resetsAt is { } reset && reset <= DateTimeOffset.Now)
+        {
+            remaining = 1d;
+            if (windowMinutes > 0)
+            {
+                var step = TimeSpan.FromMinutes(windowMinutes);
+                while (reset <= DateTimeOffset.Now) reset += step;
+                resetsAt = reset;
+            }
+            else
+            {
+                resetsAt = null;
+            }
+        }
+
         limits.Add(new UsageLimit(name, remaining, resetsAt, null));
     }
 

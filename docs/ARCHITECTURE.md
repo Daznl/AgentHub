@@ -115,7 +115,9 @@ Cockpit usage dashboard
    as an API side effect. `CodexUsageReader` reads these directly. Because any write bumps a file's
    mtime and several sessions can be open at once, it selects the reading with the newest **recorded
    timestamp** across recent files (not the newest file mtime), and tolerates files locked by a live
-   Codex session (shared read).
+   Codex session (shared read). Because Codex only writes a reading on an API call, a window whose
+   `resets_at` has already passed is treated as rolled over and fully available again (shown as 100%
+   left) rather than surfacing the stale pre-reset number.
 2. **Claude — OAuth usage endpoint:** `ClaudeUsageReader` reads Claude's structured usage JSON
    (session/5-hour and weekly utilization + reset times) rather than driving the interactive
    `/status` TUI.
