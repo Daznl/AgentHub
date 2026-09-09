@@ -2,7 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:terminal="clr-namespace:AgentHub.Terminal"
-        Title="AgentHub - Repository &amp; Agent Cockpit" Height="860" Width="1340" MinHeight="680" MinWidth="1020">
+        Title="AgentHub - Repository &amp; Agent Cockpit" Height="860" Width="1340" MinHeight="680" MinWidth="1020"
+        Icon="Assets/AppIcon.png">
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -13,9 +14,9 @@
         <!-- Top Navigation & Action Header -->
         <StackPanel Grid.Row="0" Margin="0,0,0,14">
             <DockPanel>
-                <StackPanel DockPanel.Dock="Left">
-                    <TextBlock FontSize="26" FontWeight="SemiBold" Text="AgentHub" />
-                    <TextBlock Foreground="{StaticResource MutedBrush}" Text="Repos, GitHub and interchangeable coding agents in one cockpit" />
+                <StackPanel DockPanel.Dock="Left" HorizontalAlignment="Left">
+                    <Image Source="Assets/HeaderLogo.png" Width="96" Height="96" HorizontalAlignment="Left" RenderOptions.BitmapScalingMode="HighQuality" />
+                    <TextBlock Foreground="{StaticResource MutedBrush}" Text="Repos, GitHub and interchangeable coding agents in one cockpit" Margin="0,6,0,0" />
                 </StackPanel>
 
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
@@ -57,9 +58,9 @@
                         <ListBox x:Name="RepoList" SelectionChanged="RepoList_SelectionChanged" Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <Border Padding="4,5" Margin="0,0,0,2">
+                                    <Border Padding="6,6,16,6" Margin="0,0,4,3" CornerRadius="6">
                                         <DockPanel>
-                                            <Border DockPanel.Dock="Right" Background="{Binding StatusBadgeBrush}" CornerRadius="4" Padding="6,2" VerticalAlignment="Center" Margin="4,0,0,0">
+                                            <Border DockPanel.Dock="Right" Background="{Binding StatusBadgeBrush}" CornerRadius="4" Padding="6,2" VerticalAlignment="Center" Margin="8,0,0,0">
                                                 <TextBlock Text="{Binding StatusBadgeText}" Foreground="{Binding StatusTextBrush}" FontSize="10" FontWeight="SemiBold" />
                                             </Border>
                                             <StackPanel DockPanel.Dock="Left">
@@ -129,14 +130,6 @@
                                     <Button Click="OpenHandoff_Click" Content="Open handoff" />
                                 </WrapPanel>
                                 <TextBlock x:Name="AgentCommandPreview" Margin="0,4,0,0" Foreground="{StaticResource MutedBrush}" FontFamily="Consolas" />
-                            </StackPanel>
-                        </Border>
-
-                        <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="18">
-                            <StackPanel>
-                                <TextBlock FontSize="18" FontWeight="SemiBold" Text="Agent handoff" />
-                                <TextBlock Margin="0,4,0,0" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"
-                                           Text="AgentHub keeps .agenthub/handoff.md inside each repository. Use it to record the current task, completed work, next steps and relevant files before swapping agents." />
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -342,7 +335,7 @@
                     </Border>
 
                     <!-- Collapsible Split Terminal Output Panel (Per-Provider Feeds) -->
-                    <Border x:Name="RawOutputPanel" Grid.Row="2" Background="#111317" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12,10" Margin="0,8,0,0" Visibility="Collapsed">
+                    <Border x:Name="RawOutputPanel" Grid.Row="2" Background="#0A0F17" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12,10" Margin="0,8,0,0" Visibility="Collapsed">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -354,8 +347,8 @@
                                 <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBlock Text="Terminal Feeds:" FontWeight="SemiBold" FontSize="11" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,10,0" />
                                     <Button x:Name="FeedTabAntigravity" Click="FeedTab_Click" Tag="gemini" Content="✦ Antigravity" Padding="10,3" Margin="0,0,6,0" FontSize="11" FontWeight="SemiBold" Background="#2563eb" Foreground="White" />
-                                    <Button x:Name="FeedTabCodex" Click="FeedTab_Click" Tag="codex" Content="⚡ Codex" Padding="10,3" Margin="0,0,6,0" FontSize="11" FontWeight="SemiBold" Background="#27272a" Foreground="#a1a1aa" />
-                                    <Button x:Name="FeedTabClaude" Click="FeedTab_Click" Tag="claude" Content="✻ Claude Code" Padding="10,3" Margin="0,0,6,0" FontSize="11" FontWeight="SemiBold" Background="#27272a" Foreground="#a1a1aa" />
+                                    <Button x:Name="FeedTabCodex" Click="FeedTab_Click" Tag="codex" Content="⚡ Codex" Padding="10,3" Margin="0,0,6,0" FontSize="11" FontWeight="SemiBold" Background="#16202F" Foreground="#7E8CA6" />
+                                    <Button x:Name="FeedTabClaude" Click="FeedTab_Click" Tag="claude" Content="✻ Claude Code" Padding="10,3" Margin="0,0,6,0" FontSize="11" FontWeight="SemiBold" Background="#16202F" Foreground="#7E8CA6" />
                                 </StackPanel>
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                                     <Button Click="CopyCurrentFeed_Click" Content="📋 Copy" Padding="7,2" Margin="0,0,6,0" FontSize="10" ToolTip="Copy active terminal output to clipboard" />
@@ -365,7 +358,7 @@
                             </DockPanel>
 
                             <!-- Active Provider Feed Details & Monospace Output -->
-                            <Border Grid.Row="1" Background="#090a0f" BorderBrush="#27272a" BorderThickness="1" CornerRadius="4" Padding="10">
+                            <Border Grid.Row="1" Background="#070B12" BorderBrush="#1E2C40" BorderThickness="1" CornerRadius="4" Padding="10">
                                 <Grid>
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />

@@ -8,7 +8,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>AgentHub</AssemblyName>
     <RootNamespace>AgentHub</RootNamespace>
+    <ApplicationIcon>Assets\AgentHub.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Packed into the assembly so the window/taskbar icon resolves at runtime -->
+    <Resource Include="Assets\AppIcon.png" />
+    <Resource Include="Assets\HeaderLogo.png" />
+    <Resource Include="Assets\AgentHub.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <Using Include="System.IO" />

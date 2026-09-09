@@ -11,19 +11,50 @@ namespace AgentHub.Services.Usage;
 /// <c>/status</c> screen uses. The local OAuth access token is read from
 /// <c>~/.claude/.credentials.json</c> (written by Claude Code's login). This is the clean,
 /// non-scraping route to the live 5-hour / weekly limits.
+///
+/// The endpoint is IP-rate-limited (returns HTTP 429 when polled too often), so this reader is
+/// deliberately conservative: it caches the last good reading, refuses to call the network more
+/// than once per <see cref="MinNetworkInterval"/> (serving the cache in between), and — when a
+/// call does fail transiently (429 / network blip) — keeps returning the last good numbers rather
+/// than blanking the card. Only genuinely actionable states (login missing / expired) surface as
+/// failures.
 /// </summary>
 public static class ClaudeUsageReader
 {
     private const string Endpoint = "https://api.anthropic.com/api/oauth/usage";
     private const string SourceLabel = "Anthropic usage API";
 
+    /// <summary>Minimum gap between real network calls. The 5-hour / weekly windows move slowly,
+    /// so polling more often than this only risks a 429. Extra UI refreshes are served from cache.</summary>
+    private static readonly TimeSpan MinNetworkInterval = TimeSpan.FromSeconds(60);
+
+    /// <summary>Default back-off applied after a 429 when the server sends no <c>Retry-After</c>.</summary>
+    private static readonly TimeSpan RateLimitBackoff = TimeSpan.FromSeconds(90);
+
+    /// <summary>Cached numbers older than this are shown as <see cref="UsageCollectionStatus.Stale"/>
+    /// while a refresh keeps failing, so a long outage is visible rather than silently frozen.</summary>
+    private static readonly TimeSpan StaleAfter = TimeSpan.FromMinutes(15);
+
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
+
+    // Guards the cache + throttle fields. Held only around synchronous reads/writes, never across an await.
+    private static readonly object Gate = new();
+    private static UsageSnapshot? _cached;
+    private static DateTimeOffset _nextNetworkCall = DateTimeOffset.MinValue;
 
     public static async Task<UsageSnapshot> ReadAsync(
         UsageProviderDefinition provider,
         string? credentialsPath = null,
         CancellationToken cancellationToken = default)
     {
+        // If we have a recent good reading, serve it without touching the network. This keeps the
+        // card populated and, more importantly, stops aggressive UI polling from tripping the 429.
+        lock (Gate)
+        {
+            if (_cached is not null && DateTimeOffset.Now < _nextNetworkCall)
+                return ServeCache(provider);
+        }
+
         credentialsPath ??= Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", ".credentials.json");
 
@@ -58,23 +89,52 @@ public static class ClaudeUsageReader
             using var response = await Http.SendAsync(request, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
-            if (!response.IsSuccessStatusCode)
+            if (response.StatusCode == HttpStatusCode.TooManyRequests)
             {
-                var hint = response.StatusCode == HttpStatusCode.Unauthorized
-                    ? "Claude login expired — run `claude` to re-authenticate."
-                    : $"Usage API returned {(int)response.StatusCode}.";
-                return Fail(provider, UsageCollectionStatus.Failed, hint);
+                // Rate-limited. Back off (honouring Retry-After) and keep showing the last good numbers.
+                var backoff = response.Headers.RetryAfter?.Delta
+                    ?? (response.Headers.RetryAfter?.Date - DateTimeOffset.Now)
+                    ?? RateLimitBackoff;
+                Throttle(backoff);
+                return SoftFail(provider, "Rate-limited by the usage API — showing last reading.");
             }
 
-            return ParseUsage(body, provider);
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                // Actionable: the login is gone/expired. Surface it (don't mask with cache).
+                Throttle(MinNetworkInterval);
+                return Fail(provider, UsageCollectionStatus.Failed,
+                    "Claude login expired — run `claude` to re-authenticate.");
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                Throttle(RateLimitBackoff);
+                return SoftFail(provider, $"Usage API returned {(int)response.StatusCode} — showing last reading.");
+            }
+
+            var snapshot = ParseUsage(body, provider);
+            if (snapshot.Status == UsageCollectionStatus.Available)
+            {
+                lock (Gate)
+                {
+                    _cached = snapshot;
+                    _nextNetworkCall = DateTimeOffset.Now + MinNetworkInterval;
+                }
+                return snapshot;
+            }
+
+            // Parsed but unusable (shape changed): keep the last good numbers if we have them.
+            return SoftFail(provider, snapshot.Error ?? "Unexpected usage response.");
         }
         catch (OperationCanceledException)
         {
-            return Fail(provider, UsageCollectionStatus.TimedOut, "Usage API request timed out.");
+            return SoftFail(provider, "Usage API request timed out — showing last reading.", UsageCollectionStatus.TimedOut);
         }
         catch (Exception ex)
         {
-            return Fail(provider, UsageCollectionStatus.Failed, ex.Message);
+            Throttle(MinNetworkInterval);
+            return SoftFail(provider, $"{ex.Message} — showing last reading.");
         }
     }
 
@@ -119,6 +179,47 @@ public static class ClaudeUsageReader
 
         var remaining = Math.Clamp((100d - usedPercent) / 100d, 0d, 1d);
         limits.Add(new UsageLimit(name, remaining, resetsAt, null));
+    }
+
+    private static void Throttle(TimeSpan backoff)
+    {
+        // Clamp so a bogus Retry-After can't freeze us out for hours or spin us in a tight loop.
+        var delay = backoff < MinNetworkInterval ? MinNetworkInterval
+            : backoff > TimeSpan.FromMinutes(30) ? TimeSpan.FromMinutes(30)
+            : backoff;
+        lock (Gate) { _nextNetworkCall = DateTimeOffset.Now + delay; }
+    }
+
+    /// <summary>Returns the cached good reading (kept fresh in the UI). Used on the throttle fast-path.</summary>
+    private static UsageSnapshot ServeCache(UsageProviderDefinition provider)
+    {
+        var c = _cached!;
+        return c with { ProviderId = provider.Id, ProviderName = provider.Name };
+    }
+
+    /// <summary>
+    /// A refresh failed transiently. If we still have a good reading, keep showing its numbers —
+    /// marked <see cref="UsageCollectionStatus.Available"/> while recent, or <c>Stale</c> once it
+    /// ages past <see cref="StaleAfter"/> so a prolonged outage becomes visible. With no cache at
+    /// all, surface the underlying failure.
+    /// </summary>
+    private static UsageSnapshot SoftFail(
+        UsageProviderDefinition provider, string reason, UsageCollectionStatus hardStatus = UsageCollectionStatus.Failed)
+    {
+        UsageSnapshot? cached;
+        lock (Gate) { cached = _cached; }
+
+        if (cached is null)
+            return Fail(provider, hardStatus, reason);
+
+        var aged = DateTimeOffset.Now - cached.CapturedAt > StaleAfter;
+        return cached with
+        {
+            ProviderId = provider.Id,
+            ProviderName = provider.Name,
+            Status = aged ? UsageCollectionStatus.Stale : UsageCollectionStatus.Available,
+            Error = aged ? reason : null,
+        };
     }
 
     private static UsageSnapshot Fail(UsageProviderDefinition provider, UsageCollectionStatus status, string error) =>

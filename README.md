@@ -1,4 +1,8 @@
-# AgentHub
+<p align="center">
+  <img src="docs/AgentHub-icon.png" alt="AgentHub" width="128" height="128" />
+</p>
+
+<h1 align="center">AgentHub</h1>
 
 A Windows-first local control centre for working with multiple AI coding CLIs across GitHub repositories.
 
@@ -53,11 +57,19 @@ dotnet restore
 dotnet run --project .\src\AgentHub\AgentHub.csproj
 ```
 
-Release build:
+Release build (produces the branded `AgentHub.exe` with its icon on the shortcut and taskbar):
 
 ```powershell
 dotnet publish .\src\AgentHub\AgentHub.csproj -c Release -r win-x64 --self-contained false
 ```
+
+The executable is written to:
+
+```text
+src\AgentHub\bin\Release\net8.0-windows\win-x64\publish\AgentHub.exe
+```
+
+Right-click it → **Pin to taskbar**, or **Send to → Desktop** to create a shortcut. Both pick up the AgentHub icon automatically.
 
 ## Configuration
 

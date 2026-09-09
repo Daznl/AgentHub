@@ -65,6 +65,10 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         _isInitializing = true;
         try
         {
+            // Paint the control the terminal's dark colour so it never flashes the
+            // default white while the CoreWebView2 environment and page are loading.
+            WebView.DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x0A, 0x0F, 0x17);
+
             var env = await GetSharedEnvironmentAsync();
             await WebView.EnsureCoreWebView2Async(env);
 

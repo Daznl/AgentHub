@@ -10,21 +10,21 @@
             </Grid.RowDefinitions>
 
             <!-- Pane Top Control Bar -->
-            <Border Grid.Row="0" Background="#1f2937" BorderBrush="#374151" BorderThickness="0,0,0,1" Padding="8,6">
+            <Border Grid.Row="0" Background="#0E1622" BorderBrush="#1E2C40" BorderThickness="0,0,0,1" Padding="8,6">
                 <DockPanel>
                     <!-- Title -->
                     <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
-                        <TextBlock x:Name="PaneTitleText" Text="Terminal 1" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#60a5fa" FontSize="12" />
+                        <TextBlock x:Name="PaneTitleText" Text="Terminal 1" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#2FD4F5" FontSize="12" />
                     </StackPanel>
 
                     <!-- Actions & Controls -->
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                         <ComboBox x:Name="RepoCombo" Width="130" Margin="0,0,4,0" DisplayMemberPath="Name" ToolTip="Select working repository" />
                         <ComboBox x:Name="ShellCombo" Width="110" Margin="0,0,4,0" ToolTip="Select agent CLI or shell" />
-                        <Button Click="Launch_Click" Content="Launch" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#2563eb" FontSize="11" />
-                        <Button x:Name="MoveLeftBtn" Click="MoveLeft_Click" Content="◀" ToolTip="Move this terminal left" Background="#374151" Foreground="#9ca3af" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
-                        <Button x:Name="MoveRightBtn" Click="MoveRight_Click" Content="▶" ToolTip="Move this terminal right" Background="#374151" Foreground="#9ca3af" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
-                        <Button Click="Close_Click" Content="✕" ToolTip="Close this terminal session" Background="#374151" Foreground="#9ca3af" Padding="7,3" Margin="0" FontSize="11" FontWeight="Bold" />
+                        <Button Click="Launch_Click" Content="Launch" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#0E7490" FontSize="11" />
+                        <Button x:Name="MoveLeftBtn" Click="MoveLeft_Click" Content="◀" ToolTip="Move this terminal left" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
+                        <Button x:Name="MoveRightBtn" Click="MoveRight_Click" Content="▶" ToolTip="Move this terminal right" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
+                        <Button Click="Close_Click" Content="✕" ToolTip="Close this terminal session" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0" FontSize="11" FontWeight="Bold" />
                     </StackPanel>
                 </DockPanel>
             </Border>
