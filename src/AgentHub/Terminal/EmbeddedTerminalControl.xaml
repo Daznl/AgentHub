@@ -2,26 +2,9 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf">
+    <!-- Header (status dot, subtitle, Restart/Stop) lives in the outer TerminalPaneControl
+         so the whole pane shares a single top bar. This control is just the terminal surface. -->
     <Grid Background="#0A0F17">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
-
-        <Border Grid.Row="0" Background="#0E1622" BorderBrush="#1E2C40" BorderThickness="0,0,0,1" Padding="8,6">
-            <DockPanel>
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
-                    <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="#5A6B85" Margin="0,0,8,0" />
-                    <!-- Inner title removed: the outer pane header (TerminalPaneControl) already shows "Terminal N" -->
-                    <TextBlock x:Name="SubtitleText" Text="" Foreground="#7E8CA6" FontSize="11" VerticalAlignment="Center" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
-                    <Button x:Name="RestartBtn" Content="Restart" Click="RestartBtn_Click" Margin="0,0,6,0" Padding="8,2" FontSize="11" Visibility="Collapsed" />
-                    <Button x:Name="StopBtn" Content="Stop" Click="StopBtn_Click" Padding="8,2" FontSize="11" />
-                </StackPanel>
-            </DockPanel>
-        </Border>
-
-        <wv2:WebView2 Grid.Row="1" x:Name="WebView" />
+        <wv2:WebView2 x:Name="WebView" />
     </Grid>
 </UserControl>

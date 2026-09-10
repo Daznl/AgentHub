@@ -12,13 +12,15 @@
             <!-- Pane Top Control Bar -->
             <Border x:Name="PaneHeader" Grid.Row="0" Background="#0E1622" BorderBrush="#1E2C40" BorderThickness="0,0,0,1" Padding="8,6">
                 <DockPanel>
-                    <!-- Title -->
+                    <!-- Title + status (single merged bar for the whole pane) -->
                     <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
+                        <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="#5A6B85" Margin="0,0,8,0" VerticalAlignment="Center" />
                         <TextBlock x:Name="PaneTitleText" Text="Terminal 1" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#2FD4F5" FontSize="12" />
                         <!-- Shown when the agent CLI in this pane has stopped and is waiting for the user -->
                         <Border x:Name="AttentionBadge" Visibility="Collapsed" Background="#78350F" BorderBrush="#F59E0B" BorderThickness="1" CornerRadius="4" Padding="6,1" Margin="0,0,8,0" VerticalAlignment="Center">
                             <TextBlock Text="⏳ WAITING FOR YOU" Foreground="#FCD34D" FontSize="10" FontWeight="Bold" />
                         </Border>
+                        <TextBlock x:Name="SubtitleText" Text="" Foreground="#7E8CA6" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
 
                     <!-- Actions & Controls -->
@@ -29,6 +31,8 @@
                         <Button Click="LaunchInFolder_Click" Content="📂" ToolTip="Browse for a folder and launch the selected shell/agent there (not limited to registered repos)" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="MoveLeftBtn" Click="MoveLeft_Click" Content="◀" ToolTip="Move this terminal left" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="MoveRightBtn" Click="MoveRight_Click" Content="▶" ToolTip="Move this terminal right" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
+                        <Button x:Name="RestartBtn" Click="RestartBtn_Click" Content="Restart" ToolTip="Re-launch the last command in this pane" Visibility="Collapsed" Padding="8,3" Margin="0,0,4,0" FontSize="11" />
+                        <Button x:Name="StopBtn" Click="StopBtn_Click" Content="Stop" ToolTip="Stop the running session" Visibility="Collapsed" Padding="8,3" Margin="0,0,4,0" FontSize="11" />
                         <Button Click="Close_Click" Content="✕" ToolTip="Close this terminal session" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0" FontSize="11" FontWeight="Bold" />
                     </StackPanel>
                 </DockPanel>

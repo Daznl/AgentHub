@@ -1,19 +1,24 @@
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
-using Color = System.Windows.Media.Color;
 using UserControl = System.Windows.Controls.UserControl;
 
 namespace AgentHub.Terminal;
 
+/// <summary>Session lifecycle state, surfaced to the host pane for the status dot and Stop/Restart buttons.</summary>
+public enum TerminalStatus { Idle, Running, Stopped, Failed }
+
 public partial class EmbeddedTerminalControl : UserControl, IDisposable
 {
-    private static readonly SolidColorBrush RunningBrush = new(Color.FromRgb(34, 197, 94));
-    private static readonly SolidColorBrush StoppedBrush = new(Color.FromRgb(113, 113, 122));
-    private static readonly SolidColorBrush FailedBrush = new(Color.FromRgb(239, 68, 68));
+    /// <summary>Raised when the session state changes so the host pane can update the status dot and buttons.</summary>
+    public event Action<TerminalStatus>? StatusChanged;
+    /// <summary>Raised when the status subtitle (PID / working dir / exit info) changes.</summary>
+    public event Action<string>? SubtitleChanged;
+
+    private void RaiseStatus(TerminalStatus status) => StatusChanged?.Invoke(status);
+    private void RaiseSubtitle(string subtitle) => SubtitleChanged?.Invoke(subtitle);
 
     private ConPtySession? _session;
     private bool _isTerminalReady;
@@ -126,7 +131,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         }
         catch (Exception ex)
         {
-            SubtitleText.Text = "Failed to initialize terminal: " + ex.Message;
+            RaiseSubtitle("Failed to initialize terminal: " + ex.Message);
         }
         finally
         {
@@ -143,7 +148,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     {
         // Inner title intentionally not shown; the outer pane header already displays "Terminal N".
         _ = title;
-        SubtitleText.Text = subtitle;
+        RaiseSubtitle(subtitle);
     }
 
     public void StartSession(string commandLine, string workingDirectory, string title = "", string subtitle = "", bool isAgentSession = false)
@@ -171,9 +176,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
 
         try
         {
-            StatusDot.Fill = RunningBrush;
-            RestartBtn.Visibility = Visibility.Collapsed;
-            StopBtn.Visibility = Visibility.Visible;
+            RaiseStatus(TerminalStatus.Running);
 
             try
             {
@@ -204,15 +207,13 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
                 Dispatcher.InvokeAsync(() =>
                 {
                     StopAttentionTracking();
-                    StatusDot.Fill = exitCode == 0 ? StoppedBrush : FailedBrush;
-                    SubtitleText.Text = $"Exited (code {exitCode})";
-                    RestartBtn.Visibility = Visibility.Visible;
-                    StopBtn.Visibility = Visibility.Collapsed;
+                    RaiseStatus(exitCode == 0 ? TerminalStatus.Stopped : TerminalStatus.Failed);
+                    RaiseSubtitle($"Exited (code {exitCode})");
                     SessionExited?.Invoke();
                 });
             };
 
-            SubtitleText.Text = $"PID {_session.ProcessId} · {_workingDirectory}";
+            RaiseSubtitle($"PID {_session.ProcessId} · {_workingDirectory}");
             SessionStarted?.Invoke();
 
             // A freshly-launched TUI (e.g. Claude Code) reads the terminal size at
@@ -222,10 +223,8 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         }
         catch (Exception ex)
         {
-            StatusDot.Fill = FailedBrush;
-            SubtitleText.Text = "Launch failed: " + ex.Message;
-            RestartBtn.Visibility = Visibility.Visible;
-            StopBtn.Visibility = Visibility.Collapsed;
+            RaiseStatus(TerminalStatus.Failed);
+            RaiseSubtitle("Launch failed: " + ex.Message);
         }
     }
 
@@ -304,18 +303,18 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         if (wasWaiting) AttentionCleared?.Invoke();
     }
 
-    private void StopBtn_Click(object sender, RoutedEventArgs e)
+    /// <summary>Kills the running session. Called by the host pane's Stop button.</summary>
+    public void StopSession()
     {
         StopAttentionTracking();
         _session?.Kill();
-        StatusDot.Fill = StoppedBrush;
-        SubtitleText.Text = "Stopped by user";
-        RestartBtn.Visibility = Visibility.Visible;
-        StopBtn.Visibility = Visibility.Collapsed;
+        RaiseStatus(TerminalStatus.Stopped);
+        RaiseSubtitle("Stopped by user");
         SessionExited?.Invoke();
     }
 
-    private void RestartBtn_Click(object sender, RoutedEventArgs e)
+    /// <summary>Re-launches the last command. Called by the host pane's Restart button.</summary>
+    public void RestartSession()
     {
         if (!string.IsNullOrWhiteSpace(_commandLine))
         {

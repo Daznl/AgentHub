@@ -17,6 +17,12 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     private static readonly Color WorkingColor = Color.FromRgb(0x3A, 0x7B, 0xD5);        // soft blue border while the agent works
     private static readonly Color WorkingHeaderColor = Color.FromRgb(0x11, 0x24, 0x3E);  // blue-tinted header
 
+    // Status dot colours, mirrored from the embedded terminal's session state.
+    private static readonly SolidColorBrush IdleBrush = new(Color.FromRgb(0x5A, 0x6B, 0x85));
+    private static readonly SolidColorBrush RunningBrush = new(Color.FromRgb(34, 197, 94));
+    private static readonly SolidColorBrush StoppedBrush = new(Color.FromRgb(113, 113, 122));
+    private static readonly SolidColorBrush FailedBrush = new(Color.FromRgb(239, 68, 68));
+
     private SolidColorBrush? _workingBorderBrush;
     private SolidColorBrush? _workingHeaderBrush;
 
@@ -39,6 +45,8 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         InitializeComponent();
         Terminal.SessionStarted += () => SessionStateChanged?.Invoke();
         Terminal.SessionExited += () => SessionStateChanged?.Invoke();
+        Terminal.StatusChanged += OnTerminalStatusChanged;
+        Terminal.SubtitleChanged += subtitle => SubtitleText.Text = subtitle;
         Terminal.AttentionRequested += () =>
         {
             ShowAttention();
@@ -179,6 +187,38 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             ShellCombo.SelectedIndex = idx;
         }
     }
+
+    // Reflects the embedded terminal's session state onto the shared header (dot colour + Stop/Restart buttons).
+    private void OnTerminalStatusChanged(TerminalStatus status)
+    {
+        switch (status)
+        {
+            case TerminalStatus.Running:
+                StatusDot.Fill = RunningBrush;
+                RestartBtn.Visibility = Visibility.Collapsed;
+                StopBtn.Visibility = Visibility.Visible;
+                break;
+            case TerminalStatus.Stopped:
+                StatusDot.Fill = StoppedBrush;
+                RestartBtn.Visibility = Visibility.Visible;
+                StopBtn.Visibility = Visibility.Collapsed;
+                break;
+            case TerminalStatus.Failed:
+                StatusDot.Fill = FailedBrush;
+                RestartBtn.Visibility = Visibility.Visible;
+                StopBtn.Visibility = Visibility.Collapsed;
+                break;
+            default:
+                StatusDot.Fill = IdleBrush;
+                RestartBtn.Visibility = Visibility.Collapsed;
+                StopBtn.Visibility = Visibility.Collapsed;
+                break;
+        }
+    }
+
+    private void StopBtn_Click(object sender, RoutedEventArgs e) => Terminal.StopSession();
+
+    private void RestartBtn_Click(object sender, RoutedEventArgs e) => Terminal.RestartSession();
 
     private void Launch_Click(object sender, RoutedEventArgs e)
     {
