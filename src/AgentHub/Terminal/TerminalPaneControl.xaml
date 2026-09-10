@@ -2,7 +2,7 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:terminal="clr-namespace:AgentHub.Terminal">
-    <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" ClipToBounds="True">
+    <Border x:Name="PaneBorder" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" ClipToBounds="True">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -10,11 +10,15 @@
             </Grid.RowDefinitions>
 
             <!-- Pane Top Control Bar -->
-            <Border Grid.Row="0" Background="#0E1622" BorderBrush="#1E2C40" BorderThickness="0,0,0,1" Padding="8,6">
+            <Border x:Name="PaneHeader" Grid.Row="0" Background="#0E1622" BorderBrush="#1E2C40" BorderThickness="0,0,0,1" Padding="8,6">
                 <DockPanel>
                     <!-- Title -->
                     <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
                         <TextBlock x:Name="PaneTitleText" Text="Terminal 1" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#2FD4F5" FontSize="12" />
+                        <!-- Shown when the agent CLI in this pane has stopped and is waiting for the user -->
+                        <Border x:Name="AttentionBadge" Visibility="Collapsed" Background="#78350F" BorderBrush="#F59E0B" BorderThickness="1" CornerRadius="4" Padding="6,1" Margin="0,0,8,0" VerticalAlignment="Center">
+                            <TextBlock Text="⏳ WAITING FOR YOU" Foreground="#FCD34D" FontSize="10" FontWeight="Bold" />
+                        </Border>
                     </StackPanel>
 
                     <!-- Actions & Controls -->

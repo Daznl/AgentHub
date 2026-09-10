@@ -11,7 +11,7 @@ AgentHub treats the **repository as the workspace** and the AI CLI as an interch
 ## What v0.1 does
 
 - Register existing local Git repositories.
-- **Local Repository Auto-Discovery:** 1-click folder scanner that auto-detects existing local Git clones across your system and links them directly to their remote GitHub counterparts.
+- **Local Repository Auto-Discovery:** **🔍 Scan folder for repos…** opens a folder picker, searches the chosen folder two levels deep for Git clones, and links them to their remote GitHub counterparts. The picker opens in front of AgentHub and remembers the last folder you scanned (`lastScanFolder` in `settings.json`).
 - **Real-Time Sync Status, In-App Pull & Push:** Checks local clone existence, branch, uncommitted changes, and ahead/behind counts with color-coded badges (`✓ Up to date`, `⇣ Behind`, `⇡ Ahead`, `✎ Modified`). Supports 1-click fast-forward pull (`⇣ Pull`) and 1-click push (`⬆ Push`) directly from the remote repository cards.
 - **GitHub Repository Browser:** View, search, and filter every remote repository the signed-in account can see (own, shared, and organisation) via your local GitHub CLI (`gh`). Repos stream in page by page and are grouped by what you are allowed to do: your own, organisation repos you can push to, organisation repos you can only clone or pull, and archived. Each card shows the owner and your GitHub role (Admin, Maintain, Push, or Read-only), the Push button only appears where GitHub will accept it, and anyone can clone anything they can see. Filter by access, visibility (private/public) or sync status (up-to-date, needs pull, dirty), and 1-click clone & register directly into AgentHub.
 - Clone GitHub repositories by HTTPS or SSH URL.
@@ -20,6 +20,7 @@ AgentHub treats the **repository as the workspace** and the AI CLI as an interch
 - Open the repository folder or GitHub remote.
 - **Embedded Dynamic Multi-Terminal Cockpit:** Run multiple interactive CLI sessions (Antigravity, Claude Code, Codex, PowerShell, Cmd) side-by-side inside the app using Windows ConPTY + xterm.js. Supports 3+ concurrent terminal panes with draggable splitters, a 1-click **➕ Add Terminal** button, individual **✕ Close** buttons, synchronized working directory selection, and clean ConPTY lifecycle management without duplicated keystrokes or external window sprawl.
 - **PowerShell in any folder:** The Cockpit's **📂 PowerShell in Folder…** button opens the Windows folder picker and starts a plain PowerShell session in the chosen directory in a new pane, so you can work outside registered repositories. Each pane also has a 📂 button that launches that pane's selected shell or agent CLI in a folder you pick. The last folder is remembered in `settings.json`.
+- **Working and waiting-for-you indicators:** While a coding CLI in a pane is actively producing output, the pane border and header breathe a soft blue. When it finishes a burst of work and goes quiet, or rings the terminal bell, that pane pulses amber and shows a **⏳ WAITING FOR YOU** badge until you type. If AgentHub is in the background the taskbar button flashes too. Only agent CLI sessions are watched, never plain PowerShell or Cmd, and the alert fires once per turn. Tune or disable with `attentionIdleSeconds` and `attentionFlashEnabled` in `settings.json`.
 - Launch **Codex**, **Claude Code**, or **Antigravity** in Windows Terminal or directly into specific Cockpit terminal panes (T1, T2, T3).
 - Display current Codex, Claude and Antigravity usage limits in the Cockpit. AgentHub reads each provider from its cleanest local source — Codex from its on-disk session `rate_limits`, Claude from its usage endpoint, Antigravity from `agy -p /usage` — rather than scraping interactive TUIs. Cards show **percentage left**, reset time, source and refresh state on a user-set polling interval, without storing provider credentials.
 - Keep agent commands configurable in `%APPDATA%\AgentHub\settings.json`.
@@ -108,9 +109,16 @@ Default agent definitions:
   ],
   "usageRefreshMinutes": 2,
   "preferWindowsTerminal": true,
-  "animatedBackground": true
+  "animatedBackground": true,
+  "hiddenUsageCards": [],
+  "attentionFlashEnabled": true,
+  "attentionIdleSeconds": 3
 }
 ```
+
+`attentionFlashEnabled` and `attentionIdleSeconds` control the waiting-for-you alert on Cockpit panes. A pane is considered waiting when its coding CLI produced at least 1.5 seconds of continuous output after your last keystroke and has then been silent for `attentionIdleSeconds`, or when it rings the terminal bell. Output within 0.75 seconds of a keystroke is treated as echo of your own typing and never counts as work.
+
+The **📊 Usage** button in the header shows or hides the whole usage section above the terminals; the choice is remembered in `showUsagePanel`. Each usage card in the Cockpit has a **✕** to close it. Closed cards become small **+ Name** chips beside the "Usage limits" title; click a chip to open the card again. The choice is remembered in `hiddenUsageCards`.
 
 `animatedBackground` controls the drifting glow, scrolling grid and scan sweep behind the main window. Set it to `false` for a static backdrop (reduced motion, Remote Desktop, or battery saving); the dark gradient and glow layers still render, they just stop moving.
 

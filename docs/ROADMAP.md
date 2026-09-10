@@ -61,7 +61,7 @@
 - **Stage 1 (Completed in v0.1.5):** Embedded dynamic multi-terminal multiplexer via Windows ConPTY + WebView2/xterm.js. Side-by-side terminal panes for concurrent interactive sessions with 3+ default terminals, dynamic "➕ Add Terminal" pane creation, individual "✕ Close" controls, draggable splitters, and robust lifecycle idempotency preventing input duplication.
 - **Stage 1b (Completed in v0.1.6):** Open a shell in any folder: Cockpit toolbar "📂 PowerShell in Folder…" (folder picker → plain PowerShell in a new pane, idle pane reused when all 6 exist) and a per-pane 📂 button launching that pane's selected shell/agent in a chosen folder (confirms before replacing a running session). Last folder persisted as `LastTerminalFolder` in settings.
 - **Stage 2 (Next):** Interactive CLI compatibility testing & ANSI escape sequence verification across Antigravity (`agy`), Claude Code (`claude`), and Codex (`codex`).
-- **Stage 3:** Attention detector & alerting engine (flashing badges, bell chime, and input-idle detection when an agent awaits user confirmation).
+- **Stage 3 (In progress):** Attention detector & alerting engine. Shipped: `AttentionDetector` (input-idle after a work burst, terminal bell) armed only for agent CLI sessions, amber pane pulse plus a persistent **⏳ WAITING FOR YOU** badge, and taskbar flashing when AgentHub is backgrounded; thresholds in `AttentionIdleSeconds` / `AttentionFlashEnabled`. Remaining: bell chime, `[y/N]`-style prompt heuristics, Windows Toast.
 - **Stage 4:** Automated Git worktree isolation per task with cross-agent handoff orchestration.
 
 ## Later

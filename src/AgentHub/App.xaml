@@ -208,12 +208,14 @@
                             <ToggleButton Template="{StaticResource ComboToggleChrome}"
                                           Focusable="False" ClickMode="Press"
                                           IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" />
-                            <ContentPresenter IsHitTestVisible="False"
-                                              Content="{TemplateBinding SelectionBoxItem}"
-                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
-                                              Margin="{TemplateBinding Padding}"
-                                              TextElement.Foreground="{StaticResource TextBrush}"
-                                              VerticalAlignment="Center" HorizontalAlignment="Left" />
+                            <!-- Clipped so long selections stop before the 22px arrow column instead of running under it -->
+                            <Border IsHitTestVisible="False" ClipToBounds="True" Margin="0,0,26,0">
+                                <ContentPresenter Content="{TemplateBinding SelectionBoxItem}"
+                                                  ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                  Margin="{TemplateBinding Padding}"
+                                                  TextElement.Foreground="{StaticResource TextBrush}"
+                                                  VerticalAlignment="Center" HorizontalAlignment="Left" />
+                            </Border>
                             <Popup Placement="Bottom" Focusable="False" AllowsTransparency="True"
                                    IsOpen="{TemplateBinding IsDropDownOpen}" PopupAnimation="Slide">
                                 <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"

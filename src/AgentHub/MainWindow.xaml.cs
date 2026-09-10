@@ -22,6 +22,8 @@ public sealed class ShellOption
 {
     public required string DisplayName { get; init; }
     public required string Command { get; init; }
+    /// <summary>True for coding agent CLIs (Claude Code, Codex, ...); false for plain shells. Drives attention detection.</summary>
+    public bool IsAgent { get; init; }
     public override string ToString() => DisplayName;
 }
 
@@ -62,6 +64,8 @@ public partial class MainWindow : Window
     private string _selectedFeedProviderId = "gemini";
     private bool _showRawAnsi;
     private DateTimeOffset? _lastUsageRefresh;
+    // Every provider card from the latest refresh, before the user's hidden-card filter is applied.
+    private List<UsageProviderDisplay> _usageDisplays = [];
     private bool _usageRefreshInProgress;
 
     public MainWindow()
@@ -100,6 +104,7 @@ public partial class MainWindow : Window
         Activate();
         _settings = await _settingsService.LoadAsync();
         Backdrop.SetAnimated(_settings.AnimatedBackground);
+        ApplyUsagePanelVisibility();
 
         if (_settings.Repositories.Count == 0)
         {
@@ -186,7 +191,7 @@ public partial class MainWindow : Window
         foreach (var agent in _settings.Agents.Where(a => a.Enabled))
         {
             var cmd = string.IsNullOrWhiteSpace(agent.Arguments) ? agent.Command : $"{agent.Command} {agent.Arguments}";
-            _shellOptions.Add(new ShellOption { DisplayName = agent.Name, Command = cmd });
+            _shellOptions.Add(new ShellOption { DisplayName = agent.Name, Command = cmd, IsAgent = true });
         }
 
         for (int i = 0; i < _panes.Count; i++)
@@ -202,6 +207,8 @@ public partial class MainWindow : Window
         pane.MoveRequested += OnPaneMoveRequested;
         pane.FolderLaunchRequested += OnPaneFolderLaunchRequested;
         pane.SessionStateChanged += UpdateUsagePollingInterval;
+        pane.AttentionRequested += OnPaneAttentionRequested;
+        pane.ConfigureAttention(_settings.AttentionFlashEnabled, _settings.AttentionIdleSeconds);
         pane.UpdateRepositories(_settings.Repositories, defaultRepoIndex);
         pane.UpdateShellOptions(_shellOptions, defaultShellIndex);
         return pane;
@@ -246,13 +253,15 @@ public partial class MainWindow : Window
             {
                 TerminalsContainerGrid.ColumnDefinitions.Add(new ColumnDefinition
                 {
-                    Width = new GridLength(6, GridUnitType.Pixel)
+                    Width = new GridLength(10, GridUnitType.Pixel)
                 });
 
+                // Transparent (not null) so the animated backdrop shows between panes while the
+                // splitter stays hit-testable for dragging.
                 var splitter = new GridSplitter
                 {
                     HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
-                    Background = new SolidColorBrush(Color.FromRgb(30, 44, 64)),
+                    Background = System.Windows.Media.Brushes.Transparent,
                     Cursor = System.Windows.Input.Cursors.SizeWE
                 };
 
@@ -299,7 +308,7 @@ public partial class MainWindow : Window
             SelectedPath = start,
             ShowNewFolderButton = true
         };
-        if (dialog.ShowDialog() != Forms.DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath))
+        if (dialog.ShowDialog(new Win32Owner(this)) != Forms.DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath))
             return null;
 
         var folder = dialog.SelectedPath;
@@ -376,7 +385,7 @@ public partial class MainWindow : Window
         if (folder is null) return;
 
         var name = FolderDisplayName(folder);
-        pane.StartSession(shell?.Command ?? PlainPowerShellCommand, folder, $"Terminal {pane.PaneIndex} · {shellName}", name);
+        pane.StartSession(shell?.Command ?? PlainPowerShellCommand, folder, $"Terminal {pane.PaneIndex} · {shellName}", name, shell?.IsAgent ?? false);
         StatusText.Text = $"Launched {shellName} in {folder} (Terminal {pane.PaneIndex}).";
     }
 
@@ -423,14 +432,25 @@ public partial class MainWindow : Window
 
     private async void ScanFolder_Click(object sender, RoutedEventArgs e)
     {
+        var start = !string.IsNullOrWhiteSpace(_settings.LastScanFolder) && Directory.Exists(_settings.LastScanFolder)
+            ? _settings.LastScanFolder
+            : Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+
         using var dialog = new Forms.FolderBrowserDialog
         {
-            Description = "Select a folder to scan for Git repositories (e.g. Desktop, Projects)",
+            Description = "Choose the folder to scan for Git repositories (its sub-folders are searched two levels deep)",
             UseDescriptionForTitle = true,
-            SelectedPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+            SelectedPath = start,
             ShowNewFolderButton = false
         };
-        if (dialog.ShowDialog() != Forms.DialogResult.OK) return;
+        // Owned by the main window so the picker always opens in front of it.
+        if (dialog.ShowDialog(new Win32Owner(this)) != Forms.DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath)) return;
+
+        if (!string.Equals(_settings.LastScanFolder, dialog.SelectedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            _settings.LastScanFolder = dialog.SelectedPath;
+            await _settingsService.SaveAsync(_settings);
+        }
 
         StatusText.Text = $"Scanning {dialog.SelectedPath} for Git repositories…";
         var discovered = await _discovery.ScanFolderAsync(dialog.SelectedPath, maxDepth: 2);
@@ -667,6 +687,8 @@ public partial class MainWindow : Window
         RepoViewGrid.Visibility = Visibility.Visible;
         GitHubViewGrid.Visibility = Visibility.Collapsed;
         CockpitViewGrid.Visibility = Visibility.Collapsed;
+        CockpitHeaderInfo.Visibility = Visibility.Collapsed;
+        CockpitHeaderActions.Visibility = Visibility.Collapsed;
         ManageBar.Visibility = Visibility.Visible;
         ManageReposBtn.Background = NavActiveBrush;
         ViewCockpitBtn.Background = NavInactiveBrush;
@@ -679,6 +701,8 @@ public partial class MainWindow : Window
         RepoViewGrid.Visibility = Visibility.Collapsed;
         GitHubViewGrid.Visibility = Visibility.Visible;
         CockpitViewGrid.Visibility = Visibility.Collapsed;
+        CockpitHeaderInfo.Visibility = Visibility.Collapsed;
+        CockpitHeaderActions.Visibility = Visibility.Collapsed;
         ManageBar.Visibility = Visibility.Visible;
         ManageReposBtn.Background = NavActiveBrush;
         ViewCockpitBtn.Background = NavInactiveBrush;
@@ -705,6 +729,8 @@ public partial class MainWindow : Window
         RepoViewGrid.Visibility = Visibility.Collapsed;
         GitHubViewGrid.Visibility = Visibility.Collapsed;
         CockpitViewGrid.Visibility = Visibility.Visible;
+        CockpitHeaderInfo.Visibility = Visibility.Visible;
+        CockpitHeaderActions.Visibility = Visibility.Visible;
         ManageBar.Visibility = Visibility.Collapsed;
         ViewCockpitBtn.Background = NavActiveBrush;
         ManageReposBtn.Background = NavInactiveBrush;
@@ -726,7 +752,7 @@ public partial class MainWindow : Window
         var activeProviders = _settings.UsageProviders.Where(p => p.Enabled).ToList();
         if (activeProviders.Count == 0)
         {
-            UsageCards.ItemsSource = null;
+            ApplyUsageCards([]);
             UsageCards.Visibility = Visibility.Collapsed;
             UsageEmptyNotice.Visibility = Visibility.Visible;
             UsageRefreshStatusText.Text = "No active providers configured";
@@ -738,13 +764,13 @@ public partial class MainWindow : Window
         UsageCards.Visibility = Visibility.Visible;
         UsageEmptyNotice.Visibility = Visibility.Collapsed;
 
-        if (UsageCards.ItemsSource is null)
+        if (_usageDisplays.Count == 0)
         {
-            UsageCards.ItemsSource = activeProviders
+            ApplyUsageCards(activeProviders
                 .Select(provider => ToUsageDisplay(new UsageSnapshot(
                     provider.Id, provider.Name, DateTimeOffset.Now, [], provider.Command,
                     UsageCollectionStatus.Failed, "Refreshing usage...")))
-                .ToList();
+                .ToList());
         }
 
         try
@@ -768,7 +794,7 @@ public partial class MainWindow : Window
                 };
             }).ToList();
 
-            UsageCards.ItemsSource = displaySnapshots.Select(ToUsageDisplay).ToList();
+            ApplyUsageCards(displaySnapshots.Select(ToUsageDisplay).ToList());
             _lastUsageRefresh = DateTimeOffset.Now;
 
             var available = snapshots.Count(snapshot => snapshot.Status == UsageCollectionStatus.Available);
@@ -1011,6 +1037,7 @@ public partial class MainWindow : Window
 
         return new UsageProviderDisplay
         {
+            ProviderId = snapshot.ProviderId,
             Name = snapshot.ProviderName,
             StatusText = status,
             SourceText = detail,
@@ -1021,6 +1048,51 @@ public partial class MainWindow : Window
 
     private static string Truncate(string value, int maxLength) =>
         value.Length <= maxLength ? value : value[..(maxLength - 3)] + "...";
+
+    private async void ToggleUsage_Click(object sender, RoutedEventArgs e)
+    {
+        _settings.ShowUsagePanel = !_settings.ShowUsagePanel;
+        ApplyUsagePanelVisibility();
+        await _settingsService.SaveAsync(_settings);
+    }
+
+    private void ApplyUsagePanelVisibility()
+    {
+        var show = _settings.ShowUsagePanel;
+        UsageSection.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        ToggleUsageBtn.Background = show ? NavActiveBrush : NavInactiveBrush;
+    }
+
+    // Splits the latest provider cards into the visible set and the closed set (shown as reopen chips).
+    private void ApplyUsageCards(List<UsageProviderDisplay> displays)
+    {
+        _usageDisplays = displays;
+        var hidden = new HashSet<string>(_settings.HiddenUsageCards, StringComparer.OrdinalIgnoreCase);
+        UsageCards.ItemsSource = displays.Where(d => !hidden.Contains(d.ProviderId)).ToList();
+        HiddenUsageChips.ItemsSource = displays.Where(d => hidden.Contains(d.ProviderId)).ToList();
+    }
+
+    private async void HideUsageCard_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string providerId }) return;
+
+        if (!_settings.HiddenUsageCards.Contains(providerId, StringComparer.OrdinalIgnoreCase))
+        {
+            _settings.HiddenUsageCards.Add(providerId);
+        }
+
+        ApplyUsageCards(_usageDisplays);
+        await _settingsService.SaveAsync(_settings);
+    }
+
+    private async void ShowUsageCard_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string providerId }) return;
+
+        _settings.HiddenUsageCards.RemoveAll(id => string.Equals(id, providerId, StringComparison.OrdinalIgnoreCase));
+        ApplyUsageCards(_usageDisplays);
+        await _settingsService.SaveAsync(_settings);
+    }
 
     private async Task LoadGitHubReposAsync(bool forceRefresh = false)
     {
@@ -1603,8 +1675,59 @@ public partial class MainWindow : Window
 
         var target = _panes[Math.Min(paneIndex, _panes.Count - 1)];
         var cmd = string.IsNullOrWhiteSpace(agent.Arguments) ? agent.Command : $"{agent.Command} {agent.Arguments}";
-        target.StartSession(cmd, _selectedRepo.LocalPath, $"Terminal {target.PaneIndex} · {agent.Name}", _selectedRepo.Name);
+        target.StartSession(cmd, _selectedRepo.LocalPath, $"Terminal {target.PaneIndex} · {agent.Name}", _selectedRepo.Name, isAgentSession: true);
         StatusText.Text = $"Launched {agent.Name} in Terminal {target.PaneIndex}";
+    }
+
+    // A coding CLI in a pane has gone quiet after working: the pane flashes itself; here we surface it
+    // app-wide and flash the taskbar button when AgentHub is not the foreground window.
+    private void OnPaneAttentionRequested(TerminalPaneControl pane)
+    {
+        StatusText.Text = $"Terminal {pane.PaneIndex} is waiting for your input.";
+        if (!IsActive)
+        {
+            FlashTaskbarUntilForeground();
+        }
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct FLASHWINFO
+    {
+        public uint cbSize;
+        public IntPtr hwnd;
+        public uint dwFlags;
+        public uint uCount;
+        public uint dwTimeout;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool FlashWindowEx(ref FLASHWINFO pwfi);
+
+    private void FlashTaskbarUntilForeground()
+    {
+        const uint FLASHW_TRAY = 0x2;
+        const uint FLASHW_TIMERNOFG = 0xC;
+        var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero) return;
+
+        var info = new FLASHWINFO
+        {
+            cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<FLASHWINFO>(),
+            hwnd = handle,
+            dwFlags = FLASHW_TRAY | FLASHW_TIMERNOFG,
+            uCount = 0,
+            dwTimeout = 0
+        };
+        FlashWindowEx(ref info);
+    }
+
+    /// <summary>Lets WinForms dialogs (folder picker) treat this WPF window as their owner, so they open in front of it.</summary>
+    private sealed class Win32Owner : Forms.IWin32Window
+    {
+        private readonly Window _window;
+        public Win32Owner(Window window) => _window = window;
+        public IntPtr Handle => new System.Windows.Interop.WindowInteropHelper(_window).Handle;
     }
 
     protected override void OnClosed(EventArgs e)

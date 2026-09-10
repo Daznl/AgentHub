@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using Color = System.Windows.Media.Color;
 using UserControl = System.Windows.Controls.UserControl;
@@ -29,11 +30,44 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     public event Action? SessionExited;
     public bool IsRunning => _session?.IsRunning == true;
 
+    // Attention detection: only armed for coding-CLI sessions (not plain shells).
+    private readonly AttentionDetector _attention = new();
+    private readonly DispatcherTimer _attentionTimer;
+
+    /// <summary>Raised once when the agent CLI stops working and appears to be waiting for the user.</summary>
+    public event Action? AttentionRequested;
+    /// <summary>Raised when the user responds (types) after attention was requested, or the session ends.</summary>
+    public event Action? AttentionCleared;
+    /// <summary>Raised with true while the agent CLI is actively producing output, false when it stops.</summary>
+    public event Action<bool>? WorkingStateChanged;
+    private bool _working;
+
+    /// <summary>True when the running command is a coding agent CLI rather than a plain shell.</summary>
+    public bool IsAgentSession { get; set; }
+    public bool AttentionEnabled { get; set; } = true;
+    public double AttentionIdleSeconds
+    {
+        get => _attention.IdleThreshold.TotalSeconds;
+        set => _attention.IdleThreshold = TimeSpan.FromSeconds(Math.Max(0.5, value));
+    }
+
     public EmbeddedTerminalControl()
     {
         InitializeComponent();
         Loaded += EmbeddedTerminalControl_Loaded;
         Unloaded += EmbeddedTerminalControl_Unloaded;
+
+        _attentionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _attentionTimer.Tick += (_, _) =>
+        {
+            var now = DateTimeOffset.Now;
+            var raise = _attention.Tick(now);
+            SetWorking(_attention.IsWorking(now));
+            if (raise)
+            {
+                AttentionRequested?.Invoke();
+            }
+        };
     }
 
     private static Task<CoreWebView2Environment>? _sharedEnvTask;
@@ -111,10 +145,11 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         SubtitleText.Text = subtitle;
     }
 
-    public void StartSession(string commandLine, string workingDirectory, string title = "", string subtitle = "")
+    public void StartSession(string commandLine, string workingDirectory, string title = "", string subtitle = "", bool isAgentSession = false)
     {
         _commandLine = commandLine;
         _workingDirectory = workingDirectory;
+        IsAgentSession = isAgentSession;
         SetHeader(title, subtitle);
 
         if (_isTerminalReady)
@@ -146,10 +181,15 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
             catch { }
 
             _session = ConPtySession.Start(_commandLine, _workingDirectory, _cols, _rows);
+
+            _attention.OnSessionStarted(DateTimeOffset.Now);
+            _attentionTimer.IsEnabled = IsAgentSession && AttentionEnabled;
+
             _session.OutputDataReceived += text =>
             {
                 Dispatcher.InvokeAsync(() =>
                 {
+                    _attention.OnOutput(text, DateTimeOffset.Now);
                     try
                     {
                         WebView.CoreWebView2?.PostWebMessageAsString(text);
@@ -162,6 +202,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
             {
                 Dispatcher.InvokeAsync(() =>
                 {
+                    StopAttentionTracking();
                     StatusDot.Fill = exitCode == 0 ? StoppedBrush : FailedBrush;
                     SubtitleText.Text = $"Exited (code {exitCode})";
                     RestartBtn.Visibility = Visibility.Visible;
@@ -232,7 +273,13 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
                     if (root.TryGetProperty("data", out var dataProp))
                     {
                         var data = dataProp.GetString();
-                        if (data != null) _session?.Write(data);
+                        if (data != null)
+                        {
+                            var wasWaiting = _attention.IsWaiting;
+                            _attention.OnUserInput(DateTimeOffset.Now);
+                            if (wasWaiting) AttentionCleared?.Invoke();
+                            _session?.Write(data);
+                        }
                     }
                     break;
             }
@@ -240,8 +287,25 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         catch { }
     }
 
+    private void SetWorking(bool working)
+    {
+        if (working == _working) return;
+        _working = working;
+        WorkingStateChanged?.Invoke(working);
+    }
+
+    private void StopAttentionTracking()
+    {
+        _attentionTimer.Stop();
+        SetWorking(false);
+        var wasWaiting = _attention.IsWaiting;
+        _attention.Reset();
+        if (wasWaiting) AttentionCleared?.Invoke();
+    }
+
     private void StopBtn_Click(object sender, RoutedEventArgs e)
     {
+        StopAttentionTracking();
         _session?.Kill();
         StatusDot.Fill = StoppedBrush;
         SubtitleText.Text = "Stopped by user";
@@ -260,6 +324,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
 
     public void Dispose()
     {
+        _attentionTimer.Stop();
         Loaded -= EmbeddedTerminalControl_Loaded;
         if (WebView.CoreWebView2 != null)
         {

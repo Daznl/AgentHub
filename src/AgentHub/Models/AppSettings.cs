@@ -43,6 +43,24 @@ public sealed class AppSettings
     /// </summary>
     public bool AnimatedBackground { get; set; } = true;
 
+    /// <summary>Whether the usage section above the terminals is shown. Toggled by the 📊 Usage header button.</summary>
+    public bool ShowUsagePanel { get; set; } = true;
+
+    /// <summary>Provider ids whose usage card the user has closed in the Cockpit. Reopen from the chips beside "Usage limits".</summary>
+    public List<string> HiddenUsageCards { get; set; } = [];
+
+    /// <summary>
+    /// Flash a Cockpit pane (and the taskbar button when AgentHub is in the background) the first time
+    /// a coding CLI in that pane stops working and waits for input. Plain shells are never tracked.
+    /// </summary>
+    public bool AttentionFlashEnabled { get; set; } = true;
+
+    /// <summary>Seconds of output silence after a burst of agent activity before the pane counts as waiting.</summary>
+    public double AttentionIdleSeconds { get; set; } = 3;
+
     /// <summary>Last folder chosen for "open a shell in a folder"; the picker starts here next time.</summary>
     public string? LastTerminalFolder { get; set; }
+
+    /// <summary>Last folder chosen for "Scan folder for repos"; the picker starts here next time.</summary>
+    public string? LastScanFolder { get; set; }
 }
