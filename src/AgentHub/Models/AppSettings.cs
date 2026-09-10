@@ -37,6 +37,12 @@ public sealed class AppSettings
 
     public bool PreferWindowsTerminal { get; set; } = true;
 
+    /// <summary>
+    /// Drift/scan motion of the main window backdrop. Set false for a static backdrop
+    /// (reduced motion, remote desktop, or low-power laptops). The glow layers still render.
+    /// </summary>
+    public bool AnimatedBackground { get; set; } = true;
+
     /// <summary>Last folder chosen for "open a shell in a folder"; the picker starts here next time.</summary>
     public string? LastTerminalFolder { get; set; }
 }

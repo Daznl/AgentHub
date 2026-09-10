@@ -107,9 +107,12 @@ Default agent definitions:
     { "id": "claude", "name": "Claude Code", "command": "claude", "arguments": ["/status"], "enabled": true }
   ],
   "usageRefreshMinutes": 2,
-  "preferWindowsTerminal": true
+  "preferWindowsTerminal": true,
+  "animatedBackground": true
 }
 ```
+
+`animatedBackground` controls the drifting glow, scrolling grid and scan sweep behind the main window. Set it to `false` for a static backdrop (reduced motion, Remote Desktop, or battery saving); the dark gradient and glow layers still render, they just stop moving.
 
 You can add flags in `arguments`. For example, if you deliberately want an Antigravity profile that skips permission prompts, create a second agent definition rather than hard-coding it into AgentHub.
 

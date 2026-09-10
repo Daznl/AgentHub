@@ -6,8 +6,9 @@
         <!-- Futuristic AI palette, tuned to the AgentHub logo:
              deep blue-black surfaces, electric-cyan primary accent (robot),
              with mint (OpenAI) and orange (crab) available as neon highlights. -->
-        <SolidColorBrush x:Key="PanelBrush" Color="#0C121C" />
-        <SolidColorBrush x:Key="CardBrush" Color="#121A27" />
+        <!-- Panels and cards are slightly translucent so the animated backdrop glows through them. -->
+        <SolidColorBrush x:Key="PanelBrush" Color="#E00C121C" />
+        <SolidColorBrush x:Key="CardBrush" Color="#E6121A27" />
         <SolidColorBrush x:Key="BorderBrush" Color="#1E2C40" />
         <SolidColorBrush x:Key="TextBrush" Color="#E8F1FB" />
         <SolidColorBrush x:Key="MutedBrush" Color="#7E8CA6" />

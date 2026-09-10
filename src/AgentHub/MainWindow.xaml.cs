@@ -99,6 +99,7 @@ public partial class MainWindow : Window
     {
         Activate();
         _settings = await _settingsService.LoadAsync();
+        Backdrop.SetAnimated(_settings.AnimatedBackground);
 
         if (_settings.Repositories.Count == 0)
         {

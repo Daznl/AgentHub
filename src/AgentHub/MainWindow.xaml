@@ -2,8 +2,13 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:terminal="clr-namespace:AgentHub.Terminal"
+        xmlns:controls="clr-namespace:AgentHub.Controls"
         Title="AgentHub - Repository &amp; Agent Cockpit" Height="860" Width="1340" MinHeight="680" MinWidth="1020"
         Icon="Assets/AppIcon.png">
+    <Grid>
+    <!-- Animated deep-space backdrop. Sits behind all content and ignores input. -->
+    <controls:AnimatedBackground x:Name="Backdrop" />
+
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -451,5 +456,6 @@
         <Border Grid.Row="2" Margin="0,14,0,0" Padding="10,6" Background="{StaticResource PanelBrush}" CornerRadius="6">
             <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedBrush}" Text="Ready" />
         </Border>
+    </Grid>
     </Grid>
 </Window>
