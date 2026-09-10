@@ -73,7 +73,26 @@ public partial class MainWindow : Window
         _usageService = new UsageService(_runner);
         _usageRefreshTimer.Tick += async (_, _) => await RefreshUsageAsync();
         Loaded += MainWindow_Loaded;
+        SourceInitialized += (_, _) => ApplyDarkTitleBar();
         AgentCombo.SelectionChanged += (_, _) => UpdateAgentPreview();
+    }
+
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+    // Paint the native Windows title bar dark to match the app theme, instead of
+    // the default light chrome. DWMWA_USE_IMMERSIVE_DARK_MODE = 20 (19 on Win10 1809).
+    private void ApplyDarkTitleBar()
+    {
+        try
+        {
+            var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            if (hwnd == IntPtr.Zero) return;
+            int useDark = 1;
+            if (DwmSetWindowAttribute(hwnd, 20, ref useDark, sizeof(int)) != 0)
+                DwmSetWindowAttribute(hwnd, 19, ref useDark, sizeof(int));
+        }
+        catch { /* non-fatal: title bar stays default if DWM call is unavailable */ }
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -232,7 +251,7 @@ public partial class MainWindow : Window
                 var splitter = new GridSplitter
                 {
                     HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
-                    Background = new SolidColorBrush(Color.FromRgb(39, 39, 42)),
+                    Background = new SolidColorBrush(Color.FromRgb(30, 44, 64)),
                     Cursor = System.Windows.Input.Cursors.SizeWE
                 };
 
@@ -827,10 +846,10 @@ public partial class MainWindow : Window
             var isSelected = string.Equals(_selectedFeedProviderId, id, StringComparison.OrdinalIgnoreCase);
             btn.Background = isSelected
                 ? new SolidColorBrush(activeColor)
-                : new SolidColorBrush(Color.FromRgb(39, 39, 42));
+                : new SolidColorBrush(Color.FromRgb(22, 32, 47));
             btn.Foreground = isSelected
                 ? new SolidColorBrush(Color.FromRgb(255, 255, 255))
-                : new SolidColorBrush(Color.FromRgb(161, 161, 170));
+                : new SolidColorBrush(Color.FromRgb(126, 140, 166));
         }
 
         if (_latestSnapshots.TryGetValue(_selectedFeedProviderId, out var snap))
