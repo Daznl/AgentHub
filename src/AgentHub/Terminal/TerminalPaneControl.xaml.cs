@@ -11,11 +11,14 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 {
     public event Action<TerminalPaneControl>? CloseRequested;
     public event Action<TerminalPaneControl, int>? MoveRequested;
+    /// <summary>Raised when the user asks to pick an arbitrary folder and launch the selected shell there.</summary>
+    public event Action<TerminalPaneControl>? FolderLaunchRequested;
     private int _paneIndex = 1;
 
     public EmbeddedTerminalControl TerminalControl => Terminal;
     public int PaneIndex => _paneIndex;
     public bool IsRunning => Terminal.IsRunning;
+    public ShellOption? SelectedShell => ShellCombo.SelectedItem as ShellOption;
     public event Action? SessionStateChanged;
 
     public TerminalPaneControl()
@@ -75,6 +78,8 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
         Terminal.StartSession(cmd, dir, $"Terminal {_paneIndex} · {title}", repoName);
     }
+
+    private void LaunchInFolder_Click(object sender, RoutedEventArgs e) => FolderLaunchRequested?.Invoke(this);
 
     private void Close_Click(object sender, RoutedEventArgs e)
     {

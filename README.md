@@ -9,12 +9,13 @@ AgentHub treats the **repository as the workspace** and the AI CLI as an interch
 - Register existing local Git repositories.
 - **Local Repository Auto-Discovery:** 1-click folder scanner that auto-detects existing local Git clones across your system and links them directly to their remote GitHub counterparts.
 - **Real-Time Sync Status, In-App Pull & Push:** Checks local clone existence, branch, uncommitted changes, and ahead/behind counts with color-coded badges (`✓ Up to date`, `⇣ Behind`, `⇡ Ahead`, `✎ Modified`). Supports 1-click fast-forward pull (`⇣ Pull`) and 1-click push (`⬆ Push`) directly from the remote repository cards.
-- **GitHub Repository Browser:** View, search, and filter your remote GitHub repositories in-app via your local GitHub CLI (`gh`). Filter by visibility (private/public) or sync status (up-to-date, needs pull, dirty), view push timestamps, and 1-click clone & register directly into AgentHub.
+- **GitHub Repository Browser:** View, search, and filter every remote repository the signed-in account can see (own, shared, and organisation) via your local GitHub CLI (`gh`). Repos stream in page by page and are grouped by what you are allowed to do: your own, organisation repos you can push to, organisation repos you can only clone or pull, and archived. Each card shows the owner and your GitHub role (Admin, Maintain, Push, or Read-only), the Push button only appears where GitHub will accept it, and anyone can clone anything they can see. Filter by access, visibility (private/public) or sync status (up-to-date, needs pull, dirty), and 1-click clone & register directly into AgentHub.
 - Clone GitHub repositories by HTTPS or SSH URL.
 - Show current branch, changed-file count, ahead/behind state and origin remote.
 - Run `git fetch --prune`, `git pull --ff-only`, and `git push` from the UI.
 - Open the repository folder or GitHub remote.
 - **Embedded Dynamic Multi-Terminal Cockpit:** Run multiple interactive CLI sessions (Antigravity, Claude Code, Codex, PowerShell, Cmd) side-by-side inside the app using Windows ConPTY + xterm.js. Supports 3+ concurrent terminal panes with draggable splitters, a 1-click **➕ Add Terminal** button, individual **✕ Close** buttons, synchronized working directory selection, and clean ConPTY lifecycle management without duplicated keystrokes or external window sprawl.
+- **PowerShell in any folder:** The Cockpit's **📂 PowerShell in Folder…** button opens the Windows folder picker and starts a plain PowerShell session in the chosen directory in a new pane, so you can work outside registered repositories. Each pane also has a 📂 button that launches that pane's selected shell or agent CLI in a folder you pick. The last folder is remembered in `settings.json`.
 - Launch **Codex**, **Claude Code**, or **Antigravity** in Windows Terminal or directly into specific Cockpit terminal panes (T1, T2, T3).
 - Display current Codex, Claude and Antigravity usage limits in the Cockpit. AgentHub reads each provider from its cleanest local source — Codex from its on-disk session `rate_limits`, Claude from its usage endpoint, Antigravity from `agy -p /usage` — rather than scraping interactive TUIs. Cards show **percentage left**, reset time, source and refresh state on a user-set polling interval, without storing provider credentials.
 - Keep agent commands configurable in `%APPDATA%\AgentHub\settings.json`.
@@ -31,12 +32,24 @@ The Git repository is the durable state. Claude, Codex and Gemini/Antigravity ar
 - .NET 8 SDK (to build)
 - Git on `PATH`
 - Optional but recommended:
-  - GitHub CLI (`gh.exe`) — for remote repository browsing & authentication
+  - GitHub CLI (`gh.exe`) — for remote repository browsing & authentication. Sign in from the GitHub Repos view: AgentHub drives `gh auth login --web`, shows the one-time code and opens the browser; `gh` keeps the token. Multiple accounts can be signed in and switched from the account dropdown.
   - Windows Terminal (`wt.exe`) — for external tabbed launches
 - Any coding CLIs you want to use on `PATH`, initially:
   - `codex`
   - `claude`
   - `agy`
+
+## GitHub accounts and permissions
+
+Open **Manage GitHub Repos → GitHub Repos**. The header shows the active GitHub CLI account.
+
+- **Sign in** opens a dialog that starts `gh auth login --web` for you, shows the one-time code, copies it and opens github.com. Approve in the browser; `gh` stores the token. Signing in with another account adds it alongside the existing one. GitHub Enterprise Server hosts can be entered in the dialog.
+- **Account dropdown** lists every account `gh` knows about. Picking one runs `gh auth switch` and reloads the repository list. **Sign out** runs `gh auth logout` for the selected account after confirmation.
+- **What you see** is every repository the active account can access: your own, ones shared with you, and every organisation you belong to. They stream in as `gh` pages through GitHub.
+- **What you can do** is decided by GitHub, not AgentHub. Each card shows your role. Admin, Maintain and Write mean you can push. Read and Triage mean you can clone and pull only. Archived repositories are never pushable. Groups and the access filter reflect the same rule.
+- **Git credentials:** switching the active `gh` account does not change what `git push` uses. Run `gh auth setup-git` once if you want git to follow the active `gh` account.
+
+Design notes and gotchas: [docs/GITHUB_INTEGRATION.md](docs/GITHUB_INTEGRATION.md).
 
 ## Quick start
 

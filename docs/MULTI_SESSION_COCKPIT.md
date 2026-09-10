@@ -99,6 +99,55 @@ public sealed class AgentSession
 }
 ```
 
+### 2.3 Launching a shell in an arbitrary folder (shipped v0.1.6)
+
+Cockpit sessions were originally tied to the pane's **repository dropdown**: the working directory
+was always a registered repo's `LocalPath` (or the process CWD when none existed). Users needed a
+plain PowerShell in any folder without registering it as a repository first.
+
+```text
+Cockpit toolbar "📂 PowerShell in Folder…"          Pane toolbar "📂"
+        │                                                  │  (event: FolderLaunchRequested)
+        ▼                                                  ▼
+MainWindow.OpenPowerShellInFolder_Click        MainWindow.OnPaneFolderLaunchRequested
+        │                                                  │  confirm if pane.IsRunning
+        └──────────────► PickWorkingFolderAsync ◄──────────┘
+                          │  Forms.FolderBrowserDialog (Vista-style Explorer picker)
+                          │  starts at settings.LastTerminalFolder, else Desktop
+                          │  persists the chosen folder (best-effort SaveAsync)
+                          ▼
+              new pane (<6) or first idle pane      pane.StartSession(pane.SelectedShell ?? PowerShell,
+              StartSession("powershell.exe -NoLogo",                  folder, "Terminal N · <shell>", <folder name>)
+                           folder, "Terminal N · PowerShell", <folder name>)
+                          ▼
+              TerminalPaneControl.StartSession -> EmbeddedTerminalControl -> ConPtySession (cwd = folder)
+```
+
+Behaviour and rules:
+
+- **Toolbar button = always plain PowerShell** (`powershell.exe -NoLogo`), in a **new** pane. When the
+  6-pane cap is reached the first pane with no running process is reused; if every pane is busy the
+  user is told to close one or use the per-pane button. A running agent session is never replaced
+  silently.
+- **Per-pane 📂 = that pane's selected shell/agent** (PowerShell, cmd, Codex, Claude Code, Antigravity
+  as configured in settings). If the pane is running, a Yes/No prompt precedes replacement.
+- **Folder memory:** `AppSettings.LastTerminalFolder` is the only new persisted field. It is
+  validated with `Directory.Exists` before use so a deleted folder falls back to the Desktop.
+- **Repo dropdown stays consistent:** `TerminalPaneControl.StartSession` already selects the matching
+  registered repository when the chosen folder equals a repo's `LocalPath`; otherwise the dropdown is
+  left as-is and the header shows the folder name as the subtitle.
+- **Paths with spaces** (e.g. `OneDrive - IGO Limited\Projects\…`) are passed to ConPTY as the
+  working directory, not embedded in a command line, so no quoting is involved.
+
+Code: `MainWindow.xaml.cs` (`PickWorkingFolderAsync`, `FolderDisplayName`,
+`OpenPowerShellInFolder_Click`, `OnPaneFolderLaunchRequested`, `PlainPowerShellCommand`),
+`Terminal/TerminalPaneControl.xaml(.cs)` (`FolderLaunchRequested` event, `SelectedShell`,
+`LaunchInFolder_Click`), `Models/AppSettings.cs` (`LastTerminalFolder`).
+
+Not done: no most-recently-used folder list (single last folder only); no drag-and-drop of a folder
+onto a pane; the picker is modal (WinForms `FolderBrowserDialog`), which is consistent with the
+existing Scan/Add/Clone dialogs.
+
 ---
 
 ## 3. Build & Implementation Plan

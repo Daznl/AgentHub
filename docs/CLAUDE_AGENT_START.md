@@ -2,7 +2,7 @@
 
 You are continuing development of AgentHub, a Windows-first WPF application that manages local GitHub repositories and launches interchangeable coding CLIs (Codex, Claude Code, Google Antigravity).
 
-Start by reading README.md, docs/ARCHITECTURE.md, and docs/ROADMAP.md. Build the solution and fix any compile/runtime issues before adding features.
+Start by reading README.md, docs/ARCHITECTURE.md, and docs/ROADMAP.md. If the work touches GitHub sign-in, accounts or the repository browser, also read docs/GITHUB_INTEGRATION.md (it records the gh behaviours and gotchas the current implementation depends on). Build the solution and fix any compile/runtime issues before adding features.
 
 The next target is v0.2: task worktrees. Implement it incrementally and preserve these rules:
 

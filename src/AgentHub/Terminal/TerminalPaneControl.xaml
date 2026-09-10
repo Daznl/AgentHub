@@ -22,6 +22,7 @@
                         <ComboBox x:Name="RepoCombo" Width="130" Margin="0,0,4,0" DisplayMemberPath="Name" ToolTip="Select working repository" />
                         <ComboBox x:Name="ShellCombo" Width="110" Margin="0,0,4,0" ToolTip="Select agent CLI or shell" />
                         <Button Click="Launch_Click" Content="Launch" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#2563eb" FontSize="11" />
+                        <Button Click="LaunchInFolder_Click" Content="📂" ToolTip="Browse for a folder and launch the selected shell/agent there (not limited to registered repos)" Background="#374151" Foreground="#d1d5db" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="MoveLeftBtn" Click="MoveLeft_Click" Content="◀" ToolTip="Move this terminal left" Background="#374151" Foreground="#9ca3af" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="MoveRightBtn" Click="MoveRight_Click" Content="▶" ToolTip="Move this terminal right" Background="#374151" Foreground="#9ca3af" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button Click="Close_Click" Content="✕" ToolTip="Close this terminal session" Background="#374151" Foreground="#9ca3af" Padding="7,3" Margin="0" FontSize="11" FontWeight="Bold" />
