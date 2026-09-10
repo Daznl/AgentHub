@@ -36,4 +36,7 @@ public sealed class AppSettings
     public double UsageRefreshMinutes { get; set; } = 2;
 
     public bool PreferWindowsTerminal { get; set; } = true;
+
+    /// <summary>Last folder chosen for "open a shell in a folder"; the picker starts here next time.</summary>
+    public string? LastTerminalFolder { get; set; }
 }

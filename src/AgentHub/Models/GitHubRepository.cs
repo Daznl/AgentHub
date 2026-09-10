@@ -50,6 +50,87 @@ public sealed class GitHubRepository
     [JsonPropertyName("updatedAt")]
     public DateTimeOffset? UpdatedAt { get; set; }
 
+    [JsonPropertyName("isArchived")]
+    public bool IsArchived { get; set; }
+
+    [JsonPropertyName("isFork")]
+    public bool IsFork { get; set; }
+
+    [JsonPropertyName("isInOrganization")]
+    public bool IsInOrganization { get; set; }
+
+    /// <summary>GitHub's permission for the signed-in user: ADMIN, MAINTAIN, WRITE, TRIAGE or READ.</summary>
+    [JsonPropertyName("viewerPermission")]
+    public string? ViewerPermission { get; set; }
+
+    [JsonPropertyName("owner")]
+    public GitHubRepositoryOwner? Owner { get; set; }
+
+    /// <summary>True when the signed-in account owns this repository. Set after load, not by GitHub.</summary>
+    public bool IsOwnedByViewer { get; set; }
+
+    public string OwnerLogin => Owner?.Login ?? (NameWithOwner.Contains('/') ? NameWithOwner[..NameWithOwner.IndexOf('/')] : string.Empty);
+
+    public bool IsOwnedByOrganization =>
+        IsInOrganization || string.Equals(Owner?.TypeName, "Organization", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>WRITE or higher, and not archived. Archived repos are read-only on GitHub regardless of role.</summary>
+    public bool CanPush => !IsArchived && ViewerPermission?.ToUpperInvariant() is "ADMIN" or "MAINTAIN" or "WRITE";
+
+    public string AccessLabel
+    {
+        get
+        {
+            if (IsArchived) return "📦 Archived · read-only";
+            return ViewerPermission?.ToUpperInvariant() switch
+            {
+                "ADMIN" => "🔑 Admin · push",
+                "MAINTAIN" => "🔧 Maintain · push",
+                "WRITE" => "✎ Push access",
+                "TRIAGE" => "👁 Read-only · clone",
+                "READ" => "👁 Read-only · clone",
+                _ => "👁 Read-only · clone"
+            };
+        }
+    }
+
+    public string AccessTooltip => IsArchived
+        ? $"{NameWithOwner} is archived on GitHub. It can be cloned and pulled but nobody can push."
+        : CanPush
+            ? $"Your GitHub role on {NameWithOwner} is {ViewerPermission}: you can pull and push."
+            : $"Your GitHub role on {NameWithOwner} is {ViewerPermission ?? "READ"}: you can clone and pull, but pushes will be rejected.";
+
+    public SolidColorBrush AccessBadgeBrush => IsArchived ? StatusNotClonedBg : CanPush ? StatusUpToDateBg : StatusBehindBg;
+    public SolidColorBrush AccessTextBrush => IsArchived ? StatusNotClonedFg : CanPush ? StatusUpToDateFg : StatusBehindFg;
+
+    public string OwnerLabel => IsOwnedByViewer
+        ? "👤 Yours"
+        : IsOwnedByOrganization ? $"🏢 {OwnerLogin}" : $"🤝 {OwnerLogin}";
+
+    /// <summary>Group header used to categorise the list for whoever is signed in.</summary>
+    public string Category
+    {
+        get
+        {
+            if (IsArchived) return "📦 Archived · clone or pull only";
+            if (IsOwnedByViewer) return "👤 My repositories · full access";
+            if (!IsOwnedByOrganization) return CanPush ? $"🤝 Shared with me by {OwnerLogin} · you can push" : $"🤝 Shared with me by {OwnerLogin} · clone only";
+            return CanPush ? $"🏢 {OwnerLogin} · you can push" : $"🏢 {OwnerLogin} · clone only (read access)";
+        }
+    }
+
+    /// <summary>Sort key so groups appear in a sensible order: mine, then pushable, then read-only, then archived.</summary>
+    public int CategoryOrder
+    {
+        get
+        {
+            if (IsArchived) return 40;
+            if (IsOwnedByViewer) return 0;
+            if (CanPush) return IsOwnedByOrganization ? 10 : 11;
+            return IsOwnedByOrganization ? 20 : 21;
+        }
+    }
+
     // UI state properties
     public bool IsAlreadyAdded { get; set; }
     public string? LocalPath { get; set; }
@@ -110,7 +191,10 @@ public sealed class GitHubRepository
     public SolidColorBrush ActionButtonBrush => IsAlreadyAdded ? AddedBtnBg : CloneBtnBg;
 
     public Visibility PullButtonVisibility => (IsAlreadyAdded && LocalExists && BehindCount > 0) ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility PushButtonVisibility => (IsAlreadyAdded && LocalExists && AheadCount > 0) ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility PushButtonVisibility => (IsAlreadyAdded && LocalExists && AheadCount > 0 && CanPush) ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Shown instead of Push when there are local commits the signed-in account is not allowed to push.</summary>
+    public Visibility PushBlockedVisibility => (IsAlreadyAdded && LocalExists && AheadCount > 0 && !CanPush) ? Visibility.Visible : Visibility.Collapsed;
     public Visibility CockpitButtonVisibility => (IsAlreadyAdded && LocalExists) ? Visibility.Visible : Visibility.Collapsed;
 
     public string LocalPathFormatted => IsAlreadyAdded && !string.IsNullOrWhiteSpace(LocalPath)
@@ -124,4 +208,14 @@ public sealed class GitHubRepository
     public string DisplayDescription => string.IsNullOrWhiteSpace(Description)
         ? "(No description provided)"
         : Description;
+}
+
+public sealed class GitHubRepositoryOwner
+{
+    [JsonPropertyName("login")]
+    public string Login { get; set; } = string.Empty;
+
+    /// <summary>"Organization" or "User" (GraphQL __typename).</summary>
+    [JsonPropertyName("__typename")]
+    public string? TypeName { get; set; }
 }

@@ -13,7 +13,8 @@ MainWindow (WPF)
     |
     +-- SettingsService ------- %APPDATA%/AgentHub/settings.json
     +-- GitService ------------ git.exe (status, fetch, pull --ff-only, push)
-    +-- GitHubService --------- gh.exe (auth status, remote repo query, cloning)
+    +-- GitHubService --------- gh.exe (auth status/accounts, browser device-flow login, account switch, GraphQL repo query, cloning)
+    |     +-- GitHubLoginWindow  modal that drives `gh auth login --web` and shows the one-time code
     +-- RepoDiscoveryService -- local folder scanner & auto-detection
     +-- UsageService --------- clean per-provider usage readers + normalized snapshots
     +-- AgentLauncher --------- wt.exe / powershell.exe external launcher
@@ -21,6 +22,7 @@ MainWindow (WPF)
     |
     +-- Multi-Session Cockpit (WPF Grid + Splitters)
          |
+         +-- "PowerShell in Folder…" / per-pane 📂  -- FolderBrowserDialog -> session cwd (any folder, not only repos)
          +-- TerminalPaneControl (x N panes)
               |
               +-- EmbeddedTerminalControl (WebView2 + xterm.js)
@@ -44,6 +46,37 @@ External tools
 
 Using the user's installed Git keeps behavior consistent with PowerShell/GitHub Desktop and respects their credential manager, SSH setup and global Git config. It also avoids a native Git library dependency in the first version.
 
+## GitHub integration (accounts, sign-in, access-aware browser)
+
+Full detail lives in [GITHUB_INTEGRATION.md](GITHUB_INTEGRATION.md). The essentials:
+
+```text
+GitHub Repos view
+    |
+    +-- Account combo / Sign in / Sign out
+    |     +-- gh auth status --json hosts      (who is signed in, which is active)
+    |     +-- gh auth switch / gh auth logout  (per host + login)
+    |     +-- GitHubLoginWindow -> gh auth login --hostname H --git-protocol https --web --skip-ssh-key
+    |          (stdin closed => gh prints the one-time code + URL, never prompts; dialog shows code, opens browser)
+    |
+    +-- GitHubService.StreamAllRepositoriesAsync
+          +-- gh api graphql --paginate  viewer.repositories(affiliations: OWNER, COLLABORATOR, ORGANIZATION_MEMBER)
+          +-- one JSON object per line -> ParseRepositoryLine -> Progress<T> -> batched UI render
+          +-- viewerPermission + owner + isArchived => CanPush / Category
+```
+
+1. **gh owns credentials.** AgentHub never sees a token; it drives `gh` non-interactively and parses
+   what `gh` prints. The one-time device code is the only secret-adjacent value shown, and it is
+   meant to be shown.
+2. **GitHub decides push rights.** `viewerPermission` (ADMIN/MAINTAIN/WRITE => push; TRIAGE/READ =>
+   clone/pull only; archived => never push) is read straight from GitHub and drives the Push button,
+   the access badge and the group the repo appears in. Everyone can clone anything they can see.
+3. **`gh repo list` is not "everything I can see".** Without an owner it lists only personally owned
+   repos, which is why organisation-only accounts saw nothing. The GraphQL query with all
+   affiliations replaces it.
+4. **Stream, don't wait.** Pages arrive as NDJSON lines; the view re-renders every 25 repos / 400 ms
+   into a virtualised, grouped `ListBox`. Loads are cancellable so account switches never mix lists.
+
 ## Terminal subsystem & ConPTY integration
 
 AgentHub hosts interactive character-mode processes directly inside WPF using:
@@ -51,6 +84,7 @@ AgentHub hosts interactive character-mode processes directly inside WPF using:
 2. **Synchronous anonymous pipes:** Bidirectional streaming with dedicated background reading threads to avoid deadlocks. Pseudoconsole ends of pipes are closed immediately after child process creation to allow proper EOF detection.
 3. **Microsoft WebView2 + xterm.js:** Renders the terminal frontend with hardware-accelerated canvas rendering, full ANSI color palette, and dynamic resizing via `fitAddon`.
 4. **Lifecycle & event idempotency:** WPF `Loaded` events fire repeatedly across tab switches and visual tree rearrangements. `EmbeddedTerminalControl` utilizes strict initialization state flags (`_isInitialized`, `_isInitializing`) and idempotent event subscriptions to guarantee zero duplicate input handlers or ghost processes.
+5. **Working directory is a first-class input, not derived from repos.** A session's cwd normally comes from the pane's repository dropdown, but the Cockpit toolbar's "📂 PowerShell in Folder…" and each pane's 📂 button let the user pick any folder through the Windows folder picker. The toolbar button always opens plain PowerShell in a new (or idle) pane; the pane button launches that pane's selected shell/agent and confirms before replacing a running session. The last folder is persisted as `AppSettings.LastTerminalFolder`. Details in [MULTI_SESSION_COCKPIT.md §2.3](MULTI_SESSION_COCKPIT.md).
 
 ## Planned v0.2 session model
 

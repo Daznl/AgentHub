@@ -49,6 +49,10 @@ public partial class MainWindow : Window
     ];
 
     private List<GitHubRepository> _allGitHubRepos = new();
+    private List<GitHubAccount> _gitHubAccounts = new();
+    private bool _suppressAccountSelection;
+    private CancellationTokenSource? _gitHubLoadCts;
+    private bool _gitHubLoading;
     private AppSettings _settings = new();
     private RepositoryDefinition? _selectedRepo;
     private readonly Dictionary<string, UsageSnapshot> _lastSuccessfulUsage =
@@ -195,6 +199,7 @@ public partial class MainWindow : Window
         var pane = new TerminalPaneControl();
         pane.CloseRequested += OnPaneCloseRequested;
         pane.MoveRequested += OnPaneMoveRequested;
+        pane.FolderLaunchRequested += OnPaneFolderLaunchRequested;
         pane.SessionStateChanged += UpdateUsagePollingInterval;
         pane.UpdateRepositories(_settings.Repositories, defaultRepoIndex);
         pane.UpdateShellOptions(_shellOptions, defaultShellIndex);
@@ -272,6 +277,106 @@ public partial class MainWindow : Window
         RebuildTerminalLayout();
         UpdateUsagePollingInterval();
         StatusText.Text = $"Added Terminal {_panes.Count}.";
+    }
+
+    private const string PlainPowerShellCommand = "powershell.exe -NoLogo";
+
+    /// <summary>
+    /// Shows the Windows folder picker, starting at the last folder the user chose (or the Desktop).
+    /// Returns null when cancelled. Remembers the choice in settings for next time.
+    /// </summary>
+    private async Task<string?> PickWorkingFolderAsync(string description)
+    {
+        var start = !string.IsNullOrWhiteSpace(_settings.LastTerminalFolder) && Directory.Exists(_settings.LastTerminalFolder)
+            ? _settings.LastTerminalFolder
+            : Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+
+        using var dialog = new Forms.FolderBrowserDialog
+        {
+            Description = description,
+            UseDescriptionForTitle = true,
+            SelectedPath = start,
+            ShowNewFolderButton = true
+        };
+        if (dialog.ShowDialog() != Forms.DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath))
+            return null;
+
+        var folder = dialog.SelectedPath;
+        if (!Directory.Exists(folder))
+        {
+            MessageBox.Show(this, $"The folder no longer exists:\n{folder}", "AgentHub", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return null;
+        }
+
+        if (!string.Equals(_settings.LastTerminalFolder, folder, StringComparison.OrdinalIgnoreCase))
+        {
+            _settings.LastTerminalFolder = folder;
+            try { await _settingsService.SaveAsync(_settings); } catch { /* remembering the folder is best-effort */ }
+        }
+
+        return folder;
+    }
+
+    private static string FolderDisplayName(string folder)
+    {
+        var name = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return string.IsNullOrWhiteSpace(name) ? folder : name;
+    }
+
+    /// <summary>
+    /// Cockpit toolbar: browse for any folder and open a plain PowerShell there. Uses a new pane when
+    /// there is room, otherwise the first idle pane, so a running agent session is never replaced silently.
+    /// </summary>
+    private async void OpenPowerShellInFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var folder = await PickWorkingFolderAsync("Choose the folder to open PowerShell in");
+        if (folder is null) return;
+
+        TerminalPaneControl? target;
+        if (_panes.Count < 6)
+        {
+            target = CreateTerminalPane(defaultRepoIndex: _panes.Count, defaultShellIndex: 0);
+            _panes.Add(target);
+            RebuildTerminalLayout();
+            UpdateUsagePollingInterval();
+        }
+        else
+        {
+            target = _panes.FirstOrDefault(p => !p.IsRunning);
+            if (target is null)
+            {
+                MessageBox.Show(this,
+                    "All 6 terminal panes are busy. Close or finish a session first, or use the 📂 button on a pane to replace that session.",
+                    "AgentHub", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+        }
+
+        var name = FolderDisplayName(folder);
+        target.StartSession(PlainPowerShellCommand, folder, $"Terminal {target.PaneIndex} · PowerShell", name);
+        StatusText.Text = $"Opened PowerShell in {folder} (Terminal {target.PaneIndex}).";
+    }
+
+    /// <summary>Per-pane 📂 button: browse for a folder and launch that pane's selected shell/agent there.</summary>
+    private async void OnPaneFolderLaunchRequested(TerminalPaneControl pane)
+    {
+        var shell = pane.SelectedShell;
+        var shellName = shell?.DisplayName ?? "PowerShell";
+
+        if (pane.IsRunning)
+        {
+            var replace = MessageBox.Show(this,
+                $"Terminal {pane.PaneIndex} has a running session. Replace it with {shellName} in a folder you choose?",
+                "Replace session", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (replace != MessageBoxResult.Yes) return;
+        }
+
+        var folder = await PickWorkingFolderAsync($"Choose the folder to launch {shellName} in (Terminal {pane.PaneIndex})");
+        if (folder is null) return;
+
+        var name = FolderDisplayName(folder);
+        pane.StartSession(shell?.Command ?? PlainPowerShellCommand, folder, $"Terminal {pane.PaneIndex} · {shellName}", name);
+        StatusText.Text = $"Launched {shellName} in {folder} (Terminal {pane.PaneIndex}).";
     }
 
     private void OnPaneCloseRequested(TerminalPaneControl pane)
@@ -578,6 +683,11 @@ public partial class MainWindow : Window
         ViewCockpitBtn.Background = NavInactiveBrush;
         ViewGitHubBtn.Background = NavActiveBrush;
         ViewReposBtn.Background = NavInactiveBrush;
+
+        if (_gitHubLoading)
+        {
+            return; // a load is already streaming in; the list updates as pages arrive
+        }
 
         if (_allGitHubRepos.Count == 0)
         {
@@ -920,39 +1030,120 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Cancel any load still streaming from a previous account/refresh so its repos don't bleed into this list.
+        _gitHubLoadCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _gitHubLoadCts = cts;
+        _gitHubLoading = true;
+
+        GitHubLoadingText.Text = "Checking GitHub CLI account…";
         GitHubLoadingText.Visibility = Visibility.Visible;
         GitHubAuthWarning.Visibility = Visibility.Collapsed;
-        GitHubScrollViewer.Visibility = Visibility.Collapsed;
+        GitHubRepoList.Visibility = Visibility.Collapsed;
+        _allGitHubRepos = new List<GitHubRepository>();
+        GitHubRepoList.ItemsSource = null;
+
+        await RefreshGitHubAccountsAsync();
+        if (cts.IsCancellationRequested) return;
 
         var (isAuth, username) = await _githubService.GetAuthUserAsync();
         if (!isAuth || string.IsNullOrWhiteSpace(username))
         {
             GitHubLoadingText.Visibility = Visibility.Collapsed;
             GitHubAuthWarning.Visibility = Visibility.Visible;
-            GitHubAccountText.Text = "Not authenticated";
-            GitHubRepoCountText.Text = "Run gh auth login in terminal to connect your GitHub account.";
+            GitHubAccountText.Text = _gitHubAccounts.Count == 0 ? "Not signed in" : "Active account unavailable";
+            GitHubAccountText.Visibility = Visibility.Visible;
+            GitHubRepoCountText.Text = _gitHubAccounts.Count == 0
+                ? "Click Sign in to connect a GitHub account."
+                : "GitHub CLI could not use the active account. Pick another account or sign in again.";
+            _gitHubLoading = false;
             return;
         }
 
+        if (cts.IsCancellationRequested) return;
+
         GitHubAccountText.Text = $"@{username}";
+        GitHubAccountText.Visibility = _gitHubAccounts.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         GitHubAuthWarning.Visibility = Visibility.Collapsed;
+        GitHubLoadingText.Text = $"Fetching repositories visible to @{username} (own, shared and organisation)…";
+
+        // Repos arrive page by page on a worker thread; batch them onto the UI thread and re-render every so often
+        // so a large organisation shows results within a second or two instead of after the whole fetch.
+        var pending = new List<GitHubRepository>();
+        var lastRender = DateTime.UtcNow;
+        var progress = new Progress<GitHubRepository>(repo =>
+        {
+            if (cts.IsCancellationRequested) return;
+            pending.Add(repo);
+
+            if (pending.Count >= 25 || (DateTime.UtcNow - lastRender).TotalMilliseconds > 400)
+            {
+                FlushPendingGitHubRepos(pending, username, complete: false);
+                lastRender = DateTime.UtcNow;
+            }
+        });
 
         try
         {
-            var repos = await _githubService.GetRepositoriesAsync(100);
-            _allGitHubRepos = repos;
+            var (count, error) = await _githubService.StreamAllRepositoriesAsync(
+                username,
+                repo => ((IProgress<GitHubRepository>)progress).Report(repo),
+                cts.Token);
 
-            UpdateGitHubAddedState();
+            if (cts.IsCancellationRequested) return;
 
-            GitHubLoadingText.Visibility = Visibility.Collapsed;
-            GitHubScrollViewer.Visibility = Visibility.Visible;
-            ApplyGitHubFilter();
-            StatusText.Text = $"Loaded {_allGitHubRepos.Count} GitHub repositories for @{username}";
+            // Let any Progress callbacks already posted to the dispatcher land before the final flush.
+            await System.Windows.Threading.Dispatcher.Yield(DispatcherPriority.Background);
+            FlushPendingGitHubRepos(pending, username, complete: true);
+
+            if (error is not null)
+            {
+                GitHubLoadingText.Text = "Could not load repositories: " + error;
+                GitHubLoadingText.Visibility = Visibility.Visible;
+                StatusText.Text = "Failed to load GitHub repositories: " + error;
+                return;
+            }
+
+            var pushable = _allGitHubRepos.Count(r => r.CanPush);
+            StatusText.Text = $"Loaded {_allGitHubRepos.Count} GitHub repositories for @{username} · push access on {pushable}, clone-only on {_allGitHubRepos.Count - pushable}";
         }
         catch (Exception ex)
         {
             GitHubLoadingText.Visibility = Visibility.Collapsed;
             StatusText.Text = "Failed to load GitHub repositories: " + ex.Message;
+        }
+        finally
+        {
+            if (ReferenceEquals(_gitHubLoadCts, cts)) _gitHubLoading = false;
+        }
+    }
+
+    private void FlushPendingGitHubRepos(List<GitHubRepository> pending, string username, bool complete)
+    {
+        if (pending.Count > 0)
+        {
+            _allGitHubRepos.AddRange(pending);
+            pending.Clear();
+        }
+
+        UpdateGitHubAddedState();
+
+        if (_allGitHubRepos.Count > 0)
+        {
+            GitHubLoadingText.Visibility = Visibility.Collapsed;
+            GitHubRepoList.Visibility = Visibility.Visible;
+        }
+        else if (complete)
+        {
+            GitHubLoadingText.Text = $"@{username} has no repositories visible through GitHub CLI.";
+            GitHubLoadingText.Visibility = Visibility.Visible;
+        }
+
+        ApplyGitHubFilter();
+
+        if (!complete)
+        {
+            StatusText.Text = $"Loading GitHub repositories for @{username}… {_allGitHubRepos.Count} so far";
         }
     }
 
@@ -1028,7 +1219,7 @@ public partial class MainWindow : Window
         if (_allGitHubRepos == null || GitHubRepoList == null) return;
 
         var query = GitHubSearchBox?.Text?.Trim() ?? string.Empty;
-        var filterIndex = GitHubVisibilityFilter?.SelectedIndex ?? 0;
+        var filterTag = (GitHubVisibilityFilter?.SelectedItem as ComboBoxItem)?.Tag as string ?? "all";
 
         var filtered = _allGitHubRepos.Where(r =>
         {
@@ -1036,28 +1227,45 @@ public partial class MainWindow : Window
             {
                 var matchesName = r.NameWithOwner.Contains(query, StringComparison.OrdinalIgnoreCase);
                 var matchesDesc = (r.Description ?? string.Empty).Contains(query, StringComparison.OrdinalIgnoreCase);
-                if (!matchesName && !matchesDesc) return false;
+                var matchesOwner = r.OwnerLogin.Contains(query, StringComparison.OrdinalIgnoreCase);
+                if (!matchesName && !matchesDesc && !matchesOwner) return false;
             }
 
-            return filterIndex switch
+            return filterTag switch
             {
-                1 => r.IsAlreadyAdded && r.LocalExists && r.BehindCount == 0 && r.AheadCount == 0 && r.ChangedFilesCount == 0,
-                2 => r.IsAlreadyAdded && r.LocalExists && r.BehindCount > 0,
-                3 => r.IsAlreadyAdded && r.LocalExists && r.AheadCount > 0,
-                4 => r.IsAlreadyAdded && r.LocalExists && r.ChangedFilesCount > 0,
-                5 => !r.IsAlreadyAdded,
-                6 => r.IsAlreadyAdded,
-                7 => r.IsPrivate,
-                8 => !r.IsPrivate,
+                "push" => r.CanPush,
+                "readonly" => !r.CanPush,
+                "mine" => r.IsOwnedByViewer,
+                "org" => r.IsOwnedByOrganization,
+                "archived" => r.IsArchived,
+                "uptodate" => r.IsAlreadyAdded && r.LocalExists && r.BehindCount == 0 && r.AheadCount == 0 && r.ChangedFilesCount == 0,
+                "behind" => r.IsAlreadyAdded && r.LocalExists && r.BehindCount > 0,
+                "ahead" => r.IsAlreadyAdded && r.LocalExists && r.AheadCount > 0,
+                "dirty" => r.IsAlreadyAdded && r.LocalExists && r.ChangedFilesCount > 0,
+                "notadded" => !r.IsAlreadyAdded,
+                "added" => r.IsAlreadyAdded,
+                "private" => r.IsPrivate,
+                "public" => !r.IsPrivate,
                 _ => true
             };
         }).ToList();
 
-        GitHubRepoList.ItemsSource = null;
-        GitHubRepoList.ItemsSource = filtered;
+        // Group by access category (mine → pushable → read-only → archived), newest push first inside each group.
+        var view = new System.Windows.Data.ListCollectionView(filtered);
+        view.SortDescriptions.Add(new System.ComponentModel.SortDescription(nameof(GitHubRepository.CategoryOrder), System.ComponentModel.ListSortDirection.Ascending));
+        view.SortDescriptions.Add(new System.ComponentModel.SortDescription(nameof(GitHubRepository.Category), System.ComponentModel.ListSortDirection.Ascending));
+        view.SortDescriptions.Add(new System.ComponentModel.SortDescription(nameof(GitHubRepository.PushedAt), System.ComponentModel.ListSortDirection.Descending));
+        view.GroupDescriptions.Add(new System.Windows.Data.PropertyGroupDescription(nameof(GitHubRepository.Category)));
+
+        GitHubRepoList.ItemsSource = view;
 
         if (GitHubRepoCountText != null)
-            GitHubRepoCountText.Text = $"{filtered.Count} repository(ies) shown ({_allGitHubRepos.Count} total remote)";
+        {
+            var pushable = filtered.Count(r => r.CanPush);
+            GitHubRepoCountText.Text = filtered.Count == _allGitHubRepos.Count
+                ? $"{filtered.Count} repositories · push access on {pushable} · clone-only on {filtered.Count - pushable}"
+                : $"{filtered.Count} of {_allGitHubRepos.Count} repositories shown · push access on {pushable} · clone-only on {filtered.Count - pushable}";
+        }
     }
 
     private async void RefreshGitHub_Click(object sender, RoutedEventArgs e) => await LoadGitHubReposAsync(forceRefresh: true);
@@ -1136,6 +1344,12 @@ public partial class MainWindow : Window
         if (sender is not FrameworkElement el || el.Tag is not GitHubRepository ghRepo || string.IsNullOrWhiteSpace(ghRepo.LocalPath))
             return;
 
+        if (!ghRepo.CanPush)
+        {
+            MessageBox.Show(this, ghRepo.AccessTooltip, "Push not permitted", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
         StatusText.Text = $"Pushing commits for {ghRepo.Name} to GitHub…";
         var res = await _git.PushAsync(ghRepo.LocalPath);
         if (res.ExitCode == 0)
@@ -1193,6 +1407,94 @@ public partial class MainWindow : Window
         {
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
         }
+    }
+
+    /// <summary>Reloads the gh account list into the header combo without touching the repo list.</summary>
+    private async Task RefreshGitHubAccountsAsync()
+    {
+        _gitHubAccounts = await _githubService.GetAccountsAsync();
+
+        _suppressAccountSelection = true;
+        try
+        {
+            GitHubAccountCombo.ItemsSource = null;
+            GitHubAccountCombo.ItemsSource = _gitHubAccounts;
+            GitHubAccountCombo.SelectedItem = _gitHubAccounts.FirstOrDefault(a => a.IsActive) ?? _gitHubAccounts.FirstOrDefault();
+
+            var hasAccounts = _gitHubAccounts.Count > 0;
+            GitHubAccountCombo.Visibility = hasAccounts ? Visibility.Visible : Visibility.Collapsed;
+            GitHubSignOutButton.Visibility = hasAccounts ? Visibility.Visible : Visibility.Collapsed;
+            GitHubAccountText.Visibility = hasAccounts ? Visibility.Collapsed : Visibility.Visible;
+        }
+        finally
+        {
+            _suppressAccountSelection = false;
+        }
+    }
+
+    private async void GitHubAccountCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressAccountSelection) return;
+        if (GitHubAccountCombo.SelectedItem is not GitHubAccount account || account.IsActive) return;
+
+        StatusText.Text = $"Switching GitHub CLI to @{account.Login}…";
+        GitHubAccountCombo.IsEnabled = false;
+        try
+        {
+            var (ok, error) = await _githubService.SwitchAccountAsync(account.Host, account.Login);
+            if (!ok)
+            {
+                StatusText.Text = $"Could not switch to @{account.Login}: {error}";
+                await RefreshGitHubAccountsAsync();
+                return;
+            }
+
+            StatusText.Text = $"GitHub CLI is now using @{account.Login}. Reloading repositories…";
+            await LoadGitHubReposAsync(forceRefresh: true);
+        }
+        finally
+        {
+            GitHubAccountCombo.IsEnabled = true;
+        }
+    }
+
+    private async void SignInGitHub_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new GitHubLoginWindow(_githubService) { Owner = this };
+        var completed = dialog.ShowDialog() == true;
+
+        if (!completed)
+        {
+            // Even a cancelled attempt can leave gh state unchanged; just make sure the list is current.
+            await RefreshGitHubAccountsAsync();
+            return;
+        }
+
+        StatusText.Text = string.IsNullOrWhiteSpace(dialog.SignedInLogin)
+            ? "GitHub sign-in complete. Reloading repositories…"
+            : $"Signed in as @{dialog.SignedInLogin}. Reloading repositories…";
+        await LoadGitHubReposAsync(forceRefresh: true);
+    }
+
+    private async void SignOutGitHub_Click(object sender, RoutedEventArgs e)
+    {
+        if (GitHubAccountCombo.SelectedItem is not GitHubAccount account) return;
+
+        var confirm = MessageBox.Show(
+            this,
+            $"Remove @{account.Login} ({account.Host}) from GitHub CLI on this machine?\n\nThis runs `gh auth logout`. You can sign back in at any time.",
+            "Sign out of GitHub",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.Yes) return;
+
+        var (ok, error) = await _githubService.LogoutAsync(account.Host, account.Login);
+        StatusText.Text = ok
+            ? $"Signed out @{account.Login} from GitHub CLI."
+            : $"Could not sign out @{account.Login}: {error}";
+
+        _allGitHubRepos.Clear();
+        await LoadGitHubReposAsync(forceRefresh: true);
     }
 
     private void LoginGitHubInCockpit_Click(object sender, RoutedEventArgs e)

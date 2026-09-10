@@ -150,22 +150,35 @@
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="🐙 Remote Repositories" FontWeight="SemiBold" FontSize="16" Foreground="{StaticResource TextBrush}" />
                                 <TextBlock x:Name="GitHubAccountText" Text="Loading GitHub account..." Foreground="{StaticResource AccentBrush}" FontSize="13" Margin="10,0,0,0" VerticalAlignment="Center" />
+                                <ComboBox x:Name="GitHubAccountCombo" MinWidth="190" Margin="10,0,0,0" Padding="6,3" VerticalAlignment="Center" Visibility="Collapsed"
+                                          SelectionChanged="GitHubAccountCombo_SelectionChanged"
+                                          ToolTip="Accounts known to GitHub CLI. Pick one to make it the active account." />
+                                <Button Click="SignInGitHub_Click" Content="➕ Sign in" Margin="8,0,0,0" Padding="10,4" FontSize="12"
+                                        ToolTip="Sign in to another GitHub account with a real browser verification (gh auth login --web)" />
+                                <Button x:Name="GitHubSignOutButton" Click="SignOutGitHub_Click" Content="Sign out" Margin="4,0,0,0" Padding="10,4" FontSize="12" Visibility="Collapsed"
+                                        ToolTip="Remove the selected account from GitHub CLI (gh auth logout)" />
                             </StackPanel>
                             <TextBlock x:Name="GitHubRepoCountText" Text="Browse, search and 1-click clone your GitHub repositories directly into AgentHub" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,2,0,0" />
                         </StackPanel>
 
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                             <TextBox x:Name="GitHubSearchBox" Width="180" Margin="0,0,8,0" TextChanged="GitHubSearchBox_TextChanged" ToolTip="Filter by name or description..." />
-                            <ComboBox x:Name="GitHubVisibilityFilter" Width="170" Margin="0,0,8,0" SelectionChanged="GitHubVisibilityFilter_SelectionChanged">
-                                <ComboBoxItem Content="All Repositories" IsSelected="True" />
-                                <ComboBoxItem Content="✓ Up to date" />
-                                <ComboBoxItem Content="⇣ Behind (Needs Pull)" />
-                                <ComboBoxItem Content="⇡ Ahead of Origin" />
-                                <ComboBoxItem Content="✎ Uncommitted Changes" />
-                                <ComboBoxItem Content="Not in AgentHub" />
-                                <ComboBoxItem Content="In AgentHub" />
-                                <ComboBoxItem Content="Private Only" />
-                                <ComboBoxItem Content="Public Only" />
+                            <ComboBox x:Name="GitHubVisibilityFilter" Width="200" Margin="0,0,8,0" SelectionChanged="GitHubVisibilityFilter_SelectionChanged">
+                                <ComboBoxItem Content="All Repositories" Tag="all" IsSelected="True" />
+                                <ComboBoxItem Content="✎ I can push" Tag="push" />
+                                <ComboBoxItem Content="👁 Read-only (clone only)" Tag="readonly" />
+                                <ComboBoxItem Content="👤 Owned by me" Tag="mine" />
+                                <ComboBoxItem Content="🏢 Organisation repos" Tag="org" />
+                                <ComboBoxItem Content="📦 Archived" Tag="archived" />
+                                <Separator />
+                                <ComboBoxItem Content="✓ Up to date" Tag="uptodate" />
+                                <ComboBoxItem Content="⇣ Behind (Needs Pull)" Tag="behind" />
+                                <ComboBoxItem Content="⇡ Ahead of Origin" Tag="ahead" />
+                                <ComboBoxItem Content="✎ Uncommitted Changes" Tag="dirty" />
+                                <ComboBoxItem Content="Not in AgentHub" Tag="notadded" />
+                                <ComboBoxItem Content="In AgentHub" Tag="added" />
+                                <ComboBoxItem Content="Private Only" Tag="private" />
+                                <ComboBoxItem Content="Public Only" Tag="public" />
                             </ComboBox>
                             <Button Click="AutoDetectRepos_Click" Content="🔍 Auto-Detect Local" Background="#065f46" FontWeight="SemiBold" Margin="0,0,6,0" Padding="10,6" ToolTip="Scan Desktop and project folders to auto-link existing clones" />
                             <Button Click="CheckAllSync_Click" Content="🔄 Check Sync" Margin="0,0,6,0" Padding="10,6" ToolTip="Run git status and fetch across all linked repositories" />
@@ -180,18 +193,62 @@
                     <Border x:Name="GitHubAuthWarning" Visibility="Collapsed" Background="#27272a" BorderBrush="#ef4444" BorderThickness="1" CornerRadius="8" Padding="28" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="540">
                         <StackPanel HorizontalAlignment="Center">
                             <TextBlock Text="⚠️ GitHub CLI Not Authenticated" FontWeight="Bold" FontSize="17" Foreground="#ef4444" HorizontalAlignment="Center" />
-                            <TextBlock Text="AgentHub uses your local GitHub CLI (`gh`) so you never have to paste personal access tokens or credentials into the app." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,16" TextAlignment="Center" />
-                            <Button Click="LoginGitHubInCockpit_Click" Content="⚡ Open Terminal &amp; Run `gh auth login`" Background="#2563eb" FontWeight="SemiBold" Padding="16,8" HorizontalAlignment="Center" />
+                            <TextBlock Text="AgentHub uses your local GitHub CLI (`gh`) so you never have to paste personal access tokens or credentials into the app. Sign in here and approve the one-time code on github.com in your browser." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,16" TextAlignment="Center" />
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                <Button Click="SignInGitHub_Click" Content="🐙 Sign in with GitHub" Background="#2563eb" FontWeight="SemiBold" Padding="16,8" />
+                                <Button Click="LoginGitHubInCockpit_Click" Content="⚡ Use terminal instead" Padding="16,8" ToolTip="Runs gh auth login interactively in a Cockpit terminal pane" />
+                            </StackPanel>
                         </StackPanel>
                     </Border>
 
                     <!-- Loading Text -->
                     <TextBlock x:Name="GitHubLoadingText" Text="Fetching your GitHub repositories via GitHub CLI..." Foreground="{StaticResource MutedBrush}" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
 
-                    <!-- Repos List -->
-                    <ScrollViewer x:Name="GitHubScrollViewer" VerticalScrollBarVisibility="Auto">
-                        <ItemsControl x:Name="GitHubRepoList">
-                            <ItemsControl.ItemTemplate>
+                    <!-- Repos List: virtualised ListBox so hundreds of org repos render instantly; grouped by access category -->
+                    <ListBox x:Name="GitHubRepoList" Background="Transparent" BorderThickness="0" Padding="0"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.CanContentScroll="True"
+                             VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.IsVirtualizingWhenGrouping="True"
+                             VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel"
+                             HorizontalContentAlignment="Stretch">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="Margin" Value="0" />
+                                <Setter Property="Focusable" Value="False" />
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListBoxItem">
+                                            <ContentPresenter />
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.GroupStyle>
+                            <GroupStyle>
+                                <GroupStyle.ContainerStyle>
+                                    <Style TargetType="GroupItem">
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                                        <Setter Property="Margin" Value="0" />
+                                        <Setter Property="Padding" Value="0" />
+                                    </Style>
+                                </GroupStyle.ContainerStyle>
+                                <GroupStyle.HeaderTemplate>
+                                    <DataTemplate>
+                                        <DockPanel Margin="0,6,0,10" Background="#111317">
+                                            <Border DockPanel.Dock="Right" Background="#1e293b" CornerRadius="10" Padding="8,2" VerticalAlignment="Center" Margin="8,0,4,0">
+                                                <TextBlock Text="{Binding ItemCount}" Foreground="#94a3b8" FontSize="11" FontWeight="SemiBold" />
+                                            </Border>
+                                            <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </GroupStyle.HeaderTemplate>
+                            </GroupStyle>
+                        </ListBox.GroupStyle>
+                        <ListBox.ItemTemplate>
                                 <DataTemplate>
                                     <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="16,12" Margin="0,0,0,10">
                                         <Grid>
@@ -207,6 +264,9 @@
                                                     <Border Background="{Binding VisibilityBadgeBrush}" CornerRadius="4" Padding="6,2" Margin="10,0,0,0" VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding VisibilityLabel}" Foreground="{Binding VisibilityTextBrush}" FontSize="11" FontWeight="SemiBold" />
                                                     </Border>
+                                                    <Border Background="{Binding AccessBadgeBrush}" CornerRadius="4" Padding="6,2" Margin="8,0,0,0" VerticalAlignment="Center" ToolTip="{Binding AccessTooltip}">
+                                                        <TextBlock Text="{Binding AccessLabel}" Foreground="{Binding AccessTextBrush}" FontSize="11" FontWeight="SemiBold" />
+                                                    </Border>
                                                     <Border Visibility="{Binding AddedBadgeVisibility}" Background="#1e293b" CornerRadius="4" Padding="6,2" Margin="8,0,0,0" VerticalAlignment="Center">
                                                         <TextBlock Text="✓ In AgentHub" Foreground="#94a3b8" FontSize="11" FontWeight="SemiBold" />
                                                     </Border>
@@ -218,7 +278,8 @@
                                                 <TextBlock Text="{Binding DisplayDescription}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,8" FontSize="13" />
 
                                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding PushedAtFormatted}" Foreground="#71717a" FontSize="11" />
+                                                    <TextBlock Text="{Binding OwnerLabel}" Foreground="#a1a1aa" FontSize="11" ToolTip="Repository owner" />
+                                                    <TextBlock Text="{Binding PushedAtFormatted}" Foreground="#71717a" FontSize="11" Margin="14,0,0,0" />
                                                     <TextBlock Text="{Binding LocalPathFormatted}" Foreground="#60a5fa" FontSize="11" Margin="14,0,0,0" />
                                                 </StackPanel>
                                             </StackPanel>
@@ -227,6 +288,9 @@
                                             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
                                                 <Button Tag="{Binding}" Visibility="{Binding PullButtonVisibility}" Click="GitHubPull_Click" Content="⬇ Pull (fast-forward)" Background="#d97706" FontWeight="SemiBold" Padding="12,7" Margin="0,0,8,0" />
                                                 <Button Tag="{Binding}" Visibility="{Binding PushButtonVisibility}" Click="GitHubPush_Click" Content="⬆ Push" Background="#2563eb" FontWeight="SemiBold" Padding="12,7" Margin="0,0,8,0" />
+                                                <Border Visibility="{Binding PushBlockedVisibility}" Background="#3f1d1d" BorderBrush="#7f1d1d" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0,0,8,0" VerticalAlignment="Center" ToolTip="{Binding AccessTooltip}">
+                                                    <TextBlock Text="⬆ Push blocked · read-only" Foreground="#fca5a5" FontSize="12" FontWeight="SemiBold" />
+                                                </Border>
                                                 <Button Tag="{Binding}" Visibility="{Binding CockpitButtonVisibility}" Click="GitHubCockpit_Click" Content="⚡ Cockpit" Background="#7c3aed" FontWeight="SemiBold" Padding="12,7" Margin="0,0,8,0" />
                                                 <Button Tag="{Binding}" Click="GitHubAction_Click" Content="{Binding ActionButtonText}" Background="{Binding ActionButtonBrush}" FontWeight="SemiBold" Padding="14,7" Margin="0,0,8,0" />
                                                 <Button Tag="{Binding Url}" Click="OpenGitHubUrl_Click" Content="🌐 GitHub" Padding="10,7" Margin="0" />
@@ -234,9 +298,8 @@
                                         </Grid>
                                     </Border>
                                 </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
                 </Grid>
             </Grid>
 
@@ -261,6 +324,7 @@
                             <TextBlock Text="Side-by-side interactive ConPTY sessions with dynamic split panes, ANSI/VT support, and fast terminal switching" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,2,0,0" />
                         </StackPanel>
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                            <Button Click="OpenPowerShellInFolder_Click" Content="📂 PowerShell in Folder…" Background="#0f766e" FontWeight="SemiBold" Padding="12,6" Margin="0,0,8,0" ToolTip="Browse for any folder and open a plain PowerShell session there in a new terminal pane" />
                             <Button Click="AddTerminal_Click" Content="➕ Add Terminal" Background="#2563eb" FontWeight="SemiBold" Padding="12,6" Margin="0" ToolTip="Add another side-by-side terminal session" />
                         </StackPanel>
                     </DockPanel>
