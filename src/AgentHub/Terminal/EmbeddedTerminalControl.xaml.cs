@@ -141,7 +141,8 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
 
     public void SetHeader(string title, string subtitle = "")
     {
-        TitleText.Text = title;
+        // Inner title intentionally not shown; the outer pane header already displays "Terminal N".
+        _ = title;
         SubtitleText.Text = subtitle;
     }
 

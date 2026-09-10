@@ -12,8 +12,8 @@
             <DockPanel>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
                     <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="#5A6B85" Margin="0,0,8,0" />
-                    <TextBlock x:Name="TitleText" Text="Terminal" FontWeight="SemiBold" Foreground="#E8F1FB" FontSize="12" />
-                    <TextBlock x:Name="SubtitleText" Text="" Foreground="#7E8CA6" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center" />
+                    <!-- Inner title removed: the outer pane header (TerminalPaneControl) already shows "Terminal N" -->
+                    <TextBlock x:Name="SubtitleText" Text="" Foreground="#7E8CA6" FontSize="11" VerticalAlignment="Center" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
                     <Button x:Name="RestartBtn" Content="Restart" Click="RestartBtn_Click" Margin="0,0,6,0" Padding="8,2" FontSize="11" Visibility="Collapsed" />
