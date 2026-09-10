@@ -151,9 +151,9 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     public void SetIndex(int index, SolidColorBrush accent)
     {
+        // The "Terminal N" label was removed from the header; only the internal index is tracked now.
         _paneIndex = index;
-        PaneTitleText.Text = $"Terminal {index}";
-        PaneTitleText.Foreground = accent;
+        _ = accent;
     }
 
     public void UpdateRepositories(List<RepositoryDefinition> repos, int defaultIndex = 0)
