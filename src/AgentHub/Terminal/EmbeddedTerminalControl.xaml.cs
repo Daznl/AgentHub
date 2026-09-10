@@ -1,18 +1,24 @@
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
+using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
-using Color = System.Windows.Media.Color;
 using UserControl = System.Windows.Controls.UserControl;
 
 namespace AgentHub.Terminal;
 
+/// <summary>Session lifecycle state, surfaced to the host pane for the status dot and Stop/Restart buttons.</summary>
+public enum TerminalStatus { Idle, Running, Stopped, Failed }
+
 public partial class EmbeddedTerminalControl : UserControl, IDisposable
 {
-    private static readonly SolidColorBrush RunningBrush = new(Color.FromRgb(34, 197, 94));
-    private static readonly SolidColorBrush StoppedBrush = new(Color.FromRgb(113, 113, 122));
-    private static readonly SolidColorBrush FailedBrush = new(Color.FromRgb(239, 68, 68));
+    /// <summary>Raised when the session state changes so the host pane can update the status dot and buttons.</summary>
+    public event Action<TerminalStatus>? StatusChanged;
+    /// <summary>Raised when the status subtitle (PID / working dir / exit info) changes.</summary>
+    public event Action<string>? SubtitleChanged;
+
+    private void RaiseStatus(TerminalStatus status) => StatusChanged?.Invoke(status);
+    private void RaiseSubtitle(string subtitle) => SubtitleChanged?.Invoke(subtitle);
 
     private ConPtySession? _session;
     private bool _isTerminalReady;
@@ -29,11 +35,44 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     public event Action? SessionExited;
     public bool IsRunning => _session?.IsRunning == true;
 
+    // Attention detection: only armed for coding-CLI sessions (not plain shells).
+    private readonly AttentionDetector _attention = new();
+    private readonly DispatcherTimer _attentionTimer;
+
+    /// <summary>Raised once when the agent CLI stops working and appears to be waiting for the user.</summary>
+    public event Action? AttentionRequested;
+    /// <summary>Raised when the user responds (types) after attention was requested, or the session ends.</summary>
+    public event Action? AttentionCleared;
+    /// <summary>Raised with true while the agent CLI is actively producing output, false when it stops.</summary>
+    public event Action<bool>? WorkingStateChanged;
+    private bool _working;
+
+    /// <summary>True when the running command is a coding agent CLI rather than a plain shell.</summary>
+    public bool IsAgentSession { get; set; }
+    public bool AttentionEnabled { get; set; } = true;
+    public double AttentionIdleSeconds
+    {
+        get => _attention.IdleThreshold.TotalSeconds;
+        set => _attention.IdleThreshold = TimeSpan.FromSeconds(Math.Max(0.5, value));
+    }
+
     public EmbeddedTerminalControl()
     {
         InitializeComponent();
         Loaded += EmbeddedTerminalControl_Loaded;
         Unloaded += EmbeddedTerminalControl_Unloaded;
+
+        _attentionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _attentionTimer.Tick += (_, _) =>
+        {
+            var now = DateTimeOffset.Now;
+            var raise = _attention.Tick(now);
+            SetWorking(_attention.IsWorking(now));
+            if (raise)
+            {
+                AttentionRequested?.Invoke();
+            }
+        };
     }
 
     private static Task<CoreWebView2Environment>? _sharedEnvTask;
@@ -92,7 +131,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         }
         catch (Exception ex)
         {
-            SubtitleText.Text = "Failed to initialize terminal: " + ex.Message;
+            RaiseSubtitle("Failed to initialize terminal: " + ex.Message);
         }
         finally
         {
@@ -107,14 +146,16 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
 
     public void SetHeader(string title, string subtitle = "")
     {
-        TitleText.Text = title;
-        SubtitleText.Text = subtitle;
+        // Inner title intentionally not shown; the outer pane header already displays "Terminal N".
+        _ = title;
+        RaiseSubtitle(subtitle);
     }
 
-    public void StartSession(string commandLine, string workingDirectory, string title = "", string subtitle = "")
+    public void StartSession(string commandLine, string workingDirectory, string title = "", string subtitle = "", bool isAgentSession = false)
     {
         _commandLine = commandLine;
         _workingDirectory = workingDirectory;
+        IsAgentSession = isAgentSession;
         SetHeader(title, subtitle);
 
         if (_isTerminalReady)
@@ -135,9 +176,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
 
         try
         {
-            StatusDot.Fill = RunningBrush;
-            RestartBtn.Visibility = Visibility.Collapsed;
-            StopBtn.Visibility = Visibility.Visible;
+            RaiseStatus(TerminalStatus.Running);
 
             try
             {
@@ -146,10 +185,15 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
             catch { }
 
             _session = ConPtySession.Start(_commandLine, _workingDirectory, _cols, _rows);
+
+            _attention.OnSessionStarted(DateTimeOffset.Now);
+            _attentionTimer.IsEnabled = IsAgentSession && AttentionEnabled;
+
             _session.OutputDataReceived += text =>
             {
                 Dispatcher.InvokeAsync(() =>
                 {
+                    _attention.OnOutput(text, DateTimeOffset.Now);
                     try
                     {
                         WebView.CoreWebView2?.PostWebMessageAsString(text);
@@ -162,15 +206,14 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
             {
                 Dispatcher.InvokeAsync(() =>
                 {
-                    StatusDot.Fill = exitCode == 0 ? StoppedBrush : FailedBrush;
-                    SubtitleText.Text = $"Exited (code {exitCode})";
-                    RestartBtn.Visibility = Visibility.Visible;
-                    StopBtn.Visibility = Visibility.Collapsed;
+                    StopAttentionTracking();
+                    RaiseStatus(exitCode == 0 ? TerminalStatus.Stopped : TerminalStatus.Failed);
+                    RaiseSubtitle($"Exited (code {exitCode})");
                     SessionExited?.Invoke();
                 });
             };
 
-            SubtitleText.Text = $"PID {_session.ProcessId} · {_workingDirectory}";
+            RaiseSubtitle($"PID {_session.ProcessId} · {_workingDirectory}");
             SessionStarted?.Invoke();
 
             // A freshly-launched TUI (e.g. Claude Code) reads the terminal size at
@@ -180,10 +223,8 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         }
         catch (Exception ex)
         {
-            StatusDot.Fill = FailedBrush;
-            SubtitleText.Text = "Launch failed: " + ex.Message;
-            RestartBtn.Visibility = Visibility.Visible;
-            StopBtn.Visibility = Visibility.Collapsed;
+            RaiseStatus(TerminalStatus.Failed);
+            RaiseSubtitle("Launch failed: " + ex.Message);
         }
     }
 
@@ -232,7 +273,13 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
                     if (root.TryGetProperty("data", out var dataProp))
                     {
                         var data = dataProp.GetString();
-                        if (data != null) _session?.Write(data);
+                        if (data != null)
+                        {
+                            var wasWaiting = _attention.IsWaiting;
+                            _attention.OnUserInput(DateTimeOffset.Now);
+                            if (wasWaiting) AttentionCleared?.Invoke();
+                            _session?.Write(data);
+                        }
                     }
                     break;
             }
@@ -240,17 +287,34 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         catch { }
     }
 
-    private void StopBtn_Click(object sender, RoutedEventArgs e)
+    private void SetWorking(bool working)
     {
+        if (working == _working) return;
+        _working = working;
+        WorkingStateChanged?.Invoke(working);
+    }
+
+    private void StopAttentionTracking()
+    {
+        _attentionTimer.Stop();
+        SetWorking(false);
+        var wasWaiting = _attention.IsWaiting;
+        _attention.Reset();
+        if (wasWaiting) AttentionCleared?.Invoke();
+    }
+
+    /// <summary>Kills the running session. Called by the host pane's Stop button.</summary>
+    public void StopSession()
+    {
+        StopAttentionTracking();
         _session?.Kill();
-        StatusDot.Fill = StoppedBrush;
-        SubtitleText.Text = "Stopped by user";
-        RestartBtn.Visibility = Visibility.Visible;
-        StopBtn.Visibility = Visibility.Collapsed;
+        RaiseStatus(TerminalStatus.Stopped);
+        RaiseSubtitle("Stopped by user");
         SessionExited?.Invoke();
     }
 
-    private void RestartBtn_Click(object sender, RoutedEventArgs e)
+    /// <summary>Re-launches the last command. Called by the host pane's Restart button.</summary>
+    public void RestartSession()
     {
         if (!string.IsNullOrWhiteSpace(_commandLine))
         {
@@ -260,6 +324,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
 
     public void Dispose()
     {
+        _attentionTimer.Stop();
         Loaded -= EmbeddedTerminalControl_Loaded;
         if (WebView.CoreWebView2 != null)
         {

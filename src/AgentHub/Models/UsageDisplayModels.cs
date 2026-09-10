@@ -4,6 +4,8 @@ namespace AgentHub.Models;
 
 public sealed class UsageProviderDisplay
 {
+    /// <summary>Stable provider id (e.g. "claude"); used to remember which cards the user closed.</summary>
+    public required string ProviderId { get; init; }
     public required string Name { get; init; }
     public required string StatusText { get; init; }
     public required string SourceText { get; init; }

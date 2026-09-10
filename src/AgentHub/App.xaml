@@ -6,8 +6,9 @@
         <!-- Futuristic AI palette, tuned to the AgentHub logo:
              deep blue-black surfaces, electric-cyan primary accent (robot),
              with mint (OpenAI) and orange (crab) available as neon highlights. -->
-        <SolidColorBrush x:Key="PanelBrush" Color="#0C121C" />
-        <SolidColorBrush x:Key="CardBrush" Color="#121A27" />
+        <!-- Panels and cards are slightly translucent so the animated backdrop glows through them. -->
+        <SolidColorBrush x:Key="PanelBrush" Color="#E00C121C" />
+        <SolidColorBrush x:Key="CardBrush" Color="#E6121A27" />
         <SolidColorBrush x:Key="BorderBrush" Color="#1E2C40" />
         <SolidColorBrush x:Key="TextBrush" Color="#E8F1FB" />
         <SolidColorBrush x:Key="MutedBrush" Color="#7E8CA6" />
@@ -207,12 +208,14 @@
                             <ToggleButton Template="{StaticResource ComboToggleChrome}"
                                           Focusable="False" ClickMode="Press"
                                           IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" />
-                            <ContentPresenter IsHitTestVisible="False"
-                                              Content="{TemplateBinding SelectionBoxItem}"
-                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
-                                              Margin="{TemplateBinding Padding}"
-                                              TextElement.Foreground="{StaticResource TextBrush}"
-                                              VerticalAlignment="Center" HorizontalAlignment="Left" />
+                            <!-- Clipped so long selections stop before the 22px arrow column instead of running under it -->
+                            <Border IsHitTestVisible="False" ClipToBounds="True" Margin="0,0,26,0">
+                                <ContentPresenter Content="{TemplateBinding SelectionBoxItem}"
+                                                  ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                  Margin="{TemplateBinding Padding}"
+                                                  TextElement.Foreground="{StaticResource TextBrush}"
+                                                  VerticalAlignment="Center" HorizontalAlignment="Left" />
+                            </Border>
                             <Popup Placement="Bottom" Focusable="False" AllowsTransparency="True"
                                    IsOpen="{TemplateBinding IsDropDownOpen}" PopupAnimation="Slide">
                                 <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
