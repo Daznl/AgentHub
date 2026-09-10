@@ -9,13 +9,34 @@ using UserControl = System.Windows.Controls.UserControl;
 
 namespace AgentHub.Terminal;
 
+public enum TerminalSessionState
+{
+    /// <summary>No session has been launched in this terminal yet.</summary>
+    Idle,
+    Running,
+    /// <summary>The process exited normally or was stopped by the user.</summary>
+    Stopped,
+    /// <summary>The process exited with a non-zero code or failed to launch.</summary>
+    Failed
+}
+
 public partial class EmbeddedTerminalControl : UserControl, IDisposable
 {
-    private static readonly SolidColorBrush RunningBrush = new(Color.FromRgb(34, 197, 94));
-    private static readonly SolidColorBrush StoppedBrush = new(Color.FromRgb(113, 113, 122));
-    private static readonly SolidColorBrush FailedBrush = new(Color.FromRgb(239, 68, 68));
-
     private ConPtySession? _session;
+    // Set by Stop() so the process-exit callback reports "Stopped by user" rather than a failure
+    // (TerminateProcess makes the child exit with a non-zero code).
+    private bool _stopRequested;
+
+    /// <summary>Current lifecycle state; the owning pane renders it (status dot, Stop/Restart buttons).</summary>
+    public TerminalSessionState State { get; private set; } = TerminalSessionState.Idle;
+    /// <summary>What is running here, e.g. "Terminal 2 · Claude Code" as passed by the launcher.</summary>
+    public string SessionLabel { get; private set; } = string.Empty;
+    /// <summary>PID and working directory while running; exit/stop/failure reason otherwise.</summary>
+    public string StatusDetail { get; private set; } = string.Empty;
+    /// <summary>True when a previous command can be relaunched in place.</summary>
+    public bool CanRestart => State != TerminalSessionState.Running && !string.IsNullOrWhiteSpace(_commandLine);
+    /// <summary>Raised whenever State, SessionLabel or StatusDetail change.</summary>
+    public event Action? StatusChanged;
     private bool _isTerminalReady;
     private bool _pendingStart;
     private string _commandLine = string.Empty;
@@ -126,7 +147,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         }
         catch (Exception ex)
         {
-            SubtitleText.Text = "Failed to initialize terminal: " + ex.Message;
+            SetState(TerminalSessionState.Failed, "Failed to initialize terminal: " + ex.Message);
         }
         finally
         {
@@ -141,8 +162,16 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
 
     public void SetHeader(string title, string subtitle = "")
     {
-        TitleText.Text = title;
-        SubtitleText.Text = subtitle;
+        SessionLabel = title;
+        StatusDetail = subtitle;
+        StatusChanged?.Invoke();
+    }
+
+    private void SetState(TerminalSessionState state, string detail)
+    {
+        State = state;
+        StatusDetail = detail;
+        StatusChanged?.Invoke();
     }
 
     public void StartSession(string commandLine, string workingDirectory, string title = "", string subtitle = "", bool isAgentSession = false)
@@ -165,15 +194,12 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     private void SpawnConPty()
     {
         _pendingStart = false;
+        _stopRequested = false;
         _session?.Dispose();
         _session = null;
 
         try
         {
-            StatusDot.Fill = RunningBrush;
-            RestartBtn.Visibility = Visibility.Collapsed;
-            StopBtn.Visibility = Visibility.Visible;
-
             try
             {
                 WebView.CoreWebView2?.PostWebMessageAsString(JsonSerializer.Serialize(new { type = "clear" }));
@@ -182,8 +208,11 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
 
             _session = ConPtySession.Start(_commandLine, _workingDirectory, _cols, _rows);
 
+            // The working pulse is output-driven for every session (so a plain shell in which the user
+            // typed `claude` still glows); only the "waiting for you" alert is limited to agent launches.
+            _attention.RaiseAttention = IsAgentSession && AttentionEnabled;
             _attention.OnSessionStarted(DateTimeOffset.Now);
-            _attentionTimer.IsEnabled = IsAgentSession && AttentionEnabled;
+            _attentionTimer.IsEnabled = true;
 
             _session.OutputDataReceived += text =>
             {
@@ -203,15 +232,19 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
                 Dispatcher.InvokeAsync(() =>
                 {
                     StopAttentionTracking();
-                    StatusDot.Fill = exitCode == 0 ? StoppedBrush : FailedBrush;
-                    SubtitleText.Text = $"Exited (code {exitCode})";
-                    RestartBtn.Visibility = Visibility.Visible;
-                    StopBtn.Visibility = Visibility.Collapsed;
+                    if (_stopRequested)
+                    {
+                        SetState(TerminalSessionState.Stopped, "Stopped by user");
+                    }
+                    else
+                    {
+                        SetState(exitCode == 0 ? TerminalSessionState.Stopped : TerminalSessionState.Failed, $"Exited (code {exitCode})");
+                    }
                     SessionExited?.Invoke();
                 });
             };
 
-            SubtitleText.Text = $"PID {_session.ProcessId} · {_workingDirectory}";
+            SetState(TerminalSessionState.Running, $"PID {_session.ProcessId} · {_workingDirectory}");
             SessionStarted?.Invoke();
 
             // A freshly-launched TUI (e.g. Claude Code) reads the terminal size at
@@ -221,10 +254,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         }
         catch (Exception ex)
         {
-            StatusDot.Fill = FailedBrush;
-            SubtitleText.Text = "Launch failed: " + ex.Message;
-            RestartBtn.Visibility = Visibility.Visible;
-            StopBtn.Visibility = Visibility.Collapsed;
+            SetState(TerminalSessionState.Failed, "Launch failed: " + ex.Message);
         }
     }
 
@@ -303,18 +333,18 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         if (wasWaiting) AttentionCleared?.Invoke();
     }
 
-    private void StopBtn_Click(object sender, RoutedEventArgs e)
+    /// <summary>Kills the running process but keeps the pane and its last command so it can be restarted.</summary>
+    public void Stop()
     {
+        _stopRequested = true;
         StopAttentionTracking();
         _session?.Kill();
-        StatusDot.Fill = StoppedBrush;
-        SubtitleText.Text = "Stopped by user";
-        RestartBtn.Visibility = Visibility.Visible;
-        StopBtn.Visibility = Visibility.Collapsed;
+        SetState(TerminalSessionState.Stopped, "Stopped by user");
         SessionExited?.Invoke();
     }
 
-    private void RestartBtn_Click(object sender, RoutedEventArgs e)
+    /// <summary>Relaunches the last command in the same working directory.</summary>
+    public void Restart()
     {
         if (!string.IsNullOrWhiteSpace(_commandLine))
         {

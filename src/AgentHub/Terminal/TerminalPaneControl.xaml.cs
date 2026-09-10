@@ -50,7 +50,40 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             if (working) StartWorkingPulse();
             else StopWorkingPulse();
         };
+        Terminal.StatusChanged += UpdateSessionStatus;
+        UpdateSessionStatus();
     }
+
+    private static readonly SolidColorBrush IdleDotBrush = new(Color.FromRgb(0x5A, 0x6B, 0x85));
+    private static readonly SolidColorBrush RunningDotBrush = new(Color.FromRgb(34, 197, 94));
+    private static readonly SolidColorBrush StoppedDotBrush = new(Color.FromRgb(113, 113, 122));
+    private static readonly SolidColorBrush FailedDotBrush = new(Color.FromRgb(239, 68, 68));
+
+    // Renders the terminal's session state in the pane's single header row.
+    private void UpdateSessionStatus()
+    {
+        StatusDot.Fill = Terminal.State switch
+        {
+            TerminalSessionState.Running => RunningDotBrush,
+            TerminalSessionState.Failed => FailedDotBrush,
+            TerminalSessionState.Stopped => StoppedDotBrush,
+            _ => IdleDotBrush
+        };
+
+        // Launchers pass "Terminal N · <shell>"; the pane title already shows "Terminal N".
+        var label = Terminal.SessionLabel;
+        var prefix = PaneTitleText.Text + " · ";
+        if (label.StartsWith(prefix, StringComparison.Ordinal)) label = label[prefix.Length..];
+        SessionLabelText.Text = string.IsNullOrWhiteSpace(label) ? "" : "· " + label;
+
+        PaneTitleGroup.ToolTip = string.IsNullOrWhiteSpace(Terminal.StatusDetail) ? null : Terminal.StatusDetail;
+        StopBtn.Visibility = Terminal.State == TerminalSessionState.Running ? Visibility.Visible : Visibility.Collapsed;
+        RestartBtn.Visibility = Terminal.CanRestart ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void Stop_Click(object sender, RoutedEventArgs e) => Terminal.Stop();
+
+    private void Restart_Click(object sender, RoutedEventArgs e) => Terminal.Restart();
 
     // Gentle blue breathing on the border and header while the agent is producing output.
     private void StartWorkingPulse()
@@ -110,7 +143,12 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
         borderBrush.BeginAnimation(SolidColorBrush.ColorProperty, BuildPulse(baseBorder, AttentionColor, restore: () =>
         {
-            PaneBorder.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
+            // If the working pulse took over the border while the amber flash was still running,
+            // leave its brush in place; otherwise the pane would look inert until the next turn.
+            if (ReferenceEquals(PaneBorder.BorderBrush, borderBrush))
+            {
+                PaneBorder.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
+            }
         }));
         headerBrush.BeginAnimation(SolidColorBrush.ColorProperty, BuildPulse(HeaderBaseColor, AttentionHeaderColor, restore: null));
     }

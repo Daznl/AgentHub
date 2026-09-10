@@ -27,6 +27,12 @@ public sealed class AttentionDetector
     /// <summary>Output this soon after a keystroke is the terminal echoing the user, not the agent working.</summary>
     public TimeSpan EchoGrace { get; set; } = TimeSpan.FromMilliseconds(750);
 
+    /// <summary>
+    /// When false (plain shells, or the user turned the alert off) <see cref="Tick"/> never declares the
+    /// session waiting, so <see cref="IsWorking"/> is driven purely by output activity.
+    /// </summary>
+    public bool RaiseAttention { get; set; } = true;
+
     private DateTimeOffset? _lastInputAt;
     private DateTimeOffset? _workStartedAt;
     private DateTimeOffset? _lastOutputAt;
@@ -128,7 +134,7 @@ public sealed class AttentionDetector
     /// </summary>
     public bool Tick(DateTimeOffset now)
     {
-        if (_notified)
+        if (_notified || !RaiseAttention)
         {
             return false;
         }

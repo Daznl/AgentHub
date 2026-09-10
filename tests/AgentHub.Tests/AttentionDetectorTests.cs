@@ -148,4 +148,21 @@ public class AttentionDetectorTests
 
         Assert.True(d.Tick(At(7)));
     }
+
+    [Fact]
+    public void RaiseAttentionOff_NeverWaits_ButStillReportsWorking()
+    {
+        var d = NewDetector();
+        d.RaiseAttention = false;
+        d.OnSessionStarted(At(0));
+        SimulateTurn(d, inputAt: 1, workFrom: 1.2, workUntil: 6);
+
+        Assert.True(d.IsWorking(At(4)));           // output-driven glow still works
+        Assert.False(d.Tick(At(9.5)));             // would have raised for an agent session
+        Assert.False(d.IsWaiting);
+
+        // A later burst with no keystroke in between (e.g. a long-running build) glows again.
+        for (var t = 20.0; t <= 23; t += 0.1) d.OnOutput("Compiling...", At(t));
+        Assert.True(d.IsWorking(At(22)));
+    }
 }
