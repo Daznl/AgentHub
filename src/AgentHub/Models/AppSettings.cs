@@ -4,6 +4,9 @@ public sealed class AppSettings
 {
     public List<RepositoryDefinition> Repositories { get; set; } = [];
 
+    /// <summary>Saved SSH targets shown on each Cockpit pane's SSH button. Addresses only, never credentials.</summary>
+    public List<SshConnection> SshConnections { get; set; } = [];
+
     public List<AgentDefinition> Agents { get; set; } =
     [
         new() { Id = "codex", Name = "Codex", Command = "codex", Notes = "OpenAI Codex CLI" },

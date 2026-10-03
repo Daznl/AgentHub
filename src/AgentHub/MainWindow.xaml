@@ -41,6 +41,7 @@
                     <!-- Row 2 (Cockpit view): cockpit actions -->
                     <StackPanel x:Name="CockpitHeaderActions" Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button x:Name="ToggleUsageBtn" Click="ToggleUsage_Click" Content="📊 Usage" FontWeight="SemiBold" ToolTip="Show or hide the provider usage cards above the terminals" />
+                        <Button Click="ManageSsh_Click" Content="🔐 SSH" Background="#4C1D95" FontWeight="SemiBold" ToolTip="Add or remove saved SSH connections. They appear on every terminal's SSH button." />
                         <Button Click="OpenPowerShellInFolder_Click" Content="📂 PowerShell in Folder…" Background="#0f766e" FontWeight="SemiBold" ToolTip="Browse for any folder and open a plain PowerShell session there in a new terminal pane" />
                         <Button Click="AddTerminal_Click" Content="➕ Add Terminal" Background="#2563eb" FontWeight="SemiBold" ToolTip="Add another side-by-side terminal session" />
                     </StackPanel>

@@ -225,12 +225,28 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
             // startup. Force a couple of re-fits so it gets the true current size and
             // its bottom input/mode line isn't rendered below the visible area.
             ScheduleRefit();
+            FocusTerminal();
         }
         catch (Exception ex)
         {
             RaiseStatus(TerminalStatus.Failed);
             RaiseSubtitle("Launch failed: " + ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Moves keyboard focus into this terminal so the user can type without clicking the pane first.
+    /// Deferred to Input priority so it runs after the click that triggered the launch has finished
+    /// (otherwise the Launch button keeps focus).
+    /// </summary>
+    public void FocusTerminal()
+    {
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            WebView.Focus();
+            try { WebView.CoreWebView2?.PostWebMessageAsString("{\"type\":\"focus\"}"); }
+            catch { }
+        }, System.Windows.Threading.DispatcherPriority.Input);
     }
 
     private void ScheduleRefit()

@@ -14,10 +14,27 @@
                 <DockPanel LastChildFill="True">
                     <!-- Actions docked right FIRST so they always keep their full width -->
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                        <ComboBox x:Name="RepoCombo" Width="130" Margin="0,0,4,0" DisplayMemberPath="Name" ToolTip="Select working repository" />
+                        <ComboBox x:Name="RepoCombo" Width="130" Margin="0,0,4,0" DisplayMemberPath="Name" ToolTip="Select working repository or folder" SelectionChanged="RepoCombo_SelectionChanged" />
+                        <Button Click="BrowseFolder_Click" Content="📂" ToolTip="Browse for any folder to launch in. It is added to the dropdown and selected; press Launch to start." Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <ComboBox x:Name="ShellCombo" Width="110" Margin="0,0,4,0" ToolTip="Select agent CLI or shell" />
                         <Button Click="Launch_Click" Content="Launch" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#0E7490" FontSize="11" />
-                        <Button Click="LaunchInFolder_Click" Content="📂" ToolTip="Browse for a folder and launch the selected shell/agent there (not limited to registered repos)" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
+                        <Button x:Name="SshBtn" Click="Ssh_Click" Content="SSH" ToolTip="Connect to a saved SSH connection" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#4C1D95" FontSize="11" />
+                        <!-- Shown by the SSH button when more than one connection is saved -->
+                        <Popup x:Name="SshPopup" PlacementTarget="{Binding ElementName=SshBtn}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                            <Border Background="#111A28" BorderBrush="#24344B" BorderThickness="1" CornerRadius="6" Padding="4" MinWidth="200">
+                                <StackPanel>
+                                    <ItemsControl x:Name="SshList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Button Click="SshItem_Click" Tag="{Binding}" Content="{Binding DisplayName}" HorizontalContentAlignment="Left" Background="Transparent" Padding="10,5" Margin="0" FontSize="12" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <Border Height="1" Background="#24344B" Margin="4,4" />
+                                    <Button Click="SshManage_Click" Content="⚙ Manage SSH connections…" HorizontalContentAlignment="Left" Background="Transparent" Foreground="#7E8CA6" Padding="10,5" Margin="0" FontSize="12" />
+                                </StackPanel>
+                            </Border>
+                        </Popup>
                         <Button x:Name="MoveLeftBtn" Click="MoveLeft_Click" Content="◀" ToolTip="Move this terminal left" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="MoveRightBtn" Click="MoveRight_Click" Content="▶" ToolTip="Move this terminal right" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="RestartBtn" Click="RestartBtn_Click" Content="Restart" ToolTip="Re-launch the last command in this pane" Visibility="Collapsed" Padding="8,3" Margin="0,0,4,0" FontSize="11" />

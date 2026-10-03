@@ -59,9 +59,11 @@ It never stores API keys or provider credentials. Authentication stays with the 
 ### Terminal cockpit
 
 - Run up to six interactive sessions side by side inside AgentHub, powered by Windows ConPTY and xterm.js in WebView2.
-- Each pane can host Codex, Claude Code, Antigravity, PowerShell or Cmd, in any registered repository or any folder you pick.
+- Each pane can host Codex, Claude Code, Antigravity, PowerShell or Cmd, in any registered repository or any folder you pick. The location dropdown defaults to **🏠 Home (no repo)**, your user profile folder. Pick a repository from it, or press **📂** to browse to any folder, which is then added to the dropdown and selected. Nothing starts until you press **Launch**, and Launch asks before replacing a running session.
 - Draggable splitters, **➕ Add Terminal**, per-pane close buttons and clean session teardown.
 - **Working and waiting indicators.** A pane running a coding CLI breathes blue while the CLI is producing output. When the CLI goes quiet, or rings the terminal bell, the pane pulses amber with a **⏳ WAITING FOR YOU** badge until you type. If AgentHub is in the background, the taskbar button flashes. Plain shells are never tracked.
+- **SSH.** Save connections with the **🔐 SSH** header button: an optional name plus `user@host` or `user@host:port`. Each pane's **SSH** button connects straight away when one connection is saved, or lets you pick when there are several. The session runs your own OpenSSH client inside PowerShell, so `exit` drops you back to a local prompt. AgentHub stores only the address; passwords and keys stay with `ssh`.
+- **Copy and paste.** Select text and press **Ctrl+Shift+C** to copy, **Ctrl+Shift+V** to paste, or right-click a pane for **Copy** / **Paste**. Plain **Ctrl+C** still interrupts the running command.
 - Launch an agent into a specific pane straight from a repository card, or into a new Windows Terminal tab.
 
 ### Usage limit cards

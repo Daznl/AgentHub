@@ -167,9 +167,9 @@ public partial class MainWindow : Window
         if (selectedId is not null)
             RepoList.SelectedItem = repos.FirstOrDefault(r => r.Id == selectedId);
 
-        for (int i = 0; i < _panes.Count; i++)
+        foreach (var pane in _panes)
         {
-            _panes[i].UpdateRepositories(repos, i);
+            pane.UpdateRepositories(repos);
         }
 
         UpdateGitHubAddedState();
@@ -205,11 +205,13 @@ public partial class MainWindow : Window
         var pane = new TerminalPaneControl();
         pane.CloseRequested += OnPaneCloseRequested;
         pane.MoveRequested += OnPaneMoveRequested;
-        pane.FolderLaunchRequested += OnPaneFolderLaunchRequested;
+        pane.FolderPickRequested += OnPaneFolderPickRequested;
         pane.SessionStateChanged += UpdateUsagePollingInterval;
         pane.AttentionRequested += OnPaneAttentionRequested;
         pane.ConfigureAttention(_settings.AttentionFlashEnabled, _settings.AttentionIdleSeconds);
-        pane.UpdateRepositories(_settings.Repositories, defaultRepoIndex);
+        pane.UpdateRepositories(_settings.Repositories);
+        pane.UpdateSshConnections(_settings.SshConnections);
+        pane.SshManageRequested += () => ManageSsh_Click(pane, new RoutedEventArgs());
         pane.UpdateShellOptions(_shellOptions, defaultShellIndex);
         return pane;
     }
@@ -292,14 +294,15 @@ public partial class MainWindow : Window
     private const string PlainPowerShellCommand = "powershell.exe -NoLogo";
 
     /// <summary>
-    /// Shows the Windows folder picker, starting at the last folder the user chose (or the Desktop).
-    /// Returns null when cancelled. Remembers the choice in settings for next time.
+    /// Shows the Windows folder picker, starting at <paramref name="startFolder"/> or else the last folder
+    /// the user chose (or the Desktop). Returns null when cancelled. Remembers the choice in settings for next time.
     /// </summary>
-    private async Task<string?> PickWorkingFolderAsync(string description)
+    private async Task<string?> PickWorkingFolderAsync(string description, string? startFolder = null)
     {
-        var start = !string.IsNullOrWhiteSpace(_settings.LastTerminalFolder) && Directory.Exists(_settings.LastTerminalFolder)
-            ? _settings.LastTerminalFolder
-            : Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+        var start = startFolder
+            ?? (!string.IsNullOrWhiteSpace(_settings.LastTerminalFolder) && Directory.Exists(_settings.LastTerminalFolder)
+                ? _settings.LastTerminalFolder
+                : Environment.GetFolderPath(Environment.SpecialFolder.Desktop));
 
         using var dialog = new Forms.FolderBrowserDialog
         {
@@ -356,7 +359,7 @@ public partial class MainWindow : Window
             if (target is null)
             {
                 MessageBox.Show(this,
-                    "All 6 terminal panes are busy. Close or finish a session first, or use the 📂 button on a pane to replace that session.",
+                    "All 6 terminal panes are busy. Close or finish a session first, or use the 📂 button on a pane to choose a folder and relaunch it there.",
                     "AgentHub", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
@@ -367,26 +370,39 @@ public partial class MainWindow : Window
         StatusText.Text = $"Opened PowerShell in {folder} (Terminal {target.PaneIndex}).";
     }
 
-    /// <summary>Per-pane 📂 button: browse for a folder and launch that pane's selected shell/agent there.</summary>
-    private async void OnPaneFolderLaunchRequested(TerminalPaneControl pane)
+    /// <summary>Header 🔐 SSH button (and a pane's SSH button with nothing saved): add or remove saved SSH connections.</summary>
+    private async void ManageSsh_Click(object sender, RoutedEventArgs e)
     {
-        var shell = pane.SelectedShell;
-        var shellName = shell?.DisplayName ?? "PowerShell";
+        var dialog = new SshConnectionsWindow(_settings.SshConnections) { Owner = this };
+        dialog.ShowDialog();
+        if (!dialog.Changed) return;
 
-        if (pane.IsRunning)
+        foreach (var pane in _panes)
+            pane.UpdateSshConnections(_settings.SshConnections);
+
+        try
         {
-            var replace = MessageBox.Show(this,
-                $"Terminal {pane.PaneIndex} has a running session. Replace it with {shellName} in a folder you choose?",
-                "Replace session", MessageBoxButton.YesNo, MessageBoxImage.Question);
-            if (replace != MessageBoxResult.Yes) return;
+            await _settingsService.SaveAsync(_settings);
+            StatusText.Text = $"{_settings.SshConnections.Count} SSH connection(s) saved.";
         }
+        catch (Exception ex)
+        {
+            StatusText.Text = "Could not save SSH connections: " + ex.Message;
+        }
+    }
 
-        var folder = await PickWorkingFolderAsync($"Choose the folder to launch {shellName} in (Terminal {pane.PaneIndex})");
+    /// <summary>
+    /// Per-pane 📂 button: browse for a folder, starting from the pane's current location, and select it
+    /// in that pane's dropdown. Nothing launches until the user presses Launch, so no running session is touched.
+    /// </summary>
+    private async void OnPaneFolderPickRequested(TerminalPaneControl pane)
+    {
+        var start = Directory.Exists(pane.SelectedFolder) ? pane.SelectedFolder : TerminalPaneControl.BaseDirectory;
+        var folder = await PickWorkingFolderAsync("Choose the folder to launch in", start);
         if (folder is null) return;
 
-        var name = FolderDisplayName(folder);
-        pane.StartSession(shell?.Command ?? PlainPowerShellCommand, folder, $"Terminal {pane.PaneIndex} · {shellName}", name, shell?.IsAgent ?? false);
-        StatusText.Text = $"Launched {shellName} in {folder} (Terminal {pane.PaneIndex}).";
+        pane.SetCustomFolder(folder);
+        StatusText.Text = $"Terminal {pane.PaneIndex} will launch in {folder}. Press Launch to start.";
     }
 
     private void OnPaneCloseRequested(TerminalPaneControl pane)

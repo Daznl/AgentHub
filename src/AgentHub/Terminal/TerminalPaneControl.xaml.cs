@@ -28,8 +28,13 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     public event Action<TerminalPaneControl>? CloseRequested;
     public event Action<TerminalPaneControl, int>? MoveRequested;
-    /// <summary>Raised when the user asks to pick an arbitrary folder and launch the selected shell there.</summary>
-    public event Action<TerminalPaneControl>? FolderLaunchRequested;
+    /// <summary>Raised when the user asks to browse for a folder to launch in. The host shows the picker and calls <see cref="SetCustomFolder"/>.</summary>
+    public event Action<TerminalPaneControl>? FolderPickRequested;
+    /// <summary>Raised when the user wants to add or remove SSH connections (also when SSH is pressed with none saved).</summary>
+    public event Action? SshManageRequested;
+    private List<SshConnection> _sshConnections = [];
+    private List<RepositoryDefinition> _repositories = [];
+    private LaunchLocation? _customLocation;
     /// <summary>Raised once when the coding CLI in this pane stops working and waits for the user.</summary>
     public event Action<TerminalPaneControl>? AttentionRequested;
     private int _paneIndex = 1;
@@ -156,20 +161,51 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         _ = accent;
     }
 
-    public void UpdateRepositories(List<RepositoryDefinition> repos, int defaultIndex = 0)
+    /// <summary>Folder a session starts in when no repository or folder has been chosen.</summary>
+    public static string BaseDirectory => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+    /// <summary>The folder the Launch button will start in.</summary>
+    public string SelectedFolder => (RepoCombo.SelectedItem as LaunchLocation)?.Path ?? BaseDirectory;
+
+    public void UpdateRepositories(List<RepositoryDefinition> repos)
     {
-        var prevSelected = RepoCombo.SelectedItem as RepositoryDefinition;
-        RepoCombo.ItemsSource = null;
-        RepoCombo.ItemsSource = repos;
-        if (prevSelected != null && repos.Any(r => r.Id == prevSelected.Id))
+        _repositories = repos;
+        var prev = RepoCombo.SelectedItem as LaunchLocation;
+        RebuildLocations(prev);
+    }
+
+    /// <summary>Adds (or replaces) the browsed-folder entry in the location dropdown and selects it.</summary>
+    public void SetCustomFolder(string folder)
+    {
+        var name = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        _customLocation = new LaunchLocation
         {
-            RepoCombo.SelectedItem = repos.First(r => r.Id == prevSelected.Id);
-        }
-        else if (repos.Count > 0)
-        {
-            var idx = Math.Clamp(defaultIndex, 0, repos.Count - 1);
-            RepoCombo.SelectedIndex = idx;
-        }
+            Name = "📁 " + (string.IsNullOrWhiteSpace(name) ? folder : name),
+            Path = folder
+        };
+        RebuildLocations(_customLocation);
+    }
+
+    // Dropdown order: home (the default), the browsed folder if any, then registered repositories.
+    private void RebuildLocations(LaunchLocation? select)
+    {
+        var home = new LaunchLocation { Name = "🏠 Home (no repo)", Path = BaseDirectory };
+        var items = new List<LaunchLocation> { home };
+        if (_customLocation is not null) items.Add(_customLocation);
+        items.AddRange(_repositories.Select(r => new LaunchLocation { Name = r.Name, Path = r.LocalPath, Repository = r }));
+
+        RepoCombo.ItemsSource = items;
+        RepoCombo.SelectedItem =
+            (select?.Repository is { } repo ? items.FirstOrDefault(i => i.Repository?.Id == repo.Id) : null)
+            ?? (select is not null && select == _customLocation ? _customLocation : null)
+            ?? home;
+    }
+
+    private void RepoCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        RepoCombo.ToolTip = RepoCombo.SelectedItem is LaunchLocation loc
+            ? $"Launches in {loc.Path}"
+            : "Select working repository or folder";
     }
 
     public void UpdateShellOptions(List<ShellOption> shells, int defaultIndex = 0)
@@ -222,17 +258,87 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     private void Launch_Click(object sender, RoutedEventArgs e)
     {
-        var repo = RepoCombo.SelectedItem as RepositoryDefinition;
-        var dir = repo?.LocalPath ?? Directory.GetCurrentDirectory();
-        var repoName = repo?.Name ?? "Workspace";
+        var location = RepoCombo.SelectedItem as LaunchLocation;
+        var dir = location?.Path ?? BaseDirectory;
+        if (!Directory.Exists(dir))
+        {
+            System.Windows.MessageBox.Show(Window.GetWindow(this), $"The folder no longer exists:\n{dir}", "AgentHub",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        var repoName = location?.Repository?.Name ?? location?.Name ?? "Home";
         var shell = ShellCombo.SelectedItem as ShellOption;
         var cmd = shell?.Command ?? "powershell.exe -NoLogo";
         var title = shell?.DisplayName ?? "Shell";
 
+        if (Terminal.IsRunning)
+        {
+            var replace = System.Windows.MessageBox.Show(Window.GetWindow(this),
+                $"This terminal has a running session. Replace it with {title} in {dir}?",
+                "Replace session", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (replace != MessageBoxResult.Yes) return;
+        }
+
         Terminal.StartSession(cmd, dir, $"Terminal {_paneIndex} · {title}", repoName, shell?.IsAgent ?? false);
     }
 
-    private void LaunchInFolder_Click(object sender, RoutedEventArgs e) => FolderLaunchRequested?.Invoke(this);
+    public void UpdateSshConnections(List<SshConnection> connections)
+    {
+        _sshConnections = connections;
+        SshList.ItemsSource = null;
+        SshList.ItemsSource = connections;
+        SshBtn.ToolTip = connections.Count switch
+        {
+            0 => "Add an SSH connection",
+            1 => $"SSH to {connections[0].DisplayName}",
+            _ => "Choose a saved SSH connection"
+        };
+    }
+
+    // One saved connection: connect straight away. Several: show the picker. None: open the manager.
+    private void Ssh_Click(object sender, RoutedEventArgs e)
+    {
+        switch (_sshConnections.Count)
+        {
+            case 0:
+                SshManageRequested?.Invoke();
+                break;
+            case 1:
+                ConnectSsh(_sshConnections[0]);
+                break;
+            default:
+                SshPopup.IsOpen = true;
+                break;
+        }
+    }
+
+    private void SshItem_Click(object sender, RoutedEventArgs e)
+    {
+        SshPopup.IsOpen = false;
+        if ((sender as FrameworkElement)?.Tag is SshConnection connection)
+            ConnectSsh(connection);
+    }
+
+    private void SshManage_Click(object sender, RoutedEventArgs e)
+    {
+        SshPopup.IsOpen = false;
+        SshManageRequested?.Invoke();
+    }
+
+    private void ConnectSsh(SshConnection connection)
+    {
+        if (Terminal.IsRunning)
+        {
+            var replace = System.Windows.MessageBox.Show(Window.GetWindow(this),
+                $"This terminal has a running session. Replace it with SSH to {connection.DisplayName}?",
+                "Replace session", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (replace != MessageBoxResult.Yes) return;
+        }
+
+        Terminal.StartSession(connection.BuildCommandLine(), BaseDirectory, $"Terminal {_paneIndex} · SSH", $"SSH · {connection.DisplayName}");
+    }
+
+    private void BrowseFolder_Click(object sender, RoutedEventArgs e) => FolderPickRequested?.Invoke(this);
 
     private void Close_Click(object sender, RoutedEventArgs e)
     {
@@ -245,13 +351,14 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     public void StartSession(string commandLine, string workingDirectory, string title, string repoName, bool isAgentSession = false)
     {
-        if (!string.IsNullOrEmpty(workingDirectory) && RepoCombo.ItemsSource is IEnumerable<RepositoryDefinition> repos)
+        // Keep the location dropdown in step with where the session actually runs.
+        if (!string.IsNullOrEmpty(workingDirectory) && RepoCombo.ItemsSource is IEnumerable<LaunchLocation> locations)
         {
-            var match = repos.FirstOrDefault(r => string.Equals(r.LocalPath, workingDirectory, StringComparison.OrdinalIgnoreCase));
+            var match = locations.FirstOrDefault(l => string.Equals(l.Path, workingDirectory, StringComparison.OrdinalIgnoreCase));
             if (match != null)
-            {
                 RepoCombo.SelectedItem = match;
-            }
+            else if (Directory.Exists(workingDirectory))
+                SetCustomFolder(workingDirectory);
         }
         Terminal.StartSession(commandLine, workingDirectory, title, repoName, isAgentSession);
     }
@@ -260,4 +367,12 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     {
         Terminal.Dispose();
     }
+}
+
+/// <summary>An entry in a pane's location dropdown: the home folder, a browsed folder, or a registered repository.</summary>
+public sealed class LaunchLocation
+{
+    public required string Name { get; init; }
+    public required string Path { get; init; }
+    public RepositoryDefinition? Repository { get; init; }
 }

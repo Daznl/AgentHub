@@ -226,6 +226,11 @@
             scheduleFit();
             return;
           }
+          // Host just launched a session here; put the cursor in it so the user can type straight away.
+          if (msg.startsWith('{') && msg.includes('"type":"focus"')) {
+            term.focus();
+            return;
+          }
           writeToTerminal(msg);
         } else if (msg && msg.type === 'clear') {
           term.reset();
