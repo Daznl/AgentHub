@@ -116,6 +116,11 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
             WebView.CoreWebView2.Settings.AreDevToolsEnabled = false;
             WebView.CoreWebView2.Settings.IsStatusBarEnabled = false;
 
+            // Auto-grant clipboard read so Ctrl+Shift+V / right-click Paste work
+            // without a permission prompt on our own local terminal page.
+            WebView.CoreWebView2.PermissionRequested -= CoreWebView2_PermissionRequested;
+            WebView.CoreWebView2.PermissionRequested += CoreWebView2_PermissionRequested;
+
             // Ensure event handler is subscribed strictly once to avoid duplicate keystroke events
             WebView.CoreWebView2.WebMessageReceived -= CoreWebView2_WebMessageReceived;
             WebView.CoreWebView2.WebMessageReceived += CoreWebView2_WebMessageReceived;
@@ -242,6 +247,14 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         });
     }
 
+    private void CoreWebView2_PermissionRequested(object? sender, CoreWebView2PermissionRequestedEventArgs e)
+    {
+        if (e.PermissionKind == CoreWebView2PermissionKind.ClipboardRead)
+        {
+            e.State = CoreWebView2PermissionState.Allow;
+        }
+    }
+
     private void CoreWebView2_WebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
         try
@@ -331,6 +344,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
             try
             {
                 WebView.CoreWebView2.WebMessageReceived -= CoreWebView2_WebMessageReceived;
+                WebView.CoreWebView2.PermissionRequested -= CoreWebView2_PermissionRequested;
             }
             catch { }
         }

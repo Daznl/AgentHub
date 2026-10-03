@@ -129,6 +129,88 @@
       }
     });
 
+    // Send text to the running session as if typed. Used by paste.
+    function sendInput(data) {
+      if (!data) return;
+      if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage(JSON.stringify({ type: 'input', data: data }));
+      }
+    }
+
+    function copySelection() {
+      const text = term.getSelection();
+      if (text && navigator.clipboard) {
+        navigator.clipboard.writeText(text).catch(() => {});
+      }
+      return !!text;
+    }
+
+    function pasteClipboard() {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        navigator.clipboard.readText().then(sendInput).catch(() => {});
+      }
+    }
+
+    // xterm renders to a canvas, so the browser's native copy/paste can't reach
+    // the selection. Wire up the usual terminal shortcuts explicitly:
+    //   Ctrl+Shift+C -> copy selection   Ctrl+Shift+V -> paste
+    // Ctrl+Shift+* is used (not plain Ctrl+C/V) so Ctrl+C still sends SIGINT.
+    term.attachCustomKeyEventHandler(e => {
+      if (e.type !== 'keydown') return true;
+      if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
+        copySelection();
+        return false;
+      }
+      if (e.ctrlKey && e.shiftKey && (e.key === 'V' || e.key === 'v')) {
+        pasteClipboard();
+        return false;
+      }
+      return true;
+    });
+
+    // Minimal right-click context menu for copy/paste.
+    const menu = document.createElement('div');
+    menu.style.cssText = [
+      'position:fixed', 'z-index:1000', 'display:none',
+      'background:#111A28', 'border:1px solid #24344B', 'border-radius:6px',
+      'padding:4px', 'box-shadow:0 4px 16px rgba(0,0,0,0.5)',
+      'font-family:Consolas, "Segoe UI", sans-serif', 'font-size:13px',
+      'color:#E6F1FF', 'user-select:none', 'min-width:120px'
+    ].join(';');
+    function makeItem(label, onClick) {
+      const item = document.createElement('div');
+      item.textContent = label;
+      item.style.cssText = 'padding:6px 12px;border-radius:4px;cursor:pointer';
+      item.addEventListener('mouseenter', () => { item.style.background = '#1E3350'; });
+      item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
+      item.addEventListener('mousedown', ev => {
+        ev.preventDefault();
+        hideMenu();
+        onClick();
+      });
+      return item;
+    }
+    const copyItem = makeItem('Copy', copySelection);
+    const pasteItem = makeItem('Paste', pasteClipboard);
+    menu.appendChild(copyItem);
+    menu.appendChild(pasteItem);
+    document.body.appendChild(menu);
+
+    function hideMenu() { menu.style.display = 'none'; }
+
+    document.getElementById('terminal-container').addEventListener('contextmenu', e => {
+      e.preventDefault();
+      const hasSelection = !!term.getSelection();
+      copyItem.style.opacity = hasSelection ? '1' : '0.4';
+      copyItem.style.pointerEvents = hasSelection ? 'auto' : 'none';
+      menu.style.left = Math.min(e.clientX, window.innerWidth - 130) + 'px';
+      menu.style.top = Math.min(e.clientY, window.innerHeight - 80) + 'px';
+      menu.style.display = 'block';
+    });
+    window.addEventListener('mousedown', e => { if (!menu.contains(e.target)) hideMenu(); });
+    window.addEventListener('scroll', hideMenu, true);
+    window.addEventListener('blur', hideMenu);
+
     if (window.chrome && window.chrome.webview) {
       window.chrome.webview.addEventListener('message', event => {
         const msg = event.data;
