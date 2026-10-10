@@ -291,6 +291,8 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             watcher.TurnEvent += e => OnTurnEvent(watcher, repoRoot, e);
             _watcher = watcher;
             watcher.Start();
+            // Claude writes nothing until the first prompt; show the strip now so it is clear the pane is tracked.
+            ShowTurn("—", "Tracking this session. Your next message and Claude's reply will show here.", TurnStatus.Complete, label: "👀 Tracking");
         }
 
         Terminal.StartSession(commandLine, workingDirectory, title, subtitle, isAgent);
@@ -323,7 +325,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         });
     }
 
-    private void ShowTurn(string asked, string said, TurnStatus status)
+    private void ShowTurn(string asked, string said, TurnStatus status, string? label = null)
     {
         TurnStrip.Visibility = Visibility.Visible;
         TurnAskedText.Text = asked;
@@ -333,6 +335,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             TurnStatus.Interrupted => ("⚠ Claude said", said.Length > 0 ? said : "(interrupted before replying)"),
             _ => ("✅ Claude said", said.Length > 0 ? said : "(finished without a text reply)")
         };
+        if (label is not null) TurnSaidLabel.Text = label;
         ApplyStripExpansion();
     }
 
