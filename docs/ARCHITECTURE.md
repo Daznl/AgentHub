@@ -96,6 +96,7 @@ Groundwork for a per-repository tracker that summarises each coding session and 
 - **Known session id.** `ClaudeSessionLaunch` appends `--session-id <guid>` to fresh interactive `claude` launches in a Git repository root, so the pane knows its exact transcript. Restart generates a new id, because Claude refuses to reuse one.
 - **Incremental reads.** `TranscriptWatcher` polls every 1.5 s, reads only bytes past its offset and holds back an unfinished last line.
 - **Turn boundaries.** `ClaudeTranscriptParser` opens a turn on a human prompt (`origin.kind == "human"`, not a tool result, not `isMeta`/`isSidechain`, system reminders stripped). The final text is the text written after the last tool call. A turn ends on an `end_turn` stop reason on a text line. One reply is split into one line per content block, each carrying the stop reason, so a thinking-only line does not end it. A new prompt marks an unfinished turn as interrupted. The pane's waiting signal and session exit call `Settle` as a fallback.
+- **Clean child environment.** A Claude started under another Claude session inherits markers such as `CLAUDE_CODE_CHILD_SESSION` and then saves no transcript. `App` clears those markers at startup, so panes behave the same however AgentHub was launched.
 - **Journal.** `TurnJournal` appends to `<repo>/.agenthub/journal.jsonl` (shared by all sessions in the repo) and adds it to `.git/info/exclude`. A turn that continues after finishing is appended again with the same `turnId`; readers keep the last entry per id.
 
 ## Planned v0.2 session model
