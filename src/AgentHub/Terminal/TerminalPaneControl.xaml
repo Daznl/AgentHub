@@ -66,6 +66,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="📝 You asked" Foreground="#7E8CA6" FontSize="11" FontWeight="SemiBold" Margin="0,0,10,2" />
                     <TextBlock x:Name="TurnAskedText" Grid.Row="0" Grid.Column="1" Foreground="#C9D4E5" FontSize="11" TextTrimming="CharacterEllipsis" Margin="0,0,0,2" />
@@ -73,6 +74,12 @@
                     <ScrollViewer x:Name="TurnSaidScroll" Grid.Row="1" Grid.Column="1" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled">
                         <TextBlock x:Name="TurnSaidText" Foreground="#C9D4E5" FontSize="11" TextTrimming="CharacterEllipsis" />
                     </ScrollViewer>
+                    <!-- Suggested next message: click to type it into the session (never sent; the user presses Enter) -->
+                    <TextBlock x:Name="TurnNextLabel" Grid.Row="2" Grid.Column="0" Text="👉 Suggested next" Foreground="#7E8CA6" FontSize="11" FontWeight="SemiBold" Margin="0,2,10,0" Visibility="Collapsed" />
+                    <Border x:Name="TurnNextChip" Grid.Row="2" Grid.Column="1" HorizontalAlignment="Left" Margin="0,2,0,0" Padding="6,1" CornerRadius="4" Background="#12324A" BorderBrush="#1E5A80" BorderThickness="1"
+                            Visibility="Collapsed" Cursor="Hand" MouseLeftButtonUp="TurnNext_Click" ToolTip="Click to type this into the terminal. It is not sent: edit it or press Enter.">
+                        <TextBlock x:Name="TurnNextText" Foreground="#9FD8FF" FontSize="11" TextTrimming="CharacterEllipsis" />
+                    </Border>
                 </Grid>
             </Border>
 

@@ -1,27 +1,41 @@
+using System.Text;
 using System.Text.RegularExpressions;
 using AgentHub.Services;
 
 namespace AgentHub.Tracking;
 
+/// <summary>A finished turn boiled down: what happened, and the message the user would most likely send next.</summary>
+public sealed record TurnInsight(string? Summary, string? Suggestion);
+
 /// <summary>
-/// Boils an agent's closing reply down to one short sentence by running a stripped-down headless
-/// Claude Code call (<c>claude -p</c>): no tools, hooks, MCP servers, skills or project CLAUDE.md, and
-/// nothing saved as a session. ANTHROPIC_API_KEY is removed from that call's environment so it signs
-/// in with the user's claude.ai login (subscription) instead of billing an API key. AgentHub never
-/// handles a credential itself.
+/// Turns an agent's full closing reply into a short summary and a suggested next message, in one
+/// stripped-down headless Claude Code call (<c>claude -p</c>): no tools, hooks, MCP servers, skills or
+/// project CLAUDE.md, and nothing saved as a session. ANTHROPIC_API_KEY is removed from that call's
+/// environment so it signs in with the user's claude.ai login (subscription) instead of billing an API
+/// key. AgentHub never handles a credential itself. The suggestion is only shown to the user; it is
+/// never sent to the session.
 /// </summary>
 public sealed partial class TurnSummarizer
 {
     public const int MaxWords = 20;
 
-    // Only the closing reply is sent; anything longer is cut, since the summary is one sentence anyway.
-    private const int MaxInputChars = 12_000;
+    // The full closing reply is sent, cut only if it is very long.
+    private const int MaxReplyChars = 12_000;
+    private const int MaxPromptChars = 2_000;
+    private const int MaxHistoryItemChars = 300;
 
     private const string SystemPrompt =
-        "You write the status line for a coding assistant's reply. Output one plain sentence of at most " +
-        "20 words saying what the assistant did or found, written as the assistant in past tense without " +
-        "a subject (for example: \"Added login page; tests pass\"). Mention a question only if the reply " +
-        "asks the user to decide something. No preamble, markdown or quotes.";
+        "You track a coding session for a busy user who is not watching it. You get recent turns for context, " +
+        "the user's latest message and the assistant's full closing reply. Output exactly two lines and nothing else:\n" +
+        "SUMMARY: at most 20 words on what the assistant did or found, past tense, no subject " +
+        "(for example: Added login page; tests pass).\n" +
+        "NEXT: at most 20 words: the message the user would most likely send next, written as the user talking to the assistant.\n" +
+        "Rules for NEXT: if the reply asks a question or offers to do something, answer it (for example: Yes, start building it). " +
+        "If it offers a choice, pick the option the reply recommends. If work is finished and working, write \"Test it: <how, " +
+        "from the reply>, then <the next step>\", taking the next step from the recent turns when the plan shows one. " +
+        "Start with Yes only when answering a question. If something failed or is blocked, ask for the fix. If the user " +
+        "must do something themselves, tell them what to run or check.\n" +
+        "No preamble, markdown or quotes.";
 
     // Variables that would route the call to an API key or a third-party provider instead of the claude.ai login.
     private static readonly string[] NonSubscriptionAuth = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"];
@@ -49,27 +63,78 @@ public sealed partial class TurnSummarizer
     ];
 
     /// <summary>
-    /// Returns a summary of at most <see cref="MaxWords"/> words, or null if the call failed.
-    /// A reply that is already short enough is returned as is, without a call.
+    /// What the call reads on stdin: earlier turns as prompt + summary (oldest first), then the latest
+    /// prompt and the assistant's full closing reply. Public for tests.
     /// </summary>
-    public async Task<string?> SummarizeAsync(string claudeExecutable, string reply, CancellationToken cancellationToken = default)
+    public static string BuildInput(string userMessage, string reply, IEnumerable<JournalEntry> recentTurns)
     {
-        var flat = Flatten(reply);
-        if (flat.Length == 0) return null;
-        if (CountWords(flat) <= MaxWords) return flat;
+        var sb = new StringBuilder();
+        var history = recentTurns.ToList();
+        if (history.Count > 0)
+        {
+            sb.AppendLine("Recent turns (oldest first):");
+            var n = 1;
+            foreach (var turn in history)
+            {
+                var result = turn.Summary ?? turn.FinalText;
+                sb.AppendLine($"{n++}. User: {Clip(Flatten(turn.UserMessage), MaxHistoryItemChars)}");
+                sb.AppendLine($"   Result: {Clip(Flatten(result), MaxHistoryItemChars)}");
+            }
+            sb.AppendLine();
+        }
+        sb.AppendLine("Latest user message:");
+        sb.AppendLine(Clip(userMessage.Trim(), MaxPromptChars));
+        sb.AppendLine();
+        sb.AppendLine("Assistant's full closing reply:");
+        sb.AppendLine(Clip(reply.Trim(), MaxReplyChars));
+        return sb.ToString();
+    }
 
-        var input = reply.Length > MaxInputChars ? reply[..MaxInputChars] : reply;
+    /// <summary>Returns the summary and suggestion for a turn, or null if the call failed.</summary>
+    public async Task<TurnInsight?> AnalyzeAsync(string claudeExecutable, string userMessage, string reply,
+        IEnumerable<JournalEntry> recentTurns, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(reply)) return null;
+
         var (exitCode, stdout, _) = await _runner.RunAsync(
             claudeExecutable,
             BuildArguments(),
             WorkingFolder(),
             cancellationToken,
             TimeSpan.FromSeconds(90),
-            standardInput: input,
+            standardInput: BuildInput(userMessage, reply, recentTurns),
             removeEnvironmentVariables: NonSubscriptionAuth);
 
-        var summary = Flatten(stdout);
-        return exitCode == 0 && summary.Length > 0 ? LimitWords(summary, MaxWords) : null;
+        if (exitCode != 0) return null;
+        var insight = ParseOutput(stdout);
+        return insight.Summary is null && insight.Suggestion is null ? null : insight;
+    }
+
+    /// <summary>
+    /// Reads the SUMMARY and NEXT lines, each capped at <see cref="MaxWords"/>. Unlabelled output is taken as
+    /// the summary. Public for tests.
+    /// </summary>
+    public static TurnInsight ParseOutput(string output)
+    {
+        string? summary = null, suggestion = null;
+        var unlabelled = new List<string>();
+        foreach (var raw in output.Replace("\r", "").Split('\n'))
+        {
+            var line = raw.Trim().Trim('*').Trim();
+            if (line.Length == 0) continue;
+            var label = LabelRegex().Match(line);
+            if (!label.Success) { unlabelled.Add(line); continue; }
+
+            var text = Flatten(line[label.Length..]);
+            if (text.Length == 0) continue;
+            if (label.Groups[1].Value.Equals("SUMMARY", StringComparison.OrdinalIgnoreCase)) summary ??= text;
+            else suggestion ??= text;
+        }
+        if (summary is null && unlabelled.Count > 0) summary = Flatten(string.Join(' ', unlabelled));
+
+        return new TurnInsight(
+            summary is { Length: > 0 } ? LimitWords(summary, MaxWords) : null,
+            suggestion is { Length: > 0 } ? LimitWords(suggestion, MaxWords) : null);
     }
 
     // An empty folder of AgentHub's own, so no repository CLAUDE.md is picked up.
@@ -89,6 +154,8 @@ public sealed partial class TurnSummarizer
         return words.Length <= max ? string.Join(' ', words) : string.Join(' ', words.Take(max)).TrimEnd(',', ';', ':', '.') + "…";
     }
 
+    private static string Clip(string text, int max) => text.Length <= max ? text : text[..max] + "…";
+
     // One line, light markdown removed (headings, bullets, bold/code markers), surrounding quotes dropped.
     private static string Flatten(string text)
     {
@@ -98,6 +165,9 @@ public sealed partial class TurnSummarizer
         var flat = string.Join(' ', lines).Replace("**", "").Replace("`", "");
         return WhitespaceRegex().Replace(flat, " ").Trim().Trim('"');
     }
+
+    [GeneratedRegex(@"^(SUMMARY|NEXT)\s*:\s*", RegexOptions.IgnoreCase)]
+    private static partial Regex LabelRegex();
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRegex();

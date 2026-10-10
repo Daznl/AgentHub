@@ -24,6 +24,9 @@ public sealed class TranscriptTurn
     /// <summary>One-sentence summary of <see cref="FinalText"/>, filled in after the turn completes.</summary>
     public string? Summary { get; set; }
 
+    /// <summary>The message the user would most likely send next, worked out from the full reply. Shown, never sent.</summary>
+    public string? Suggestion { get; set; }
+
     /// <summary>
     /// A copy that later parser updates cannot change. The parser reuses the turn object if the agent carries on,
     /// so anything handled off the parser's thread works on a snapshot.
@@ -40,7 +43,8 @@ public sealed class TranscriptTurn
             Status = Status,
             FinalText = FinalText,
             ToolCalls = ToolCalls,
-            Summary = Summary
+            Summary = Summary,
+            Suggestion = Suggestion
         };
         copy.FilesTouched.AddRange(FilesTouched);
         return copy;

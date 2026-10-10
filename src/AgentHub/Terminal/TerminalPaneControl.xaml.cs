@@ -277,7 +277,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     /// <summary>
     /// Turns the per-turn transcript tracking for Claude Code sessions in repositories on or off.
-    /// With a <paramref name="summarizer"/>, each finished reply is also summarised in a few words.
+    /// With a <paramref name="summarizer"/>, each finished reply also gets a short summary and a suggested next message.
     /// </summary>
     public void ConfigureTracking(bool enabled, TurnSummarizer? summarizer)
     {
@@ -322,6 +322,8 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         var turn = e.Turn.Snapshot();
         var summarizer = _summarizer;
         var summarise = e.Kind == TurnEventKind.Completed && summarizer is not null && turn.FinalText.Length > 0;
+        // Earlier turns in this repository give the suggestion context; read before this turn is appended.
+        var recentTurns = summarise ? RecentTurns(repoRoot, turn.TurnId) : [];
 
         if (e.Kind == TurnEventKind.Completed)
             AppendJournal(repoRoot, turn);
@@ -342,19 +344,33 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         });
 
         if (summarise)
-            _ = SummariseAsync(summarizer!, source, repoRoot, claudeExecutable, turn, state);
+            _ = SummariseAsync(summarizer!, source, repoRoot, claudeExecutable, turn, recentTurns, state);
     }
 
-    private async Task SummariseAsync(TurnSummarizer summarizer, TranscriptWatcher source, string repoRoot,
-        string claudeExecutable, TranscriptTurn turn, StripState shown)
-    {
-        string? summary = null;
-        try { summary = await summarizer.SummarizeAsync(claudeExecutable, turn.FinalText).ConfigureAwait(false); }
-        catch (Exception) { } // a failed summary leaves the full reply on show
+    private const int RecentTurnsForContext = 5;
 
-        if (summary is not null)
+    private static List<JournalEntry> RecentTurns(string repoRoot, string excludeTurnId)
+    {
+        try
         {
-            turn.Summary = summary;
+            return TurnJournal.Read(repoRoot).Where(t => t.TurnId != excludeTurnId).TakeLast(RecentTurnsForContext).ToList();
+        }
+        catch (IOException) { return []; }
+        catch (UnauthorizedAccessException) { return []; }
+    }
+
+    // One headless call turns the full reply (plus recent turns for context) into a summary and a suggested next message.
+    private async Task SummariseAsync(TurnSummarizer summarizer, TranscriptWatcher source, string repoRoot,
+        string claudeExecutable, TranscriptTurn turn, List<JournalEntry> recentTurns, StripState shown)
+    {
+        TurnInsight? insight = null;
+        try { insight = await summarizer.AnalyzeAsync(claudeExecutable, turn.UserMessage, turn.FinalText, recentTurns).ConfigureAwait(false); }
+        catch (Exception) { } // a failed call leaves the full reply on show
+
+        if (insight is not null)
+        {
+            turn.Summary = insight.Summary;
+            turn.Suggestion = insight.Suggestion;
             AppendJournal(repoRoot, turn);
         }
 
@@ -362,7 +378,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         {
             // Only update the strip if it still shows this reply (no newer prompt, relaunch or continued turn).
             if (!ReferenceEquals(source, _watcher) || !ReferenceEquals(_strip, shown)) return;
-            ShowStrip(shown with { Summary = summary, Summarising = false });
+            ShowStrip(shown with { Summary = insight?.Summary, Suggestion = insight?.Suggestion, Summarising = false });
         });
     }
 
@@ -379,7 +395,22 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         TurnStrip.Visibility = Visibility.Visible;
         TurnAskedText.Text = state.Asked;
         TurnSaidLabel.Text = state.Label;
+
+        var next = state.Summarising ? "working it out…" : state.Suggestion;
+        var showNext = next is not null;
+        TurnNextLabel.Visibility = showNext ? Visibility.Visible : Visibility.Collapsed;
+        TurnNextChip.Visibility = showNext ? Visibility.Visible : Visibility.Collapsed;
+        TurnNextText.Text = next ?? "";
+        TurnNextChip.IsEnabled = state.Suggestion is not null;
         ApplyStripExpansion();
+    }
+
+    // Types the suggestion into the session without pressing Enter: the user stays in charge of what is sent.
+    private void TurnNext_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        e.Handled = true; // do not also toggle the strip
+        if (_strip?.Suggestion is { } suggestion)
+            Terminal.TypeText(suggestion);
     }
 
     private void TurnStrip_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -405,6 +436,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         var wrap = _stripExpanded ? TextWrapping.Wrap : TextWrapping.NoWrap;
         TurnAskedText.TextWrapping = wrap;
         TurnSaidText.TextWrapping = wrap;
+        TurnNextText.TextWrapping = wrap;
         TurnSaidScroll.MaxHeight = _stripExpanded ? 160 : double.PositiveInfinity;
         TurnSaidScroll.VerticalScrollBarVisibility = _stripExpanded ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
     }
@@ -523,8 +555,8 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         Terminal.Dispose();
     }
 
-    /// <summary>What the turn strip shows: the prompt, a label, the reply, and its summary once ready.</summary>
-    private sealed record StripState(string Asked, string Label, string Text, string? Summary = null, bool Summarising = false);
+    /// <summary>What the turn strip shows: the prompt, a label, the reply, and its summary and suggestion once ready.</summary>
+    private sealed record StripState(string Asked, string Label, string Text, string? Summary = null, bool Summarising = false, string? Suggestion = null);
 
     private sealed record LaunchRequest(string CommandLine, string WorkingDirectory, string Title, string Subtitle, bool IsAgent);
 }

@@ -332,6 +332,18 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         if (wasWaiting) AttentionCleared?.Invoke();
     }
 
+    /// <summary>
+    /// Types <paramref name="text"/> into the running session as if the user had typed it, without pressing Enter,
+    /// and focuses the terminal so the user can edit or submit it. Returns false when nothing is running.
+    /// </summary>
+    public bool TypeText(string text)
+    {
+        if (_session?.IsRunning != true || string.IsNullOrEmpty(text)) return false;
+        _session.Write(text);
+        FocusTerminal();
+        return true;
+    }
+
     /// <summary>Kills the running session. Called by the host pane's Stop button.</summary>
     public void StopSession()
     {

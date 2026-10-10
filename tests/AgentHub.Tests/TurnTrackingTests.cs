@@ -303,12 +303,44 @@ public class TurnSummarizerTests
     }
 
     [Fact]
-    public async Task Short_replies_are_used_as_is_without_calling_claude()
+    public void Parses_summary_and_suggestion_lines()
     {
-        var summarizer = new TurnSummarizer(new AgentHub.Services.ProcessRunner());
-        var summary = await summarizer.SummarizeAsync("this-executable-does-not-exist", "## Done\n- Added the **login** page.");
+        var insight = TurnSummarizer.ParseOutput("**SUMMARY:** Built the People tab; tests pass.\nNEXT: Yes, start building the filters panel\n");
 
-        Assert.Equal("Done Added the login page.", summary);
+        Assert.Equal("Built the People tab; tests pass.", insight.Summary);
+        Assert.Equal("Yes, start building the filters panel", insight.Suggestion);
+    }
+
+    [Fact]
+    public void Unlabelled_output_becomes_the_summary_and_long_lines_are_capped()
+    {
+        var insight = TurnSummarizer.ParseOutput("Did a thing.");
+        Assert.Equal("Did a thing.", insight.Summary);
+        Assert.Null(insight.Suggestion);
+
+        var longNext = TurnSummarizer.ParseOutput("NEXT: " + string.Join(' ', Enumerable.Repeat("word", 40)));
+        Assert.Equal(20, TurnSummarizer.CountWords(longNext.Suggestion!));
+    }
+
+    [Fact]
+    public void Input_has_recent_turns_then_the_full_reply()
+    {
+        var history = new[]
+        {
+            new JournalEntry { TurnId = "a", UserMessage = "build the map", FinalText = "long text", Summary = "Built the map." },
+            new JournalEntry { TurnId = "b", UserMessage = "add rivers", FinalText = "Rivers added, no summary yet." }
+        };
+        var reply = "## Done\nAdded the People tab.\n\nWant me to add filters next?";
+
+        var input = TurnSummarizer.BuildInput("add a people tab", reply, history);
+
+        Assert.Contains("1. User: build the map", input);
+        Assert.Contains("Result: Built the map.", input);
+        Assert.Contains("Result: Rivers added, no summary yet.", input);
+        Assert.Contains("Latest user message:" + Environment.NewLine + "add a people tab", input);
+        // The whole closing reply goes in, not a summary of it.
+        Assert.Contains(reply, input);
+        Assert.True(input.IndexOf("Recent turns") < input.IndexOf("Assistant's full closing reply"));
     }
 
     [Fact]
