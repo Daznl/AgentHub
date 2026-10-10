@@ -1,89 +1,82 @@
 # AgentHub Handoff Context
 
-**Generated:** 2026-09-05  
-**Current Branch:** `main`  
-**Current Milestone:** Multi-Session Cockpit & GitHub Hub (v0.1.5)
+**Updated:** 2026-10-10
+**Current branch:** `compact-header` (built on `turn-capture`; neither is on `main` yet)
+**Current work:** Session tracker, stage 1 (turn capture + 20-word summaries), and a one-row header
 
 ---
 
-## 1. Current State of the System
+## 1. What AgentHub is
 
-AgentHub is a Windows-first personal control centre built with **.NET 8 WPF** that manages local and remote GitHub repositories and hosts interchangeable AI coding CLIs (Codex, Claude Code, Google Antigravity, PowerShell, and Cmd).
-
-### Key Subsystems
-
-1. **Local Repositories View (`RepoViewGrid`)**:
-   - Lists registered local repositories with real-time Git sync state badges (`✓ Up to date`, `⇣ Behind`, `⇡ Ahead`, `✎ Modified`).
-   - Detailed repository inspector with branch name, dirty file count, ahead/behind counts, origin URL, and raw git status output.
-   - 1-click Git actions: `Fetch`, `Pull (fast-forward-only)`, and `Push`.
-   - Quick launch agent into Cockpit terminals (`⚡ Launch in T1`, `⚡ Launch in T2`, `⚡ Launch in T3`) or external Windows Terminal (`wt.exe`).
-   - Automated folder scanning (`🔍 Scan for repos`) using [`RepoDiscoveryService.cs`](file:///C:/Users/danie/Desktop/AgentHub/src/AgentHub/Services/RepoDiscoveryService.cs) that detects repositories up to 2 levels deep and imports them.
-
-2. **Remote GitHub Browser (`GitHubViewGrid`)**:
-   - Queries repositories directly via the local `gh` CLI ([`GitHubService.cs`](file:///C:/Users/danie/Desktop/AgentHub/src/AgentHub/Services/GitHubService.cs)).
-   - Displays authenticated account status and repository counts.
-   - Search/filter by name/description, visibility (All, Public, Private), and sync state (Up to date, Needs Pull, Ahead, Uncommitted Changes, In AgentHub, Not in AgentHub).
-   - 1-click Fast-Forward Pull (`⇣ Pull`) directly from remote cards when local is behind.
-   - 1-click Push (`⬆ Push`) directly from remote cards when local branch is ahead.
-   - 1-click Clone & Register for remote repositories not yet added locally.
-   - Auto-detection linking local folders to GitHub remotes.
-
-3. **Multi-Session Cockpit (`CockpitViewGrid`)**:
-   - Dynamic N-terminal multiplexer running side-by-side sessions (defaults to 3 panes).
-   - Dynamic pane management: `➕ Add Terminal` button (supports up to 6 concurrent sessions) and individual `✕` close buttons per pane.
-   - Draggable horizontal splitters (`GridSplitter`) between all panes.
-   - Per-pane repository selection (`RepoCombo`) and shell selection (`ShellCombo`).
-   - Session hosting powered by Windows ConPTY ([`ConPtySession.cs`](file:///C:/Users/danie/Desktop/AgentHub/src/AgentHub/Terminal/ConPtySession.cs), [`ConPtyNative.cs`](file:///C:/Users/danie/Desktop/AgentHub/src/AgentHub/Terminal/ConPtyNative.cs)) and Microsoft WebView2 + xterm.js ([`EmbeddedTerminalControl.xaml.cs`](file:///C:/Users/danie/Desktop/AgentHub/src/AgentHub/Terminal/EmbeddedTerminalControl.xaml.cs), [`terminal.html`](file:///C:/Users/danie/Desktop/AgentHub/src/AgentHub/Terminal/Assets/terminal.html)).
-   - Top navigation button labeled `⚡ Cockpit`.
+A Windows-first **.NET 8 WPF** control centre for local and GitHub repositories that hosts interchangeable coding CLIs (Codex, Claude Code, Antigravity, PowerShell, Cmd) in a multi-pane ConPTY + WebView2/xterm.js Cockpit. `README.md` has the full feature list; `docs/ARCHITECTURE.md` the component map.
 
 ---
 
-## 2. Recent Bugfixes & Improvements
+## 2. The session tracker (what this work is for)
 
-- **Navigation Button Label:** Updated top navigation button from `⚡ Cockpit (Dual Terminal)` to `⚡ Cockpit` in [`MainWindow.xaml`](file:///C:/Users/danie/Desktop/AgentHub/src/AgentHub/MainWindow.xaml).
-- **Terminal Duplicate Typing Fix:** Resolved an issue where typed characters were duplicated when interacting with Cockpit terminals.
-  - **Root Cause:** WPF `Loaded` events fired multiple times during tab switching and pane layout re-evaluations while `EnsureCoreWebView2Async` was completing. This resulted in duplicate subscriptions to `WebView.CoreWebView2.WebMessageReceived`, causing each character sent via `term.onData` to be dispatched multiple times to `_session.Write(data)`.
-  - **Resolution:** Added `_isInitialized` and `_isInitializing` guards, enforced single-subscription idempotency (`-= CoreWebView2_WebMessageReceived; += CoreWebView2_WebMessageReceived;`), and cleaned up pseudoconsole pipe handles safely in `ConPtySession.cs`.
-- **Repo Combo Synchronization:** When a session is launched into a terminal pane from the main repo detail view, the pane's repository combobox now automatically syncs with the launched repository.
-- **Provider Usage Limits & Adaptive Background Monitoring:** Added automated usage limit monitoring to Cockpit.
-  - **Native Headless Invocations:** Antigravity (`agy`) supports native non-interactive slash command expansion via `agy -p /usage`, returning tab-separated live limits for Gemini and Claude/GPT models (weekly and 5-hour limits) in ~1s without token consumption or prompts.
-  - **Background Terminal Collector (`BackgroundTerminalCollector`):** Codex and Claude Code require interactive TTY environments for slash commands (`/status`). Built a dedicated background ConPTY worker that spawns an isolated pseudoconsole, delivers sequential keystrokes (`/status`, Left-Arrow tab navigation for Claude session usage), captures raw terminal streams, and parses progress bars and reset times safely.
-  - **Adaptive Polling Engine:** Polling frequency scales dynamically with the number of active interactive sessions running in Cockpit:
-    - 0 active terminals: 15 minutes (`IDLE · EVERY 15M`)
-    - 1 active terminal: 5 minutes (`⚡ 1 ACTIVE · EVERY 5M`)
-    - 2 active terminals: 2 minutes (`⚡ 2 ACTIVE · EVERY 2M`)
-    - 3+ active terminals: 1 minute (`⚡ {N} ACTIVE · EVERY 1M`)
-  - **Terminal Feed Inspection & Split Provider Tabs:** Added a collapsible "Terminal Feed ▾" panel to Cockpit with dedicated tabs for each provider (`✦ Antigravity`, `⚡ Codex`, `✻ Claude Code`), 1-click clipboard copy (`📋 Copy`), and a `Sanitized / Raw ANSI` view toggle.
-  - **Cursor Positioning & Whitespace Preservation:** Standard ANSI strippers erase VT cursor forward (`\x1b[<n>C`) and horizontal absolute (`\x1b[<n>G`) sequences, causing styled words in TUI frameworks like Ink to smash together (`Run/inittocreateaCLAUDE.md...`). Updated `UsageOutputParser.StripAnsi` to translate cursor forward commands into equivalent whitespace, keeping columns aligned and readable.
-  - **Active Screen Extraction (`ExtractRelevantScreen`):** Background terminal collectors record the entire process lifecycle (including startup banners, tips, and what's-new messages). Added `ExtractRelevantScreen` in `UsageOutputParser` to isolate the active usage frame (e.g. `Current session` / `Current week` for Claude; `5h limit` / `Weekly limit` for Codex) so users see clean, focused usage data without clutter.
-  - **Claude API Latency Handling & Keystroke Sequencing:** Claude Code's `/status` Usage tab fetches limits asynchronously from Anthropic's stats API, showing `✶ Loading your Claude Code stats…` while in flight. Extended probe timeout to 16 seconds and sequenced individual keystrokes (`/status\r`, 800ms delay, `\x1b[D`, 800ms delay, `\x1b[D`) so network latency across international regions (e.g. Australia) resolves completely before capture.
-  - **Automatic Settings Migration:** `SettingsService.LoadAsync()` automatically populates default usage providers if an existing `settings.json` lacked them.
+The user runs several Claude sessions at once and cannot watch them all. The goal is a per-repository tracker that sits on top of each coding session, **never tells the session what to do**, and tells the user "you asked X, Claude did Y, you should probably do Z next".
 
----
+Ground rules agreed with the user:
 
-## 3. Key Architecture & Coding Constraints
+- **Per repository**, shared by every session in that repo. Runs **every turn**.
+- **Never feed it the whole conversation.** Per turn it sees only the user's prompt and Claude's closing plain-text reply (the text after the last tool call), plus a compact rolling project state.
+- **Structured source, not terminal scraping.** Read Claude Code's own transcript JSONL.
+- **Subscription, not API key.** Model calls go through `claude -p` on the claude.ai login. `ANTHROPIC_API_KEY` is set on this machine as a user variable, so it must be removed from those calls' environment.
 
-1. **WPF & WinForms Namespace Disambiguation:**
-   - Both `<UseWPF>true</UseWPF>` and `<UseWindowsForms>true</UseWindowsForms>` are enabled in `AgentHub.csproj` (needed for `FolderBrowserDialog`).
-   - Files referencing UI types must explicitly alias them:
-     - `using UserControl = System.Windows.Controls.UserControl;`
-     - `using Color = System.Windows.Media.Color;`
-     - `using MessageBox = System.Windows.MessageBox;`
-     - `using Forms = System.Windows.Forms;`
-2. **Build File Locking:**
-   - Always terminate running instances of `AgentHub.exe` (`Get-Process -Name "AgentHub" -ErrorAction SilentlyContinue | Stop-Process -Force`) before running `dotnet build`.
-3. **Git & CLI Safety:**
-   - Pull operations must always use fast-forward only (`--ff-only`).
-   - Destructive Git operations must never execute without explicit user action.
-   - Quota or usage metrics must display their confidence source and never imply exact provider balances.
+### Stages
+
+| Stage | What | State |
+|---|---|---|
+| 1 | Turn capture: known session id, transcript watcher, pane strip, `.agenthub/journal.jsonl` | **Done** (`turn-capture`) |
+| 1b | 20-word summary of each reply via headless Haiku | **Done** (`turn-capture`) |
+| 2 | `CLAUDE.md` rule so Claude ends turns with a consistent summary (optional `TL;DR:` line, Haiku as fallback) | Not started |
+| 3 | Next-step suggestion from a bounded prompt (rolling `.agenthub/state.md` + recent turns + new turn) | Not started |
+| 4 | Overview of every tracked repository | Not started |
+| 5 | Codex support (`~/.codex/sessions`), "watch" rules (the user mentioned watching certain things; not yet defined) | Not started |
 
 ---
 
-## 4. Next Priorities (Roadmap Alignment)
+## 3. How stage 1 works (`src/AgentHub/Tracking/`)
 
-- **Cockpit Stage 2 (CLI Compatibility Verification):**
-  - Verify interactive behavior and full ANSI/VT escape sequences with Codex, Claude Code, and Antigravity (`agy`) across multiple repos.
-- **Cockpit Stage 3 (Attention & Bell Engine):**
-  - Visual badges / audio chimes when a CLI requires interactive user confirmation or encounters an error.
-- **Milestone v0.2 (Task Worktrees):**
-  - Automatic creation of Git worktrees per task to isolate agent file edits and avoid parallel conflict in the same working tree.
+- **`ClaudeSessionLaunch`** appends `--session-id <guid>` to a fresh interactive `claude` launch when the pane's folder is a Git repo root. Skips `--resume`, `-c`, `-p`, existing `--session-id`. Restart generates a new id. Transcript path: `~/.claude/projects/<cwd with every non-alphanumeric char → '-'>/<id>.jsonl` (`CLAUDE_CONFIG_DIR` respected).
+- **`TranscriptWatcher`** polls every 500 ms, reads only new bytes, holds back an unfinished last line. The folder-wide fallback search runs every 20th poll until the file exists.
+- **`ClaudeTranscriptParser`** opens a turn on a human prompt (`origin.kind == "human"`; skips tool results, `isMeta`, `isSidechain`; strips `<system-reminder>`; slash commands become `/name args`). Ends it on `stop_reason: end_turn` **on a text line**: one reply is written as one line per content block and every line carries the stop reason, so a thinking-only line must not end the turn. The next prompt marks an unfinished turn as interrupted. `Settle()` (on the pane's waiting signal or exit) is the fallback.
+- **`TurnJournal`** appends to `<repo>/.agenthub/journal.jsonl` and adds that path to `.git/info/exclude` (local only, never shows as a change). A turn is appended again when it continues or when its summary arrives; readers keep the last line per `turnId`.
+- **`TurnSummarizer`** runs `claude -p --model haiku --tools "" --no-session-persistence --strict-mcp-config --disable-slash-commands --settings {"disableAllHooks":true} --system-prompt ...` in `%LOCALAPPDATA%\AgentHub\summarizer`, reply on stdin, `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` removed. Capped at 20 words in code. Replies already ≤ 20 words skip the call. About 3–6 s per call. **Do not use `--bare`**: it signs in only with an API key.
+- **Pane strip** (`TerminalPaneControl`): shows **👀 Tracking** as soon as a tracked session launches (Claude writes nothing until the first prompt), then **📝 You asked** / **⏳ Claude is working…** / **✅ Claude said** with the summary. Click to expand to the full reply.
+- **`App` clears inherited Claude session markers** (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, ...) at startup. Without this, an AgentHub started from inside a Claude session gives every pane's Claude "transcript saving off", and tracking sees nothing. This cost a long debugging detour.
+- Settings: `turnTrackingEnabled`, `turnSummariesEnabled`, `turnSummaryModel` (default `haiku`).
+
+### Known gaps
+
+- `/clear` or `/resume` inside a pane switches Claude to another session id, so tracking stops for that pane.
+- Codex and Antigravity panes are not tracked.
+- The summary appears a few seconds after the reply, and each one uses a little of the Claude subscription limits.
+
+---
+
+## 4. Other changes in this work
+
+- **One-row header** (`compact-header`): view actions, divider and navigation share one row; logo 40 px; Cockpit description is one trimmed line. Gives the terminals about 40 px. On the Manage GitHub Repos view the row is wide and may clip on narrow windows (not checked).
+- `ProcessRunner.RunAsync` gained optional `standardInput` and `removeEnvironmentVariables` parameters.
+
+---
+
+## 5. Working on this repo
+
+- **Branching (user's global rule):** never commit to `main`; each stage on its own branch; when a stage is complete, fast-forward `main` to it and push.
+- **Build lock:** a running `AgentHub.exe` from `src/AgentHub/bin/Debug` locks the build output. Check for a running Claude session in AgentHub before closing it (the user may be mid-conversation). To compile without closing it: `dotnet build src/AgentHub/AgentHub.csproj -p:OutDir=<scratch>/`; for tests, build `tests/AgentHub.Tests` with the same `OutDir` and run `dotnet test <scratch>/AgentHub.Tests.dll`.
+- **Do not launch AgentHub from inside a Claude Code session expecting real pane behaviour** unless the marker-clearing fix is in the build.
+- There is an older copy of the app at `Desktop\AgentHub-App-SSH\AgentHub.exe` (not a git repo, no tracking). Both windows have the same title, so it is easy to type in the wrong one.
+- WPF + WinForms are both enabled; alias UI types (`UserControl`, `Color`, `MessageBox`, `Timer`) explicitly.
+- Pull is fast-forward only; destructive Git operations only on explicit user action; usage figures must name their source.
+- Tests: `dotnet test tests/AgentHub.Tests` (75 passing). Tracking tests are in `TurnTrackingTests.cs`.
+
+---
+
+## 6. Next steps
+
+1. Ask whether to fast-forward `main` to `compact-header` (includes `turn-capture`) and push.
+2. Session tracker stage 3: per-turn "what's next" suggestion with a rolling `.agenthub/state.md`, using the same headless subscription call as `TurnSummarizer`.
+3. Stage 2 (`CLAUDE.md` summary rule) if summary latency or usage becomes a concern.
+4. Clarify with the user what "watch certain things" should mean.
