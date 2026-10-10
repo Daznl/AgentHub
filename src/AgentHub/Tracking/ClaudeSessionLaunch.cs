@@ -34,6 +34,9 @@ public static class ClaudeSessionLaunch
         return true;
     }
 
+    /// <summary>The executable part of a launch command line, without surrounding quotes.</summary>
+    public static string ExecutableOf(string commandLine) => SplitExecutable(commandLine.Trim()).Exe;
+
     /// <summary>Claude Code's config folder: CLAUDE_CONFIG_DIR when set, otherwise ~/.claude.</summary>
     public static string ConfigDirectory =>
         Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") is { Length: > 0 } dir

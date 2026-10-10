@@ -240,6 +240,12 @@ public sealed class TurnJournalAndWatcherTests : IDisposable
         Assert.Equal(["a", "b"], entries.Select(e => e.TurnId));
         Assert.Equal("first, revised", entries[0].FinalText);
         Assert.Equal("claude", entries[0].Agent);
+        Assert.Null(entries[1].Summary);
+
+        var summarised = Turn("b", "second");
+        summarised.Summary = "Did the second thing.";
+        TurnJournal.Append(repo, summarised, "claude");
+        Assert.Equal("Did the second thing.", TurnJournal.Read(repo)[1].Summary);
 
         var exclude = File.ReadAllLines(Path.Combine(repo, ".git", "info", "exclude"));
         Assert.Equal("# existing", exclude[0]);
@@ -280,5 +286,43 @@ public sealed class TurnJournalAndWatcherTests : IDisposable
         watcher.Poll();
         Assert.Equal([TurnEventKind.Started, TurnEventKind.Completed], events.Select(e => e.Kind));
         Assert.Equal("hi", events[1].Turn.FinalText);
+    }
+}
+
+public class TurnSummarizerTests
+{
+    [Fact]
+    public void Limits_to_twenty_words_and_marks_the_cut()
+    {
+        var text = string.Join(' ', Enumerable.Range(1, 30).Select(i => $"w{i}")) + ".";
+        var limited = TurnSummarizer.LimitWords(text, TurnSummarizer.MaxWords);
+
+        Assert.Equal(20, TurnSummarizer.CountWords(limited));
+        Assert.EndsWith("w20…", limited);
+        Assert.Equal("short reply", TurnSummarizer.LimitWords("  short   reply ", 20));
+    }
+
+    [Fact]
+    public async Task Short_replies_are_used_as_is_without_calling_claude()
+    {
+        var summarizer = new TurnSummarizer(new AgentHub.Services.ProcessRunner());
+        var summary = await summarizer.SummarizeAsync("this-executable-does-not-exist", "## Done\n- Added the **login** page.");
+
+        Assert.Equal("Done Added the login page.", summary);
+    }
+
+    [Fact]
+    public void Headless_call_is_stripped_down_and_never_uses_bare_mode()
+    {
+        var args = new TurnSummarizer(new AgentHub.Services.ProcessRunner(), "haiku").BuildArguments();
+
+        Assert.Equal("-p", args[0]);
+        Assert.Contains("--no-session-persistence", args);
+        Assert.Contains("--strict-mcp-config", args);
+        Assert.Contains("--disable-slash-commands", args);
+        Assert.Equal("", args[args.ToList().IndexOf("--tools") + 1]);
+        Assert.Equal("haiku", args[args.ToList().IndexOf("--model") + 1]);
+        // --bare signs in only with an API key, never the claude.ai subscription login.
+        Assert.DoesNotContain("--bare", args);
     }
 }

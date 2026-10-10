@@ -67,6 +67,15 @@ public sealed class AppSettings
     /// </summary>
     public bool TurnTrackingEnabled { get; set; } = true;
 
+    /// <summary>
+    /// Summarise each tracked turn's reply in at most 20 words with a headless Claude Code call that signs in with
+    /// the claude.ai login (ANTHROPIC_API_KEY is removed for that call), so it counts toward the subscription limits.
+    /// </summary>
+    public bool TurnSummariesEnabled { get; set; } = true;
+
+    /// <summary>Model alias for turn summaries.</summary>
+    public string TurnSummaryModel { get; set; } = "haiku";
+
     /// <summary>Last folder chosen for "open a shell in a folder"; the picker starts here next time.</summary>
     public string? LastTerminalFolder { get; set; }
 

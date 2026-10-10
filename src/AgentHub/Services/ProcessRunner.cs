@@ -10,7 +10,9 @@ public sealed class ProcessRunner
         IEnumerable<string> arguments,
         string? workingDirectory = null,
         CancellationToken cancellationToken = default,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null,
+        string? standardInput = null,
+        IEnumerable<string>? removeEnvironmentVariables = null)
     {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         linkedCts.CancelAfter(timeout ?? TimeSpan.FromSeconds(30));
@@ -26,11 +28,14 @@ public sealed class ProcessRunner
             // gh and git emit UTF-8; without this .NET decodes with the console codepage and em dashes etc. become mojibake.
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
+            StandardInputEncoding = standardInput is null ? null : new UTF8Encoding(false),
             CreateNoWindow = true
         };
 
         foreach (var arg in arguments)
             psi.ArgumentList.Add(arg);
+        foreach (var name in removeEnvironmentVariables ?? [])
+            psi.Environment.Remove(name);
 
         using var process = new Process { StartInfo = psi };
         var stdout = new StringBuilder();
@@ -41,9 +46,11 @@ public sealed class ProcessRunner
         try
         {
             process.Start();
-            process.StandardInput.Close();
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
+            if (standardInput is not null)
+                await process.StandardInput.WriteAsync(standardInput.AsMemory(), linkedCts.Token);
+            process.StandardInput.Close();
             await process.WaitForExitAsync(linkedCts.Token);
 
             return (process.ExitCode, stdout.ToString(), stderr.ToString());

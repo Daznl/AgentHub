@@ -7,7 +7,7 @@ namespace AgentHub.Tracking;
 /// <summary>
 /// Per-repository log of finished turns at <c>.agenthub/journal.jsonl</c>: one JSON object per line,
 /// shared by every session working in the repository. A turn that continues after it finished is
-/// appended again with the same <c>turnId</c>; readers keep the last line for each id.
+/// appended again with the same <c>turnId</c>, as is a turn once its summary is ready; readers keep the last line for each id.
 /// The file is kept out of Git through <c>.git/info/exclude</c>, which never changes the repository.
 /// </summary>
 public static class TurnJournal
@@ -43,6 +43,7 @@ public static class TurnJournal
             EndedAt = turn.EndedAt,
             UserMessage = turn.UserMessage,
             FinalText = turn.FinalText,
+            Summary = turn.Summary,
             ToolCalls = turn.ToolCalls,
             FilesTouched = turn.FilesTouched.Count > 0 ? [.. turn.FilesTouched] : null
         };
@@ -112,6 +113,7 @@ public sealed class JournalEntry
     public DateTimeOffset? EndedAt { get; set; }
     public string UserMessage { get; set; } = "";
     public string FinalText { get; set; } = "";
+    public string? Summary { get; set; }
     public int ToolCalls { get; set; }
     public List<string>? FilesTouched { get; set; }
 }

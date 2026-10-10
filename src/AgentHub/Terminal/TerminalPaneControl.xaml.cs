@@ -45,6 +45,8 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     private TranscriptWatcher? _watcher;
     private LaunchRequest? _lastLaunch;
     private bool _stripExpanded;
+    private TurnSummarizer? _summarizer;
+    private StripState? _strip;
 
     public EmbeddedTerminalControl TerminalControl => Terminal;
     public int PaneIndex => _paneIndex;
@@ -273,8 +275,15 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             Terminal.RestartSession();
     }
 
-    /// <summary>Turns the per-turn transcript tracking for Claude Code sessions in repositories on or off.</summary>
-    public void ConfigureTracking(bool enabled) => _trackingEnabled = enabled;
+    /// <summary>
+    /// Turns the per-turn transcript tracking for Claude Code sessions in repositories on or off.
+    /// With a <paramref name="summarizer"/>, each finished reply is also summarised in a few words.
+    /// </summary>
+    public void ConfigureTracking(bool enabled, TurnSummarizer? summarizer)
+    {
+        _trackingEnabled = enabled;
+        _summarizer = summarizer;
+    }
 
     // Every launch goes through here so a Claude Code session in a repository gets its transcript followed.
     private void StartTerminal(string commandLine, string workingDirectory, string title, string subtitle, bool isAgent)
@@ -285,14 +294,15 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         if (_trackingEnabled && isAgent && TurnJournal.IsRepositoryRoot(workingDirectory)
             && ClaudeSessionLaunch.TryAssignSessionId(commandLine, out var decorated, out var sessionId))
         {
+            var claudeExecutable = ClaudeSessionLaunch.ExecutableOf(commandLine);
             commandLine = decorated;
             var repoRoot = workingDirectory;
             var watcher = new TranscriptWatcher(sessionId, workingDirectory);
-            watcher.TurnEvent += e => OnTurnEvent(watcher, repoRoot, e);
+            watcher.TurnEvent += e => OnTurnEvent(watcher, repoRoot, claudeExecutable, e);
             _watcher = watcher;
             watcher.Start();
             // Claude writes nothing until the first prompt; show the strip now so it is clear the pane is tracked.
-            ShowTurn("—", "Tracking this session. Your next message and Claude's reply will show here.", TurnStatus.Complete, label: "👀 Tracking");
+            ShowStrip(new StripState("—", "👀 Tracking", "Tracking this session. Your next message and Claude's reply will show here."));
         }
 
         Terminal.StartSession(commandLine, workingDirectory, title, subtitle, isAgent);
@@ -302,40 +312,73 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     {
         _watcher?.Dispose();
         _watcher = null;
+        _strip = null;
         TurnStrip.Visibility = Visibility.Collapsed;
     }
 
     // Raised on a thread-pool thread: write the journal there, then update the strip on the UI thread.
-    private void OnTurnEvent(TranscriptWatcher source, string repoRoot, TurnEvent e)
+    private void OnTurnEvent(TranscriptWatcher source, string repoRoot, string claudeExecutable, TurnEvent e)
     {
-        if (e.Kind == TurnEventKind.Completed)
-        {
-            try { TurnJournal.Append(repoRoot, e.Turn, "claude"); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-        }
+        var turn = e.Turn.Snapshot();
+        var summarizer = _summarizer;
+        var summarise = e.Kind == TurnEventKind.Completed && summarizer is not null && turn.FinalText.Length > 0;
 
-        var asked = e.Turn.UserMessage;
-        var said = e.Turn.FinalText;
-        var status = e.Kind == TurnEventKind.Started ? TurnStatus.Working : e.Turn.Status;
+        if (e.Kind == TurnEventKind.Completed)
+            AppendJournal(repoRoot, turn);
+
+        var state = e.Kind == TurnEventKind.Started
+            ? new StripState(turn.UserMessage, "⏳ Claude is", "working…")
+            : new StripState(
+                turn.UserMessage,
+                turn.Status == TurnStatus.Interrupted ? "⚠ Claude said" : "✅ Claude said",
+                turn.FinalText.Length > 0 ? turn.FinalText
+                    : turn.Status == TurnStatus.Interrupted ? "(interrupted before replying)" : "(finished without a text reply)",
+                Summarising: summarise);
+
         Dispatcher.InvokeAsync(() =>
         {
             if (!ReferenceEquals(source, _watcher)) return; // a newer launch replaced this session
-            ShowTurn(asked, said, status);
+            ShowStrip(state);
+        });
+
+        if (summarise)
+            _ = SummariseAsync(summarizer!, source, repoRoot, claudeExecutable, turn, state);
+    }
+
+    private async Task SummariseAsync(TurnSummarizer summarizer, TranscriptWatcher source, string repoRoot,
+        string claudeExecutable, TranscriptTurn turn, StripState shown)
+    {
+        string? summary = null;
+        try { summary = await summarizer.SummarizeAsync(claudeExecutable, turn.FinalText).ConfigureAwait(false); }
+        catch (Exception) { } // a failed summary leaves the full reply on show
+
+        if (summary is not null)
+        {
+            turn.Summary = summary;
+            AppendJournal(repoRoot, turn);
+        }
+
+        await Dispatcher.InvokeAsync(() =>
+        {
+            // Only update the strip if it still shows this reply (no newer prompt, relaunch or continued turn).
+            if (!ReferenceEquals(source, _watcher) || !ReferenceEquals(_strip, shown)) return;
+            ShowStrip(shown with { Summary = summary, Summarising = false });
         });
     }
 
-    private void ShowTurn(string asked, string said, TurnStatus status, string? label = null)
+    private static void AppendJournal(string repoRoot, TranscriptTurn turn)
     {
+        try { TurnJournal.Append(repoRoot, turn, "claude"); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private void ShowStrip(StripState state)
+    {
+        _strip = state;
         TurnStrip.Visibility = Visibility.Visible;
-        TurnAskedText.Text = asked;
-        (TurnSaidLabel.Text, TurnSaidText.Text) = status switch
-        {
-            TurnStatus.Working => ("⏳ Claude is", "working…"),
-            TurnStatus.Interrupted => ("⚠ Claude said", said.Length > 0 ? said : "(interrupted before replying)"),
-            _ => ("✅ Claude said", said.Length > 0 ? said : "(finished without a text reply)")
-        };
-        if (label is not null) TurnSaidLabel.Text = label;
+        TurnAskedText.Text = state.Asked;
+        TurnSaidLabel.Text = state.Label;
         ApplyStripExpansion();
     }
 
@@ -345,9 +388,20 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         ApplyStripExpansion();
     }
 
-    // Collapsed: one line each. Expanded: full text, the reply scrolling past a few lines.
+    // Collapsed: one line each, the reply as its summary. Expanded: the summary above the full reply, which scrolls.
     private void ApplyStripExpansion()
     {
+        if (_strip is { } state)
+        {
+            TurnSaidText.Text = (_stripExpanded, state.Summary, state.Summarising) switch
+            {
+                (false, { } summary, _) => summary,
+                (false, null, true) => "summarising… · " + state.Text,
+                (true, { } summary, _) => summary + Environment.NewLine + Environment.NewLine + state.Text,
+                _ => state.Text
+            };
+        }
+
         var wrap = _stripExpanded ? TextWrapping.Wrap : TextWrapping.NoWrap;
         TurnAskedText.TextWrapping = wrap;
         TurnSaidText.TextWrapping = wrap;
@@ -468,6 +522,9 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         _watcher = null;
         Terminal.Dispose();
     }
+
+    /// <summary>What the turn strip shows: the prompt, a label, the reply, and its summary once ready.</summary>
+    private sealed record StripState(string Asked, string Label, string Text, string? Summary = null, bool Summarising = false);
 
     private sealed record LaunchRequest(string CommandLine, string WorkingDirectory, string Title, string Subtitle, bool IsAgent);
 }

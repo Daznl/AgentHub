@@ -20,6 +20,31 @@ public sealed class TranscriptTurn
     public string FinalText { get; set; } = "";
     public int ToolCalls { get; set; }
     public List<string> FilesTouched { get; } = [];
+
+    /// <summary>One-sentence summary of <see cref="FinalText"/>, filled in after the turn completes.</summary>
+    public string? Summary { get; set; }
+
+    /// <summary>
+    /// A copy that later parser updates cannot change. The parser reuses the turn object if the agent carries on,
+    /// so anything handled off the parser's thread works on a snapshot.
+    /// </summary>
+    public TranscriptTurn Snapshot()
+    {
+        var copy = new TranscriptTurn
+        {
+            TurnId = TurnId,
+            SessionId = SessionId,
+            UserMessage = UserMessage,
+            StartedAt = StartedAt,
+            EndedAt = EndedAt,
+            Status = Status,
+            FinalText = FinalText,
+            ToolCalls = ToolCalls,
+            Summary = Summary
+        };
+        copy.FilesTouched.AddRange(FilesTouched);
+        return copy;
+    }
 }
 
 public enum TurnEventKind

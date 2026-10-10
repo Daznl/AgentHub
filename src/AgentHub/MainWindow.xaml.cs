@@ -8,6 +8,7 @@ using AgentHub.Models;
 using AgentHub.Services;
 using AgentHub.Services.Usage;
 using AgentHub.Terminal;
+using AgentHub.Tracking;
 using Color = System.Windows.Media.Color;
 using Forms = System.Windows.Forms;
 using MessageBox = System.Windows.MessageBox;
@@ -209,7 +210,8 @@ public partial class MainWindow : Window
         pane.SessionStateChanged += UpdateUsagePollingInterval;
         pane.AttentionRequested += OnPaneAttentionRequested;
         pane.ConfigureAttention(_settings.AttentionFlashEnabled, _settings.AttentionIdleSeconds);
-        pane.ConfigureTracking(_settings.TurnTrackingEnabled);
+        pane.ConfigureTracking(_settings.TurnTrackingEnabled,
+            _settings.TurnSummariesEnabled ? new TurnSummarizer(_runner, _settings.TurnSummaryModel) : null);
         pane.UpdateRepositories(_settings.Repositories);
         pane.UpdateSshConnections(_settings.SshConnections);
         pane.SshManageRequested += () => ManageSsh_Click(pane, new RoutedEventArgs());
