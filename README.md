@@ -66,6 +66,15 @@ It never stores API keys or provider credentials. Authentication stays with the 
 - **Copy and paste.** Select text and press **Ctrl+Shift+C** to copy, **Ctrl+Shift+V** to paste, or right-click a pane for **Copy** / **Paste**. Plain **Ctrl+C** still interrupts the running command.
 - Launch an agent into a specific pane straight from a repository card, or into a new Windows Terminal tab.
 
+### Turn tracking
+
+- When Claude Code is launched in a pane whose folder is a Git repository, AgentHub gives the session its own id (`--session-id`) and follows its transcript file in `~/.claude/projects`. Nothing is read from the terminal screen.
+- A strip under the pane header shows **📝 You asked** (your last prompt) and **✅ Claude said** (the plain-text reply Claude ended its turn with). While Claude works it reads **⏳ Claude is working…**. Click the strip to expand it to the full text.
+- Every finished turn is appended to the repository's `.agenthub/journal.jsonl`: your prompt, Claude's closing text, the number of tool calls and the files it edited. Tool calls, tool output and code are never stored. Every session in the same repository writes to the same journal.
+- The journal is added to `.git/info/exclude` the first time it is written, so it stays local and never appears as a change. Remove that line if you want to commit it.
+- Sessions launched with `--resume`, `--continue` or `-p` are not tracked, and neither is a new conversation started inside a pane with `/clear` (Claude gives it a new session id). Turn `turnTrackingEnabled` off to disable tracking.
+- This is stage 1 of the session tracker: turn capture only. Summaries and next-step suggestions build on this journal.
+
 ### Usage limit cards
 
 - Live 5-hour and weekly quota for Codex, Claude Code and Antigravity, shown above the terminals.
@@ -174,7 +183,8 @@ Defaults:
   "showUsagePanel": true,
   "hiddenUsageCards": [],
   "attentionFlashEnabled": true,
-  "attentionIdleSeconds": 3
+  "attentionIdleSeconds": 3,
+  "turnTrackingEnabled": true
 }
 ```
 
@@ -189,6 +199,7 @@ Defaults:
 | `hiddenUsageCards` | Provider ids whose card you have closed. Reopen from the chips beside "Usage limits". |
 | `attentionFlashEnabled` | Enable the waiting-for-you pane and taskbar alert. |
 | `attentionIdleSeconds` | Seconds of silence after a burst of agent output before a pane counts as waiting. |
+| `turnTrackingEnabled` | Follow Claude Code sessions started in a repository, show the last prompt and reply on the pane and log each turn to `.agenthub/journal.jsonl`. See [Turn tracking](#turn-tracking). |
 | `lastTerminalFolder`, `lastScanFolder` | Remembered folder-picker locations. Written automatically. |
 
 A pane is considered waiting when its coding CLI produced at least 1.5 seconds of continuous output after your last keystroke and has then been silent for `attentionIdleSeconds`, or when it rings the bell. Output within 0.75 seconds of a keystroke is treated as echo of your own typing.
@@ -230,6 +241,8 @@ Each repository can contain a plain Markdown file for passing context between ag
 
 Before switching agents, record the current task, completed work, next steps and relevant files. Because it is plain Markdown, every CLI can read it without AgentHub being present. This repository's own [`.agenthub/handoff.md`](.agenthub/handoff.md) is an example.
 
+The same folder holds `journal.jsonl`, the local turn log written by [turn tracking](#turn-tracking).
+
 ## Safety choices
 
 - Pull uses `--ff-only`. AgentHub never silently creates a merge commit.
@@ -249,6 +262,7 @@ src/AgentHub/                     WPF application
   Services/                       Git, GitHub CLI, discovery, settings and agent launching
   Services/Usage/                 per-provider usage readers and the output parser
   Terminal/                       ConPTY host, xterm.js assets and the terminal controls
+  Tracking/                       Claude Code transcript parser, watcher and per-repo turn journal
   Sessions/                       interfaces for the planned session layer
 tests/AgentHub.Tests/             xUnit tests
 docs/                             architecture, GitHub integration, cockpit design, roadmap

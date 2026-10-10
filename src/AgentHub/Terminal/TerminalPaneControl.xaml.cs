@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using AgentHub.Models;
+using AgentHub.Tracking;
 using Color = System.Windows.Media.Color;
 using UserControl = System.Windows.Controls.UserControl;
 
@@ -39,6 +40,12 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     public event Action<TerminalPaneControl>? AttentionRequested;
     private int _paneIndex = 1;
 
+    // Turn tracking: follows a Claude Code session's transcript and shows its last turn in the strip.
+    private bool _trackingEnabled = true;
+    private TranscriptWatcher? _watcher;
+    private LaunchRequest? _lastLaunch;
+    private bool _stripExpanded;
+
     public EmbeddedTerminalControl TerminalControl => Terminal;
     public int PaneIndex => _paneIndex;
     public bool IsRunning => Terminal.IsRunning;
@@ -56,7 +63,10 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         {
             ShowAttention();
             AttentionRequested?.Invoke(this);
+            _watcher?.Settle();
         };
+        // The watcher keeps polling after exit (the old process's exit can land after a relaunch); it ends on the next launch.
+        Terminal.SessionExited += () => _watcher?.Settle();
         Terminal.AttentionCleared += ClearAttention;
         Terminal.WorkingStateChanged += working =>
         {
@@ -254,7 +264,93 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     private void StopBtn_Click(object sender, RoutedEventArgs e) => Terminal.StopSession();
 
-    private void RestartBtn_Click(object sender, RoutedEventArgs e) => Terminal.RestartSession();
+    // A tracked Claude session needs a fresh session id on restart; Claude refuses to reuse one.
+    private void RestartBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (_lastLaunch is { } last && _watcher is not null)
+            StartTerminal(last.CommandLine, last.WorkingDirectory, last.Title, last.Subtitle, last.IsAgent);
+        else
+            Terminal.RestartSession();
+    }
+
+    /// <summary>Turns the per-turn transcript tracking for Claude Code sessions in repositories on or off.</summary>
+    public void ConfigureTracking(bool enabled) => _trackingEnabled = enabled;
+
+    // Every launch goes through here so a Claude Code session in a repository gets its transcript followed.
+    private void StartTerminal(string commandLine, string workingDirectory, string title, string subtitle, bool isAgent)
+    {
+        _lastLaunch = new LaunchRequest(commandLine, workingDirectory, title, subtitle, isAgent);
+        StopTracking();
+
+        if (_trackingEnabled && isAgent && TurnJournal.IsRepositoryRoot(workingDirectory)
+            && ClaudeSessionLaunch.TryAssignSessionId(commandLine, out var decorated, out var sessionId))
+        {
+            commandLine = decorated;
+            var repoRoot = workingDirectory;
+            var watcher = new TranscriptWatcher(sessionId, workingDirectory);
+            watcher.TurnEvent += e => OnTurnEvent(watcher, repoRoot, e);
+            _watcher = watcher;
+            watcher.Start();
+        }
+
+        Terminal.StartSession(commandLine, workingDirectory, title, subtitle, isAgent);
+    }
+
+    private void StopTracking()
+    {
+        _watcher?.Dispose();
+        _watcher = null;
+        TurnStrip.Visibility = Visibility.Collapsed;
+    }
+
+    // Raised on a thread-pool thread: write the journal there, then update the strip on the UI thread.
+    private void OnTurnEvent(TranscriptWatcher source, string repoRoot, TurnEvent e)
+    {
+        if (e.Kind == TurnEventKind.Completed)
+        {
+            try { TurnJournal.Append(repoRoot, e.Turn, "claude"); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        var asked = e.Turn.UserMessage;
+        var said = e.Turn.FinalText;
+        var status = e.Kind == TurnEventKind.Started ? TurnStatus.Working : e.Turn.Status;
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (!ReferenceEquals(source, _watcher)) return; // a newer launch replaced this session
+            ShowTurn(asked, said, status);
+        });
+    }
+
+    private void ShowTurn(string asked, string said, TurnStatus status)
+    {
+        TurnStrip.Visibility = Visibility.Visible;
+        TurnAskedText.Text = asked;
+        (TurnSaidLabel.Text, TurnSaidText.Text) = status switch
+        {
+            TurnStatus.Working => ("⏳ Claude is", "working…"),
+            TurnStatus.Interrupted => ("⚠ Claude said", said.Length > 0 ? said : "(interrupted before replying)"),
+            _ => ("✅ Claude said", said.Length > 0 ? said : "(finished without a text reply)")
+        };
+        ApplyStripExpansion();
+    }
+
+    private void TurnStrip_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        _stripExpanded = !_stripExpanded;
+        ApplyStripExpansion();
+    }
+
+    // Collapsed: one line each. Expanded: full text, the reply scrolling past a few lines.
+    private void ApplyStripExpansion()
+    {
+        var wrap = _stripExpanded ? TextWrapping.Wrap : TextWrapping.NoWrap;
+        TurnAskedText.TextWrapping = wrap;
+        TurnSaidText.TextWrapping = wrap;
+        TurnSaidScroll.MaxHeight = _stripExpanded ? 160 : double.PositiveInfinity;
+        TurnSaidScroll.VerticalScrollBarVisibility = _stripExpanded ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
+    }
 
     private void Launch_Click(object sender, RoutedEventArgs e)
     {
@@ -279,7 +375,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             if (replace != MessageBoxResult.Yes) return;
         }
 
-        Terminal.StartSession(cmd, dir, $"Terminal {_paneIndex} · {title}", repoName, shell?.IsAgent ?? false);
+        StartTerminal(cmd, dir, $"Terminal {_paneIndex} · {title}", repoName, shell?.IsAgent ?? false);
     }
 
     public void UpdateSshConnections(List<SshConnection> connections)
@@ -335,7 +431,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             if (replace != MessageBoxResult.Yes) return;
         }
 
-        Terminal.StartSession(connection.BuildCommandLine(), BaseDirectory, $"Terminal {_paneIndex} · SSH", $"SSH · {connection.DisplayName}");
+        StartTerminal(connection.BuildCommandLine(), BaseDirectory, $"Terminal {_paneIndex} · SSH", $"SSH · {connection.DisplayName}", isAgent: false);
     }
 
     private void BrowseFolder_Click(object sender, RoutedEventArgs e) => FolderPickRequested?.Invoke(this);
@@ -360,13 +456,17 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             else if (Directory.Exists(workingDirectory))
                 SetCustomFolder(workingDirectory);
         }
-        Terminal.StartSession(commandLine, workingDirectory, title, repoName, isAgentSession);
+        StartTerminal(commandLine, workingDirectory, title, repoName, isAgentSession);
     }
 
     public void Dispose()
     {
+        _watcher?.Dispose();
+        _watcher = null;
         Terminal.Dispose();
     }
+
+    private sealed record LaunchRequest(string CommandLine, string WorkingDirectory, string Title, string Subtitle, bool IsAgent);
 }
 
 /// <summary>An entry in a pane's location dropdown: the home folder, a browsed folder, or a registered repository.</summary>

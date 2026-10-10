@@ -21,6 +21,11 @@
 
 ## v0.3 — Session manager
 
+- [x] Turn capture (session tracker stage 1): Claude Code panes in a repository get a known session id, their transcript is followed, the last prompt and closing reply show on the pane, and each turn is logged to `.agenthub/journal.jsonl`
+- Session tracker stage 2: `CLAUDE.md` rule for a consistent closing summary
+- Session tracker stage 3: per-turn summary and next-step suggestion from a bounded prompt (project state + recent turns + new turn), kept in `.agenthub/state.md`
+- Session tracker stage 4: Overview of every tracked repository
+
 - Track agent process/session start and end
 - Session history per repo/task
 - Quick switch: Codex → Claude → Antigravity in same worktree

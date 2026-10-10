@@ -25,6 +25,8 @@ MainWindow (WPF)
          +-- "PowerShell in Folder…" / per-pane 📂  -- FolderBrowserDialog -> session cwd (any folder, not only repos)
          +-- TerminalPaneControl (x N panes)
               |
+              +-- TranscriptWatcher (Claude Code panes in a repo) -- ~/.claude/projects/<folder>/<session-id>.jsonl
+              |     +-- ClaudeTranscriptParser -> TurnJournal -- <repo>/.agenthub/journal.jsonl
               +-- EmbeddedTerminalControl (WebView2 + xterm.js)
                    |
                    +-- ConPtySession (Win32 PseudoConsole HPCON)
@@ -85,6 +87,16 @@ AgentHub hosts interactive character-mode processes directly inside WPF using:
 3. **Microsoft WebView2 + xterm.js:** Renders the terminal frontend with hardware-accelerated canvas rendering, full ANSI color palette, and dynamic resizing via `fitAddon`.
 4. **Lifecycle & event idempotency:** WPF `Loaded` events fire repeatedly across tab switches and visual tree rearrangements. `EmbeddedTerminalControl` utilizes strict initialization state flags (`_isInitialized`, `_isInitializing`) and idempotent event subscriptions to guarantee zero duplicate input handlers or ghost processes.
 5. **Working directory is a first-class input, not derived from repos.** A session's cwd normally comes from the pane's repository dropdown, but the Cockpit toolbar's "📂 PowerShell in Folder…" and each pane's 📂 button let the user pick any folder through the Windows folder picker. The toolbar button always opens plain PowerShell in a new (or idle) pane; the pane button launches that pane's selected shell/agent and confirms before replacing a running session. The last folder is persisted as `AppSettings.LastTerminalFolder`. Details in [MULTI_SESSION_COCKPIT.md §2.3](MULTI_SESSION_COCKPIT.md).
+
+## Turn tracking (session tracker, stage 1)
+
+Groundwork for a per-repository tracker that summarises each coding session and suggests the next step. The tracker must never see the whole conversation, so stage 1 captures only two things per turn: the user's prompt and the plain-text reply the agent closed the turn with.
+
+- **Structured source, not the screen.** Claude Code writes every session to `~/.claude/projects/<folder>/<session-id>.jsonl` (`CLAUDE_CONFIG_DIR` respected). `<folder>` is the working directory with every non-alphanumeric character replaced by `-`.
+- **Known session id.** `ClaudeSessionLaunch` appends `--session-id <guid>` to fresh interactive `claude` launches in a Git repository root, so the pane knows its exact transcript. Restart generates a new id, because Claude refuses to reuse one.
+- **Incremental reads.** `TranscriptWatcher` polls every 1.5 s, reads only bytes past its offset and holds back an unfinished last line.
+- **Turn boundaries.** `ClaudeTranscriptParser` opens a turn on a human prompt (`origin.kind == "human"`, not a tool result, not `isMeta`/`isSidechain`, system reminders stripped). The final text is the text written after the last tool call. A turn ends on an `end_turn` stop reason on a text line. One reply is split into one line per content block, each carrying the stop reason, so a thinking-only line does not end it. A new prompt marks an unfinished turn as interrupted. The pane's waiting signal and session exit call `Settle` as a fallback.
+- **Journal.** `TurnJournal` appends to `<repo>/.agenthub/journal.jsonl` (shared by all sessions in the repo) and adds it to `.git/info/exclude`. A turn that continues after finishing is appended again with the same `turnId`; readers keep the last entry per id.
 
 ## Planned v0.2 session model
 

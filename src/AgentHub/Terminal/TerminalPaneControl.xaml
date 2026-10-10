@@ -6,6 +6,7 @@
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
@@ -54,8 +55,29 @@
                 </DockPanel>
             </Border>
 
+            <!-- Turn strip: the last prompt and the agent's closing reply, read from the session transcript -->
+            <Border x:Name="TurnStrip" Grid.Row="1" Visibility="Collapsed" Background="#0B121C" BorderBrush="#1E2C40" BorderThickness="0,0,0,1" Padding="10,5" Cursor="Hand"
+                    MouseLeftButtonUp="TurnStrip_Click" ToolTip="Click to expand or collapse">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="📝 You asked" Foreground="#7E8CA6" FontSize="11" FontWeight="SemiBold" Margin="0,0,10,2" />
+                    <TextBlock x:Name="TurnAskedText" Grid.Row="0" Grid.Column="1" Foreground="#C9D4E5" FontSize="11" TextTrimming="CharacterEllipsis" Margin="0,0,0,2" />
+                    <TextBlock x:Name="TurnSaidLabel" Grid.Row="1" Grid.Column="0" Text="✅ Claude said" Foreground="#7E8CA6" FontSize="11" FontWeight="SemiBold" Margin="0,0,10,0" />
+                    <ScrollViewer x:Name="TurnSaidScroll" Grid.Row="1" Grid.Column="1" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled">
+                        <TextBlock x:Name="TurnSaidText" Foreground="#C9D4E5" FontSize="11" TextTrimming="CharacterEllipsis" />
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+
             <!-- Embedded Terminal -->
-            <terminal:EmbeddedTerminalControl Grid.Row="1" x:Name="Terminal" />
+            <terminal:EmbeddedTerminalControl Grid.Row="2" x:Name="Terminal" />
         </Grid>
     </Border>
 </UserControl>

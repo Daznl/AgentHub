@@ -61,6 +61,12 @@ public sealed class AppSettings
     /// <summary>Seconds of output silence after a burst of agent activity before the pane counts as waiting.</summary>
     public double AttentionIdleSeconds { get; set; } = 3;
 
+    /// <summary>
+    /// Follow each Claude Code session started in a repository through its transcript, show the last
+    /// prompt and reply on the pane, and log every turn to the repository's .agenthub/journal.jsonl.
+    /// </summary>
+    public bool TurnTrackingEnabled { get; set; } = true;
+
     /// <summary>Last folder chosen for "open a shell in a folder"; the picker starts here next time.</summary>
     public string? LastTerminalFolder { get; set; }
 
