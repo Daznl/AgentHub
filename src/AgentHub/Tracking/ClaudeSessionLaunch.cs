@@ -44,8 +44,11 @@ public static class ClaudeSessionLaunch
     public static string EncodeProjectFolder(string workingDirectory) =>
         new(workingDirectory.Select(ch => char.IsAsciiLetterOrDigit(ch) ? ch : '-').ToArray());
 
-    /// <summary>Finds the transcript for <paramref name="sessionId"/>, or null if Claude has not written it yet.</summary>
-    public static string? FindTranscript(string sessionId, string workingDirectory, string? configDirectory = null)
+    /// <summary>
+    /// Finds the transcript for <paramref name="sessionId"/>, or null if Claude has not written it yet.
+    /// <paramref name="searchAll"/> also searches every project folder, in case the naming scheme changes.
+    /// </summary>
+    public static string? FindTranscript(string sessionId, string workingDirectory, string? configDirectory = null, bool searchAll = true)
     {
         var projects = Path.Combine(configDirectory ?? ConfigDirectory, "projects");
         var fileName = sessionId + ".jsonl";
@@ -53,8 +56,7 @@ public static class ClaudeSessionLaunch
         var expected = Path.Combine(projects, EncodeProjectFolder(workingDirectory), fileName);
         if (File.Exists(expected)) return expected;
 
-        // Fall back to a search in case the folder naming scheme changes.
-        if (!Directory.Exists(projects)) return null;
+        if (!searchAll || !Directory.Exists(projects)) return null;
         try
         {
             return Directory.EnumerateFiles(projects, fileName, SearchOption.AllDirectories).FirstOrDefault();

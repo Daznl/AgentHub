@@ -9,7 +9,10 @@ namespace AgentHub.Tracking;
 /// </summary>
 public sealed class TranscriptWatcher : IDisposable
 {
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1.5);
+    // Short enough that a prompt shows on the pane about as soon as it is submitted; a poll with nothing new is one file-length check.
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(500);
+    // Until the transcript exists, the folder-wide fallback search runs only every this many polls.
+    private const int SearchEveryPolls = 20;
 
     private readonly string _sessionId;
     private readonly string _workingDirectory;
@@ -20,6 +23,7 @@ public sealed class TranscriptWatcher : IDisposable
     private string? _path;
     private long _offset;
     private byte[] _partialLine = [];
+    private int _lookups;
     private bool _disposed;
 
     public event Action<TurnEvent>? TurnEvent;
@@ -67,7 +71,8 @@ public sealed class TranscriptWatcher : IDisposable
 
     private void ReadNewLines(List<TurnEvent> events)
     {
-        _path ??= ClaudeSessionLaunch.FindTranscript(_sessionId, _workingDirectory, _configDirectory);
+        _path ??= ClaudeSessionLaunch.FindTranscript(_sessionId, _workingDirectory, _configDirectory,
+            searchAll: _lookups++ % SearchEveryPolls == 0);
         if (_path is null) return;
 
         using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
