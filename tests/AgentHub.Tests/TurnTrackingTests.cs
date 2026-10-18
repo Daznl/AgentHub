@@ -240,12 +240,12 @@ public sealed class TurnJournalAndWatcherTests : IDisposable
         Assert.Equal(["a", "b"], entries.Select(e => e.TurnId));
         Assert.Equal("first, revised", entries[0].FinalText);
         Assert.Equal("claude", entries[0].Agent);
-        Assert.Null(entries[1].Summary);
+        Assert.Null(entries[1].Suggestion);
 
-        var summarised = Turn("b", "second");
-        summarised.Summary = "Did the second thing.";
-        TurnJournal.Append(repo, summarised, "claude");
-        Assert.Equal("Did the second thing.", TurnJournal.Read(repo)[1].Summary);
+        var suggested = Turn("b", "second");
+        suggested.Suggestion = "Test it, then add the third thing.";
+        TurnJournal.Append(repo, suggested, "claude");
+        Assert.Equal("Test it, then add the third thing.", TurnJournal.Read(repo)[1].Suggestion);
 
         var exclude = File.ReadAllLines(Path.Combine(repo, ".git", "info", "exclude"));
         Assert.Equal("# existing", exclude[0]);
@@ -289,37 +289,34 @@ public sealed class TurnJournalAndWatcherTests : IDisposable
     }
 }
 
-public class TurnSummarizerTests
+public class TurnSuggesterTests
 {
     [Fact]
     public void Limits_to_twenty_words_and_marks_the_cut()
     {
         var text = string.Join(' ', Enumerable.Range(1, 30).Select(i => $"w{i}")) + ".";
-        var limited = TurnSummarizer.LimitWords(text, TurnSummarizer.MaxWords);
+        var limited = TurnSuggester.LimitWords(text, TurnSuggester.MaxWords);
 
-        Assert.Equal(20, TurnSummarizer.CountWords(limited));
+        Assert.Equal(20, TurnSuggester.CountWords(limited));
         Assert.EndsWith("w20…", limited);
-        Assert.Equal("short reply", TurnSummarizer.LimitWords("  short   reply ", 20));
+        Assert.Equal("short reply", TurnSuggester.LimitWords("  short   reply ", 20));
     }
 
     [Fact]
-    public void Parses_summary_and_suggestion_lines()
+    public void Parses_the_suggestion_line()
     {
-        var insight = TurnSummarizer.ParseOutput("**SUMMARY:** Built the People tab; tests pass.\nNEXT: Yes, start building the filters panel\n");
-
-        Assert.Equal("Built the People tab; tests pass.", insight.Summary);
-        Assert.Equal("Yes, start building the filters panel", insight.Suggestion);
+        Assert.Equal("Yes, start building the filters panel",
+            TurnSuggester.ParseOutput("**NEXT:** Yes, start building the filters panel\n"));
     }
 
     [Fact]
-    public void Unlabelled_output_becomes_the_summary_and_long_lines_are_capped()
+    public void Unlabelled_output_becomes_the_suggestion_and_long_lines_are_capped()
     {
-        var insight = TurnSummarizer.ParseOutput("Did a thing.");
-        Assert.Equal("Did a thing.", insight.Summary);
-        Assert.Null(insight.Suggestion);
+        Assert.Equal("Fix the failing test.", TurnSuggester.ParseOutput("Fix the failing test."));
+        Assert.Null(TurnSuggester.ParseOutput("  \n"));
 
-        var longNext = TurnSummarizer.ParseOutput("NEXT: " + string.Join(' ', Enumerable.Repeat("word", 40)));
-        Assert.Equal(20, TurnSummarizer.CountWords(longNext.Suggestion!));
+        var longNext = TurnSuggester.ParseOutput("NEXT: " + string.Join(' ', Enumerable.Repeat("word", 40)));
+        Assert.Equal(20, TurnSuggester.CountWords(longNext!));
     }
 
     [Fact]
@@ -327,18 +324,18 @@ public class TurnSummarizerTests
     {
         var history = new[]
         {
-            new JournalEntry { TurnId = "a", UserMessage = "build the map", FinalText = "long text", Summary = "Built the map." },
-            new JournalEntry { TurnId = "b", UserMessage = "add rivers", FinalText = "Rivers added, no summary yet." }
+            new JournalEntry { TurnId = "a", UserMessage = "build the map", FinalText = "Built the map." },
+            new JournalEntry { TurnId = "b", UserMessage = "add rivers", FinalText = "Rivers added." }
         };
         var reply = "## Done\nAdded the People tab.\n\nWant me to add filters next?";
 
-        var input = TurnSummarizer.BuildInput("add a people tab", reply, history);
+        var input = TurnSuggester.BuildInput("add a people tab", reply, history);
 
         Assert.Contains("1. User: build the map", input);
         Assert.Contains("Result: Built the map.", input);
-        Assert.Contains("Result: Rivers added, no summary yet.", input);
+        Assert.Contains("Result: Rivers added.", input);
         Assert.Contains("Latest user message:" + Environment.NewLine + "add a people tab", input);
-        // The whole closing reply goes in, not a summary of it.
+        // The whole closing reply goes in.
         Assert.Contains(reply, input);
         Assert.True(input.IndexOf("Recent turns") < input.IndexOf("Assistant's full closing reply"));
     }
@@ -346,7 +343,7 @@ public class TurnSummarizerTests
     [Fact]
     public void Headless_call_is_stripped_down_and_never_uses_bare_mode()
     {
-        var args = new TurnSummarizer(new AgentHub.Services.ProcessRunner(), "haiku").BuildArguments();
+        var args = new TurnSuggester(new AgentHub.Services.ProcessRunner(), "haiku").BuildArguments();
 
         Assert.Equal("-p", args[0]);
         Assert.Contains("--no-session-persistence", args);

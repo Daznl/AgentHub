@@ -4,18 +4,15 @@ using AgentHub.Services;
 
 namespace AgentHub.Tracking;
 
-/// <summary>A finished turn boiled down: what happened, and the message the user would most likely send next.</summary>
-public sealed record TurnInsight(string? Summary, string? Suggestion);
-
 /// <summary>
-/// Turns an agent's full closing reply into a short summary and a suggested next message, in one
+/// Works out the message the user would most likely send next from an agent's full closing reply, in one
 /// stripped-down headless Claude Code call (<c>claude -p</c>): no tools, hooks, MCP servers, skills or
 /// project CLAUDE.md, and nothing saved as a session. ANTHROPIC_API_KEY is removed from that call's
 /// environment so it signs in with the user's claude.ai login (subscription) instead of billing an API
 /// key. AgentHub never handles a credential itself. The suggestion is only shown to the user; it is
 /// never sent to the session.
 /// </summary>
-public sealed partial class TurnSummarizer
+public sealed partial class TurnSuggester
 {
     public const int MaxWords = 20;
 
@@ -26,11 +23,9 @@ public sealed partial class TurnSummarizer
 
     private const string SystemPrompt =
         "You track a coding session for a busy user who is not watching it. You get recent turns for context, " +
-        "the user's latest message and the assistant's full closing reply. Output exactly two lines and nothing else:\n" +
-        "SUMMARY: at most 20 words on what the assistant did or found, past tense, no subject " +
-        "(for example: Added login page; tests pass).\n" +
+        "the user's latest message and the assistant's full closing reply. Output exactly one line and nothing else:\n" +
         "NEXT: at most 20 words: the message the user would most likely send next, written as the user talking to the assistant.\n" +
-        "Rules for NEXT: if the reply asks a question or offers to do something, answer it (for example: Yes, start building it). " +
+        "Rules: if the reply asks a question or offers to do something, answer it (for example: Yes, start building it). " +
         "If it offers a choice, pick the option the reply recommends. If work is finished and working, write \"Test it: <how, " +
         "from the reply>, then <the next step>\", taking the next step from the recent turns when the plan shows one. " +
         "Start with Yes only when answering a question. If something failed or is blocked, ask for the fix. If the user " +
@@ -43,7 +38,7 @@ public sealed partial class TurnSummarizer
     private readonly ProcessRunner _runner;
     private readonly string _model;
 
-    public TurnSummarizer(ProcessRunner runner, string model = "haiku")
+    public TurnSuggester(ProcessRunner runner, string model = "haiku")
     {
         _runner = runner;
         _model = string.IsNullOrWhiteSpace(model) ? "haiku" : model;
@@ -63,7 +58,7 @@ public sealed partial class TurnSummarizer
     ];
 
     /// <summary>
-    /// What the call reads on stdin: earlier turns as prompt + summary (oldest first), then the latest
+    /// What the call reads on stdin: earlier turns as prompt + clipped reply (oldest first), then the latest
     /// prompt and the assistant's full closing reply. Public for tests.
     /// </summary>
     public static string BuildInput(string userMessage, string reply, IEnumerable<JournalEntry> recentTurns)
@@ -76,9 +71,8 @@ public sealed partial class TurnSummarizer
             var n = 1;
             foreach (var turn in history)
             {
-                var result = turn.Summary ?? turn.FinalText;
                 sb.AppendLine($"{n++}. User: {Clip(Flatten(turn.UserMessage), MaxHistoryItemChars)}");
-                sb.AppendLine($"   Result: {Clip(Flatten(result), MaxHistoryItemChars)}");
+                sb.AppendLine($"   Result: {Clip(Flatten(turn.FinalText), MaxHistoryItemChars)}");
             }
             sb.AppendLine();
         }
@@ -90,8 +84,8 @@ public sealed partial class TurnSummarizer
         return sb.ToString();
     }
 
-    /// <summary>Returns the summary and suggestion for a turn, or null if the call failed.</summary>
-    public async Task<TurnInsight?> AnalyzeAsync(string claudeExecutable, string userMessage, string reply,
+    /// <summary>Returns the suggested next message for a turn, or null if the call failed.</summary>
+    public async Task<string?> SuggestAsync(string claudeExecutable, string userMessage, string reply,
         IEnumerable<JournalEntry> recentTurns, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(reply)) return null;
@@ -105,18 +99,16 @@ public sealed partial class TurnSummarizer
             standardInput: BuildInput(userMessage, reply, recentTurns),
             removeEnvironmentVariables: NonSubscriptionAuth);
 
-        if (exitCode != 0) return null;
-        var insight = ParseOutput(stdout);
-        return insight.Summary is null && insight.Suggestion is null ? null : insight;
+        return exitCode == 0 ? ParseOutput(stdout) : null;
     }
 
     /// <summary>
-    /// Reads the SUMMARY and NEXT lines, each capped at <see cref="MaxWords"/>. Unlabelled output is taken as
-    /// the summary. Public for tests.
+    /// Reads the NEXT line, capped at <see cref="MaxWords"/>. Unlabelled output is taken as the suggestion.
+    /// Public for tests.
     /// </summary>
-    public static TurnInsight ParseOutput(string output)
+    public static string? ParseOutput(string output)
     {
-        string? summary = null, suggestion = null;
+        string? suggestion = null;
         var unlabelled = new List<string>();
         foreach (var raw in output.Replace("\r", "").Split('\n'))
         {
@@ -126,21 +118,17 @@ public sealed partial class TurnSummarizer
             if (!label.Success) { unlabelled.Add(line); continue; }
 
             var text = Flatten(line[label.Length..]);
-            if (text.Length == 0) continue;
-            if (label.Groups[1].Value.Equals("SUMMARY", StringComparison.OrdinalIgnoreCase)) summary ??= text;
-            else suggestion ??= text;
+            if (text.Length > 0) suggestion ??= text;
         }
-        if (summary is null && unlabelled.Count > 0) summary = Flatten(string.Join(' ', unlabelled));
+        if (suggestion is null && unlabelled.Count > 0) suggestion = Flatten(string.Join(' ', unlabelled));
 
-        return new TurnInsight(
-            summary is { Length: > 0 } ? LimitWords(summary, MaxWords) : null,
-            suggestion is { Length: > 0 } ? LimitWords(suggestion, MaxWords) : null);
+        return suggestion is { Length: > 0 } ? LimitWords(suggestion, MaxWords) : null;
     }
 
     // An empty folder of AgentHub's own, so no repository CLAUDE.md is picked up.
     private static string WorkingFolder()
     {
-        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AgentHub", "summarizer");
+        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AgentHub", "suggester");
         Directory.CreateDirectory(dir);
         return dir;
     }
@@ -166,7 +154,7 @@ public sealed partial class TurnSummarizer
         return WhitespaceRegex().Replace(flat, " ").Trim().Trim('"');
     }
 
-    [GeneratedRegex(@"^(SUMMARY|NEXT)\s*:\s*", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^NEXT\s*:\s*", RegexOptions.IgnoreCase)]
     private static partial Regex LabelRegex();
 
     [GeneratedRegex(@"\s+")]

@@ -21,9 +21,6 @@ public sealed class TranscriptTurn
     public int ToolCalls { get; set; }
     public List<string> FilesTouched { get; } = [];
 
-    /// <summary>One-sentence summary of <see cref="FinalText"/>, filled in after the turn completes.</summary>
-    public string? Summary { get; set; }
-
     /// <summary>The message the user would most likely send next, worked out from the full reply. Shown, never sent.</summary>
     public string? Suggestion { get; set; }
 
@@ -43,7 +40,6 @@ public sealed class TranscriptTurn
             Status = Status,
             FinalText = FinalText,
             ToolCalls = ToolCalls,
-            Summary = Summary,
             Suggestion = Suggestion
         };
         copy.FilesTouched.AddRange(FilesTouched);

@@ -68,12 +68,13 @@ public sealed class AppSettings
     public bool TurnTrackingEnabled { get; set; } = true;
 
     /// <summary>
-    /// Summarise each tracked turn's reply in at most 20 words with a headless Claude Code call that signs in with
-    /// the claude.ai login (ANTHROPIC_API_KEY is removed for that call), so it counts toward the subscription limits.
+    /// Suggest the next message after each tracked turn with a headless Claude Code call that signs in with the
+    /// claude.ai login (ANTHROPIC_API_KEY is removed for that call), so it counts toward the subscription limits.
+    /// The name predates the removal of reply summaries and is kept so existing settings still apply.
     /// </summary>
     public bool TurnSummariesEnabled { get; set; } = true;
 
-    /// <summary>Model alias for turn summaries.</summary>
+    /// <summary>Model alias for next-message suggestions.</summary>
     public string TurnSummaryModel { get; set; } = "haiku";
 
     /// <summary>Last folder chosen for "open a shell in a folder"; the picker starts here next time.</summary>

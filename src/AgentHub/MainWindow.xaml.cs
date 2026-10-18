@@ -211,7 +211,7 @@ public partial class MainWindow : Window
         pane.AttentionRequested += OnPaneAttentionRequested;
         pane.ConfigureAttention(_settings.AttentionFlashEnabled, _settings.AttentionIdleSeconds);
         pane.ConfigureTracking(_settings.TurnTrackingEnabled,
-            _settings.TurnSummariesEnabled ? new TurnSummarizer(_runner, _settings.TurnSummaryModel) : null);
+            _settings.TurnSummariesEnabled ? new TurnSuggester(_runner, _settings.TurnSummaryModel) : null);
         pane.UpdateRepositories(_settings.Repositories);
         pane.UpdateSshConnections(_settings.SshConnections);
         pane.SshManageRequested += () => ManageSsh_Click(pane, new RoutedEventArgs());

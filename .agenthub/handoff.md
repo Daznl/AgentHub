@@ -1,8 +1,8 @@
 # AgentHub Handoff Context
 
-**Updated:** 2026-10-10
-**Current branch:** `turn-suggestions` (built on `compact-header`, which is built on `turn-capture`; none are on `main` yet)
-**Current work:** Session tracker: turn capture, 20-word summaries and a suggested next message per turn; one-row header
+**Updated:** 2026-10-18
+**Current branch:** `prompt-only-strip` (built on `turn-suggestions` → `compact-header` → `turn-capture`; none are on `main` yet)
+**Current work:** Session tracker: turn capture and a suggested next message per turn (reply summaries removed); one-row header
 
 ---
 
@@ -28,7 +28,7 @@ Ground rules agreed with the user:
 | Stage | What | State |
 |---|---|---|
 | 1 | Turn capture: known session id, transcript watcher, pane strip, `.agenthub/journal.jsonl` | **Done** (`turn-capture`) |
-| 1b | 20-word summary of each reply via headless Haiku | **Done** (`turn-capture`) |
+| 1b | 20-word summary of each reply via headless Haiku | **Removed** (`prompt-only-strip`): the user wants the strip to show only what they said last |
 | 1c | Suggested next message per turn, from the full reply + recent turns; click to type it into the pane | **Done** (`turn-suggestions`) |
 | 2 | `CLAUDE.md` rule so Claude ends turns with a consistent summary (optional `TL;DR:` line, Haiku as fallback) | Not started |
 | 3 | Rolling project state (`.agenthub/state.md`) so suggestions know the wider plan, not just the last five turns | Not started |
@@ -42,18 +42,18 @@ Ground rules agreed with the user:
 - **`ClaudeSessionLaunch`** appends `--session-id <guid>` to a fresh interactive `claude` launch when the pane's folder is a Git repo root. Skips `--resume`, `-c`, `-p`, existing `--session-id`. Restart generates a new id. Transcript path: `~/.claude/projects/<cwd with every non-alphanumeric char → '-'>/<id>.jsonl` (`CLAUDE_CONFIG_DIR` respected).
 - **`TranscriptWatcher`** polls every 500 ms, reads only new bytes, holds back an unfinished last line. The folder-wide fallback search runs every 20th poll until the file exists.
 - **`ClaudeTranscriptParser`** opens a turn on a human prompt (`origin.kind == "human"`; skips tool results, `isMeta`, `isSidechain`; strips `<system-reminder>`; slash commands become `/name args`). Ends it on `stop_reason: end_turn` **on a text line**: one reply is written as one line per content block and every line carries the stop reason, so a thinking-only line must not end the turn. The next prompt marks an unfinished turn as interrupted. `Settle()` (on the pane's waiting signal or exit) is the fallback.
-- **`TurnJournal`** appends to `<repo>/.agenthub/journal.jsonl` and adds that path to `.git/info/exclude` (local only, never shows as a change). A turn is appended again when it continues or when its summary arrives; readers keep the last line per `turnId`.
-- **`TurnSummarizer`** runs `claude -p --model haiku --tools "" --no-session-persistence --strict-mcp-config --disable-slash-commands --settings {"disableAllHooks":true} --system-prompt ...` in `%LOCALAPPDATA%\AgentHub\summarizer`, reply on stdin, `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` removed. Capped at 20 words in code. Replies already ≤ 20 words skip the call. About 3–6 s per call. **Do not use `--bare`**: it signs in only with an API key.
-- **Suggestions:** the same call returns `SUMMARY:` and `NEXT:` lines. Input is the last 5 journal turns (prompt + summary), the latest prompt and the **full** closing reply. The user was explicit that suggestions must come from the full reply, not the summary. Rules the user asked for: a question or offer gets an answer ("Yes, start building it"); finished work gets "Test it: <how>, then <next step>"; a failure gets "fix it". `TypeText` types the suggestion into the pane on click **without Enter**; AgentHub never submits for the user. Every reply with text now gets a call (short replies used to skip it).
-- **Pane strip** (`TerminalPaneControl`): shows **👀 Tracking** as soon as a tracked session launches (Claude writes nothing until the first prompt), then **📝 You asked** / **⏳ Claude is working…** / **✅ Claude said** with the summary, and **👉 Suggested next** as a clickable chip. Click to expand to the full reply.
+- **`TurnJournal`** appends to `<repo>/.agenthub/journal.jsonl` and adds that path to `.git/info/exclude` (local only, never shows as a change). A turn is appended again when it continues or when its suggestion arrives; readers keep the last line per `turnId`.
+- **`TurnSuggester`** (was `TurnSummarizer`) runs `claude -p --model haiku --tools "" --no-session-persistence --strict-mcp-config --disable-slash-commands --settings {"disableAllHooks":true} --system-prompt ...` in `%LOCALAPPDATA%\AgentHub\suggester`, reply on stdin, `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` removed. Capped at 20 words in code. About 3–6 s per call. **Do not use `--bare`**: it signs in only with an API key.
+- **Suggestions:** the call returns one `NEXT:` line. Input is the last 5 journal turns (prompt + clipped reply), the latest prompt and the **full** closing reply. The user was explicit that suggestions must come from the full reply. Rules the user asked for: a question or offer gets an answer ("Yes, start building it"); finished work gets "Test it: <how>, then <next step>"; a failure gets "fix it". `TypeText` types the suggestion into the pane on click **without Enter**; AgentHub never submits for the user. Every reply with text now gets a call (short replies used to skip it).
+- **Pane strip** (`TerminalPaneControl`): shows **👀 Tracking** as soon as a tracked session launches (Claude writes nothing until the first prompt), then **📝 You said** with the last prompt (**⏳ You said** while Claude works) and **👉 Suggested next** as a clickable chip. Claude's reply is not shown on the strip. Click to expand a long prompt.
 - **`App` clears inherited Claude session markers** (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, ...) at startup. Without this, an AgentHub started from inside a Claude session gives every pane's Claude "transcript saving off", and tracking sees nothing. This cost a long debugging detour.
-- Settings: `turnTrackingEnabled`, `turnSummariesEnabled`, `turnSummaryModel` (default `haiku`).
+- Settings: `turnTrackingEnabled`, `turnSummariesEnabled` (now gates suggestions only; name kept for existing settings files), `turnSummaryModel` (default `haiku`).
 
 ### Known gaps
 
 - `/clear` or `/resume` inside a pane switches Claude to another session id, so tracking stops for that pane.
 - Codex and Antigravity panes are not tracked.
-- The summary appears a few seconds after the reply, and each one uses a little of the Claude subscription limits.
+- The suggestion appears a few seconds after the reply, and each one uses a little of the Claude subscription limits.
 
 ---
 

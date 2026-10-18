@@ -69,12 +69,12 @@ It never stores API keys or provider credentials. Authentication stays with the 
 ### Turn tracking
 
 - When Claude Code is launched in a pane whose folder is a Git repository, AgentHub gives the session its own id (`--session-id`) and follows its transcript file in `~/.claude/projects`. Nothing is read from the terminal screen.
-- A strip under the pane header shows **📝 You asked** (your last prompt) and **✅ Claude said** (the plain-text reply Claude ended its turn with). While Claude works it reads **⏳ Claude is working…**. Click the strip to expand it to the full text.
-- **Summaries and suggestions.** When a turn finishes, Claude's full closing reply is boiled down to one sentence of at most 20 words, shown on the strip (expand it for the full reply), and turned into **👉 Suggested next**: the message you would most likely send next. A question or offer gets an answer ("Yes, start building it"); finished work gets "Test it: <how>, then <next step>"; a failure gets a request for the fix. The suggestion is worked out from the whole reply, not the summary, plus your last five prompts and their summaries from the journal, so it can name the next step in your plan. Click the suggestion to type it into the terminal: it is **not sent**, so you can edit it or press Enter. Both are saved to the journal as `summary` and `suggestion`. They come from one headless `claude -p --model haiku` call with no tools, hooks, MCP servers, skills or project `CLAUDE.md`, and nothing saved as a session. `ANTHROPIC_API_KEY` is removed from that call's environment, so it signs in with your claude.ai login and counts toward your subscription limits rather than billing an API key. It takes a few seconds. Turn `turnSummariesEnabled` off to disable both.
+- A strip under the pane header shows **📝 You said**: your last prompt. While Claude works the label reads **⏳ You said**. Click the strip to expand a long prompt to its full text. Claude's reply is not repeated on the strip; it is in the terminal.
+- **Suggestions.** When a turn finishes, Claude's full closing reply is turned into **👉 Suggested next**: the message you would most likely send next. A question or offer gets an answer ("Yes, start building it"); finished work gets "Test it: <how>, then <next step>"; a failure gets a request for the fix. The suggestion is worked out from the whole reply plus your last five prompts and replies from the journal, so it can name the next step in your plan. Click the suggestion to type it into the terminal: it is **not sent**, so you can edit it or press Enter. It is saved to the journal as `suggestion`. It comes from one headless `claude -p --model haiku` call with no tools, hooks, MCP servers, skills or project `CLAUDE.md`, and nothing saved as a session. `ANTHROPIC_API_KEY` is removed from that call's environment, so it signs in with your claude.ai login and counts toward your subscription limits rather than billing an API key. It takes a few seconds. Turn `turnSummariesEnabled` off to disable it.
 - Every finished turn is appended to the repository's `.agenthub/journal.jsonl`: your prompt, Claude's closing text, the number of tool calls and the files it edited. Tool calls, tool output and code are never stored. Every session in the same repository writes to the same journal.
 - The journal is added to `.git/info/exclude` the first time it is written, so it stays local and never appears as a change. Remove that line if you want to commit it.
 - Sessions launched with `--resume`, `--continue` or `-p` are not tracked, and neither is a new conversation started inside a pane with `/clear` (Claude gives it a new session id). Turn `turnTrackingEnabled` off to disable tracking.
-- This is stage 1 of the session tracker: turn capture only. Summaries and next-step suggestions build on this journal.
+- This is stage 1 of the session tracker: turn capture only. Next-step suggestions build on this journal.
 
 ### Usage limit cards
 
@@ -203,8 +203,8 @@ Defaults:
 | `attentionFlashEnabled` | Enable the waiting-for-you pane and taskbar alert. |
 | `attentionIdleSeconds` | Seconds of silence after a burst of agent output before a pane counts as waiting. |
 | `turnTrackingEnabled` | Follow Claude Code sessions started in a repository, show the last prompt and reply on the pane and log each turn to `.agenthub/journal.jsonl`. See [Turn tracking](#turn-tracking). |
-| `turnSummariesEnabled` | Summarise each tracked reply in at most 20 words and suggest the next message, with one headless Claude Code call on your subscription. |
-| `turnSummaryModel` | Model alias for summaries and suggestions. |
+| `turnSummariesEnabled` | Suggest the next message after each tracked turn, with one headless Claude Code call on your subscription. (The name is kept from when replies were also summarised.) |
+| `turnSummaryModel` | Model alias for suggestions. |
 | `lastTerminalFolder`, `lastScanFolder` | Remembered folder-picker locations. Written automatically. |
 
 A pane is considered waiting when its coding CLI produced at least 1.5 seconds of continuous output after your last keystroke and has then been silent for `attentionIdleSeconds`, or when it rings the bell. Output within 0.75 seconds of a keystroke is treated as echo of your own typing.

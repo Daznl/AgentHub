@@ -45,7 +45,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     private TranscriptWatcher? _watcher;
     private LaunchRequest? _lastLaunch;
     private bool _stripExpanded;
-    private TurnSummarizer? _summarizer;
+    private TurnSuggester? _suggester;
     private StripState? _strip;
 
     public EmbeddedTerminalControl TerminalControl => Terminal;
@@ -277,12 +277,12 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     /// <summary>
     /// Turns the per-turn transcript tracking for Claude Code sessions in repositories on or off.
-    /// With a <paramref name="summarizer"/>, each finished reply also gets a short summary and a suggested next message.
+    /// With a <paramref name="suggester"/>, each finished reply also gets a suggested next message.
     /// </summary>
-    public void ConfigureTracking(bool enabled, TurnSummarizer? summarizer)
+    public void ConfigureTracking(bool enabled, TurnSuggester? suggester)
     {
         _trackingEnabled = enabled;
-        _summarizer = summarizer;
+        _suggester = suggester;
     }
 
     // Every launch goes through here so a Claude Code session in a repository gets its transcript followed.
@@ -302,7 +302,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             _watcher = watcher;
             watcher.Start();
             // Claude writes nothing until the first prompt; show the strip now so it is clear the pane is tracked.
-            ShowStrip(new StripState("—", "👀 Tracking", "Tracking this session. Your next message and Claude's reply will show here."));
+            ShowStrip(new StripState("Tracking this session. Your next message will show here.", "👀 Tracking"));
         }
 
         Terminal.StartSession(commandLine, workingDirectory, title, subtitle, isAgent);
@@ -320,22 +320,16 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     private void OnTurnEvent(TranscriptWatcher source, string repoRoot, string claudeExecutable, TurnEvent e)
     {
         var turn = e.Turn.Snapshot();
-        var summarizer = _summarizer;
-        var summarise = e.Kind == TurnEventKind.Completed && summarizer is not null && turn.FinalText.Length > 0;
+        var suggester = _suggester;
+        var suggest = e.Kind == TurnEventKind.Completed && suggester is not null && turn.FinalText.Length > 0;
         // Earlier turns in this repository give the suggestion context; read before this turn is appended.
-        var recentTurns = summarise ? RecentTurns(repoRoot, turn.TurnId) : [];
+        var recentTurns = suggest ? RecentTurns(repoRoot, turn.TurnId) : [];
 
         if (e.Kind == TurnEventKind.Completed)
             AppendJournal(repoRoot, turn);
 
-        var state = e.Kind == TurnEventKind.Started
-            ? new StripState(turn.UserMessage, "⏳ Claude is", "working…")
-            : new StripState(
-                turn.UserMessage,
-                turn.Status == TurnStatus.Interrupted ? "⚠ Claude said" : "✅ Claude said",
-                turn.FinalText.Length > 0 ? turn.FinalText
-                    : turn.Status == TurnStatus.Interrupted ? "(interrupted before replying)" : "(finished without a text reply)",
-                Summarising: summarise);
+        var state = new StripState(turn.UserMessage, e.Kind == TurnEventKind.Started ? "⏳ You said" : "📝 You said",
+            Suggesting: suggest);
 
         Dispatcher.InvokeAsync(() =>
         {
@@ -343,8 +337,8 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             ShowStrip(state);
         });
 
-        if (summarise)
-            _ = SummariseAsync(summarizer!, source, repoRoot, claudeExecutable, turn, recentTurns, state);
+        if (suggest)
+            _ = SuggestAsync(suggester!, source, repoRoot, claudeExecutable, turn, recentTurns, state);
     }
 
     private const int RecentTurnsForContext = 5;
@@ -359,26 +353,25 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         catch (UnauthorizedAccessException) { return []; }
     }
 
-    // One headless call turns the full reply (plus recent turns for context) into a summary and a suggested next message.
-    private async Task SummariseAsync(TurnSummarizer summarizer, TranscriptWatcher source, string repoRoot,
+    // One headless call turns the full reply (plus recent turns for context) into a suggested next message.
+    private async Task SuggestAsync(TurnSuggester suggester, TranscriptWatcher source, string repoRoot,
         string claudeExecutable, TranscriptTurn turn, List<JournalEntry> recentTurns, StripState shown)
     {
-        TurnInsight? insight = null;
-        try { insight = await summarizer.AnalyzeAsync(claudeExecutable, turn.UserMessage, turn.FinalText, recentTurns).ConfigureAwait(false); }
-        catch (Exception) { } // a failed call leaves the full reply on show
+        string? suggestion = null;
+        try { suggestion = await suggester.SuggestAsync(claudeExecutable, turn.UserMessage, turn.FinalText, recentTurns).ConfigureAwait(false); }
+        catch (Exception) { } // a failed call just leaves no suggestion
 
-        if (insight is not null)
+        if (suggestion is not null)
         {
-            turn.Summary = insight.Summary;
-            turn.Suggestion = insight.Suggestion;
+            turn.Suggestion = suggestion;
             AppendJournal(repoRoot, turn);
         }
 
         await Dispatcher.InvokeAsync(() =>
         {
-            // Only update the strip if it still shows this reply (no newer prompt, relaunch or continued turn).
+            // Only update the strip if it still shows this turn (no newer prompt, relaunch or continued turn).
             if (!ReferenceEquals(source, _watcher) || !ReferenceEquals(_strip, shown)) return;
-            ShowStrip(shown with { Summary = insight?.Summary, Suggestion = insight?.Suggestion, Summarising = false });
+            ShowStrip(shown with { Suggestion = suggestion, Suggesting = false });
         });
     }
 
@@ -394,9 +387,9 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         _strip = state;
         TurnStrip.Visibility = Visibility.Visible;
         TurnAskedText.Text = state.Asked;
-        TurnSaidLabel.Text = state.Label;
+        TurnAskedLabel.Text = state.Label;
 
-        var next = state.Summarising ? "working it out…" : state.Suggestion;
+        var next = state.Suggesting ? "working it out…" : state.Suggestion;
         var showNext = next is not null;
         TurnNextLabel.Visibility = showNext ? Visibility.Visible : Visibility.Collapsed;
         TurnNextChip.Visibility = showNext ? Visibility.Visible : Visibility.Collapsed;
@@ -419,26 +412,14 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         ApplyStripExpansion();
     }
 
-    // Collapsed: one line each, the reply as its summary. Expanded: the summary above the full reply, which scrolls.
+    // Collapsed: one line each. Expanded: the whole prompt, which scrolls if it is long.
     private void ApplyStripExpansion()
     {
-        if (_strip is { } state)
-        {
-            TurnSaidText.Text = (_stripExpanded, state.Summary, state.Summarising) switch
-            {
-                (false, { } summary, _) => summary,
-                (false, null, true) => "summarising… · " + state.Text,
-                (true, { } summary, _) => summary + Environment.NewLine + Environment.NewLine + state.Text,
-                _ => state.Text
-            };
-        }
-
         var wrap = _stripExpanded ? TextWrapping.Wrap : TextWrapping.NoWrap;
         TurnAskedText.TextWrapping = wrap;
-        TurnSaidText.TextWrapping = wrap;
         TurnNextText.TextWrapping = wrap;
-        TurnSaidScroll.MaxHeight = _stripExpanded ? 160 : double.PositiveInfinity;
-        TurnSaidScroll.VerticalScrollBarVisibility = _stripExpanded ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
+        TurnAskedScroll.MaxHeight = _stripExpanded ? 160 : double.PositiveInfinity;
+        TurnAskedScroll.VerticalScrollBarVisibility = _stripExpanded ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
     }
 
     private void Launch_Click(object sender, RoutedEventArgs e)
@@ -555,8 +536,8 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         Terminal.Dispose();
     }
 
-    /// <summary>What the turn strip shows: the prompt, a label, the reply, and its summary and suggestion once ready.</summary>
-    private sealed record StripState(string Asked, string Label, string Text, string? Summary = null, bool Summarising = false, string? Suggestion = null);
+    /// <summary>What the turn strip shows: the last prompt, its label, and the suggested next message once ready.</summary>
+    private sealed record StripState(string Asked, string Label, bool Suggesting = false, string? Suggestion = null);
 
     private sealed record LaunchRequest(string CommandLine, string WorkingDirectory, string Title, string Subtitle, bool IsAgent);
 }

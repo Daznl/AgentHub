@@ -22,7 +22,7 @@
 ## v0.3 — Session manager
 
 - [x] Turn capture (session tracker stage 1): Claude Code panes in a repository get a known session id, their transcript is followed, the last prompt and closing reply show on the pane, and each turn is logged to `.agenthub/journal.jsonl`
-- [x] 20-word reply summaries from a stripped-down headless `claude -p` call on the subscription login
+- [x] ~~20-word reply summaries~~ removed: the strip shows the user's last prompt instead
 - [x] Suggested next message per turn, from the full reply plus recent turns; click to type it into the terminal without sending
 - Session tracker stage 2: `CLAUDE.md` rule for a consistent closing summary
 - Session tracker stage 3: per-turn summary and next-step suggestion from a bounded prompt (project state + recent turns + new turn), kept in `.agenthub/state.md`
