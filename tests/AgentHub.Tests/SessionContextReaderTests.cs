@@ -122,6 +122,70 @@ public class SessionContextReaderTests : IDisposable
         Assert.Equal(6, SessionContextReader.ReadClaude(path, 200_000)!.UsedTokens);
     }
 
+    private static string User(string contentJson, string extra = "") =>
+        "{\"type\":\"user\",\"isSidechain\":false" + extra +
+        ",\"timestamp\":\"2026-10-29T01:02:03.000Z\",\"message\":{\"role\":\"user\",\"content\":" + contentJson + "}}";
+
+    [Fact]
+    public void ClaudePrompt_ReturnsLastTypedPromptAndSkipsNoise()
+    {
+        var path = Path.Combine(_root, "prompt.jsonl");
+        File.WriteAllLines(path,
+        [
+            User("\"first prompt\"", ",\"origin\":{\"kind\":\"human\"}"),
+            User("\"fix the build\\nthen run tests\"", ",\"origin\":{\"kind\":\"human\"}"),
+            Assistant(1, 0, 0),
+            User("[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"ok\"}]"),
+            User("[{\"type\":\"text\",\"text\":\"Base directory for this skill\"}]", ",\"isMeta\":true"),
+            User("\"<task-notification><task-id>b1</task-id></task-notification>\"", ",\"origin\":{\"kind\":\"task-notification\"}"),
+            User("\"<command-name>/model</command-name>\""),
+            User("\"<bash-input>az login</bash-input>\""),
+            User("[{\"type\":\"text\",\"text\":\"[Request interrupted by user]\"}]"),
+            User("\"sub-agent task\"", "").Replace("\"isSidechain\":false", "\"isSidechain\":true"),
+            Assistant(1, 0, 0)
+        ]);
+
+        var prompt = SessionContextReader.ReadClaudePrompt(path)!;
+        Assert.Equal("fix the build\nthen run tests", prompt.Text);
+        Assert.Equal(new DateTimeOffset(2026, 10, 29, 1, 2, 3, TimeSpan.Zero), prompt.SentAt);
+    }
+
+    [Fact]
+    public void ClaudePrompt_ReadsTextBlocksAndOlderLinesWithoutOrigin()
+    {
+        var path = Path.Combine(_root, "blocks.jsonl");
+        File.WriteAllLines(path,
+        [
+            User("\"plain older prompt\""),
+            User("[{\"type\":\"image\",\"source\":{}},{\"type\":\"text\",\"text\":\"what is in this screenshot?\"}]", ",\"origin\":{\"kind\":\"human\"}")
+        ]);
+        Assert.Equal("what is in this screenshot?", SessionContextReader.ReadClaudePrompt(path)!.Text);
+
+        File.WriteAllLines(path, [User("\"plain older prompt\""), Assistant(1, 0, 0)]);
+        Assert.Equal("plain older prompt", SessionContextReader.ReadClaudePrompt(path)!.Text);
+
+        File.WriteAllLines(path, [Assistant(1, 0, 0)]);
+        Assert.Null(SessionContextReader.ReadClaudePrompt(path));
+    }
+
+    [Fact]
+    public void CodexPrompt_ReadsLastUserMessageEvent()
+    {
+        var path = Path.Combine(_root, "rollout-prompt.jsonl");
+        File.WriteAllLines(path,
+        [
+            "{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"C:\\\\Work\"}}",
+            "{\"timestamp\":\"2026-10-29T01:00:00.000Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"first\",\"images\":[]}}",
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<environment_context>x</environment_context>\"}]}}",
+            "{\"timestamp\":\"2026-10-29T01:05:00.000Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"  add a retry  \",\"images\":[]}}",
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"done\"}}"
+        ]);
+
+        var prompt = SessionContextReader.ReadCodexPrompt(path)!;
+        Assert.Equal("add a retry", prompt.Text);
+        Assert.Equal(new DateTimeOffset(2026, 10, 29, 1, 5, 0, TimeSpan.Zero), prompt.SentAt);
+    }
+
     [Fact]
     public void Codex_MatchesRolloutByCwdAndReadsRecordedWindow()
     {

@@ -60,7 +60,7 @@ It never stores API keys or provider credentials. Authentication stays with the 
 ### Terminal cockpit
 
 - Run up to six interactive sessions side by side inside AgentHub, powered by Windows ConPTY and xterm.js in WebView2.
-- Each pane can host Codex, Claude Code, Antigravity, PowerShell or Cmd, in any registered repository or any folder you pick. The location dropdown defaults to **🏠 Home (no repo)**, your user profile folder. Pick a repository from it, or press **📂** to browse to any folder, which is then added to the dropdown and selected. Nothing starts until you press **Launch**, and Launch asks before replacing a running session.
+- Each pane can host Codex, Claude Code, Antigravity, PowerShell or Cmd, in any registered repository or any folder you pick. The location dropdown defaults to **🏠 Home**, your user profile folder. Pick a repository from it, or press **📂** to browse to any folder, which is then added to the dropdown and selected. Nothing starts until you press **Launch**, and Launch asks before replacing a running session.
 - Draggable splitters, **➕ Add Terminal**, per-pane close buttons and clean session teardown.
 - **Working and waiting indicators.** A pane running a coding CLI breathes blue while the CLI is producing output. When the CLI goes quiet, or rings the terminal bell, the pane pulses amber with a **⏳ WAITING FOR YOU** badge until you type. If AgentHub is in the background, the taskbar button flashes. Plain shells are never tracked.
 - **SSH.** Save connections with the **🔐 SSH** header button: an optional name plus `user@host` or `user@host:port`. Each pane's **SSH** button connects straight away when one connection is saved, or lets you pick when there are several. The session runs your own OpenSSH client inside PowerShell, so `exit` drops you back to a local prompt. AgentHub stores only the address; passwords and keys stay with `ssh`.
@@ -207,6 +207,15 @@ The badge reads the transcript the CLI already writes; nothing is scraped from t
 | **Codex** | `~/.codex/sessions/yyyy/mm/dd/rollout-*.jsonl`, matched to the pane by working folder. The last `token_count` event. | Recorded by Codex (`model_context_window`). |
 
 After a compaction the badge reads **compacted** until the next reply. The session is matched by folder and launch time, so if you run the same CLI in the same folder outside AgentHub at the same time, the badge may follow that session instead. Two panes in the same folder never show the same session. The pane must be launched with the CLI itself (Launch or a repository card); a CLI started by typing into a PowerShell pane is not tracked.
+
+### Last prompt strip
+
+Under the pane header, the last prompt you sent is shown on one line so you do not have to scroll back for it. It comes from the same transcript as the badge. Click the text to expand it to the full prompt; click again to collapse. **Copy** puts the full prompt on the clipboard, and hovering **LAST PROMPT** shows when it was sent.
+
+- Claude Code: the last typed user message. Tool results, sub-agent turns, slash and `!` command echoes, background-task notifications and interrupt markers are skipped.
+- Codex: the last `user_message` event (the prompt as typed, without the context Codex adds).
+
+The strip clears when the session exits or after `/clear`, until the next prompt.
 
 ## GitHub accounts and permissions
 

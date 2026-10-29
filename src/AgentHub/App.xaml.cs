@@ -14,9 +14,18 @@ public partial class App : System.Windows.Application
     /// When AgentHub is itself started from a Claude Code session, that session's markers are inherited and passed on to
     /// every CLI AgentHub launches. Claude Code then treats Cockpit sessions as its own children: it stops saving their
     /// transcripts (so no context badge) and hands them the parent's messaging token. Cockpit sessions are independent.
+    /// Claude Code's tool shells also set <c>NO_COLOR</c> and <c>GIT_TERMINAL_PROMPT=0</c>; inherited, they strip colour from
+    /// every pane and stop git asking for credentials. Those two are cleared only when a Claude Code parent is detected,
+    /// so a user who sets them deliberately keeps them.
     /// </summary>
     private static void ClearInheritedAgentSessionMarkers()
     {
+        if (Environment.GetEnvironmentVariable("CLAUDECODE") is not null)
+        {
+            Environment.SetEnvironmentVariable("NO_COLOR", null);
+            Environment.SetEnvironmentVariable("GIT_TERMINAL_PROMPT", null);
+        }
+
         string[] markers =
         [
             "CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_SESSION_ATTENDED",

@@ -272,9 +272,6 @@ public partial class MainWindow : Window
                 TerminalsContainerGrid.Children.Add(splitter);
             }
         }
-
-        if (TerminalCountBadge != null)
-            TerminalCountBadge.Text = $"{_panes.Count} SESSION{(_panes.Count == 1 ? "" : "S")}";
     }
 
     private void AddTerminal_Click(object sender, RoutedEventArgs e)
@@ -704,7 +701,6 @@ public partial class MainWindow : Window
         RepoViewGrid.Visibility = Visibility.Visible;
         GitHubViewGrid.Visibility = Visibility.Collapsed;
         CockpitViewGrid.Visibility = Visibility.Collapsed;
-        CockpitHeaderInfo.Visibility = Visibility.Collapsed;
         CockpitHeaderActions.Visibility = Visibility.Collapsed;
         ManageBar.Visibility = Visibility.Visible;
         ManageReposBtn.Background = NavActiveBrush;
@@ -718,7 +714,6 @@ public partial class MainWindow : Window
         RepoViewGrid.Visibility = Visibility.Collapsed;
         GitHubViewGrid.Visibility = Visibility.Visible;
         CockpitViewGrid.Visibility = Visibility.Collapsed;
-        CockpitHeaderInfo.Visibility = Visibility.Collapsed;
         CockpitHeaderActions.Visibility = Visibility.Collapsed;
         ManageBar.Visibility = Visibility.Visible;
         ManageReposBtn.Background = NavActiveBrush;
@@ -741,12 +736,15 @@ public partial class MainWindow : Window
         }
     }
 
+    // The separator only divides the groups while they share a row; once the actions wrap below, it would dangle.
+    private void HeaderButtons_SizeChanged(object sender, SizeChangedEventArgs e) =>
+        NavSeparator.Opacity = HeaderButtons.ActualHeight > NavButtons.ActualHeight + 1 ? 0 : 1;
+
     private void ViewCockpitBtn_Click(object sender, RoutedEventArgs e)
     {
         RepoViewGrid.Visibility = Visibility.Collapsed;
         GitHubViewGrid.Visibility = Visibility.Collapsed;
         CockpitViewGrid.Visibility = Visibility.Visible;
-        CockpitHeaderInfo.Visibility = Visibility.Visible;
         CockpitHeaderActions.Visibility = Visibility.Visible;
         ManageBar.Visibility = Visibility.Collapsed;
         ViewCockpitBtn.Background = NavActiveBrush;

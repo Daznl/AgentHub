@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using AgentHub.Models;
@@ -34,6 +35,10 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     private SolidColorBrush? _workingHeaderBrush;
     private readonly ContextWindowTracker _context = new();
     private long _claudeContextWindowTokens = 1_000_000;
+    private const double PromptCollapsedMaxHeight = 18;
+    private const double PromptExpandedMaxHeight = 160;
+    private LastPrompt? _lastPrompt;
+    private bool _promptExpanded;
 
     public event Action<TerminalPaneControl>? CloseRequested;
     public event Action<TerminalPaneControl, int>? MoveRequested;
@@ -68,6 +73,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             SessionStateChanged?.Invoke();
         };
         _context.ReadingChanged += ShowContext;
+        _context.PromptChanged += ShowPrompt;
         Terminal.StatusChanged += OnTerminalStatusChanged;
         Terminal.SubtitleChanged += subtitle => SubtitleText.Text = subtitle;
         Terminal.AttentionRequested += () =>
@@ -165,6 +171,71 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         ContextBadge.Visibility = Visibility.Visible;
     }
 
+    private void ShowPrompt(LastPrompt? prompt)
+    {
+        if (prompt is null)
+        {
+            _lastPrompt = null;
+            PromptStrip.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (_lastPrompt?.Text != prompt.Text) _promptExpanded = false;
+        _lastPrompt = prompt;
+        PromptLabel.ToolTip = prompt.SentAt is { } sent ? $"Sent {sent.ToLocalTime():HH:mm:ss}" : null;
+        ApplyPromptLayout();
+        PromptStrip.Visibility = Visibility.Visible;
+    }
+
+    // Collapsed: one line, line breaks shown as ↵. Expanded: full text, wrapped, scrolling past a few lines.
+    private void ApplyPromptLayout()
+    {
+        if (_lastPrompt is null) return;
+        var text = _lastPrompt.Text;
+        if (_promptExpanded)
+        {
+            PromptText.Text = text;
+            PromptText.TextWrapping = TextWrapping.Wrap;
+            PromptText.TextTrimming = TextTrimming.None;
+            PromptScroller.MaxHeight = PromptExpandedMaxHeight;
+            PromptScroller.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+            PromptScroller.ToolTip = "Click to collapse";
+        }
+        else
+        {
+            PromptText.Text = string.Join(" ↵ ", text.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
+            PromptText.TextWrapping = TextWrapping.NoWrap;
+            PromptText.TextTrimming = TextTrimming.CharacterEllipsis;
+            PromptScroller.MaxHeight = PromptCollapsedMaxHeight;
+            PromptScroller.VerticalScrollBarVisibility = ScrollBarVisibility.Disabled;
+            PromptScroller.ScrollToTop();
+            PromptScroller.ToolTip = "Click to show the full prompt";
+        }
+    }
+
+    private void PromptText_Click(object sender, MouseButtonEventArgs e)
+    {
+        _promptExpanded = !_promptExpanded;
+        ApplyPromptLayout();
+    }
+
+    private void PromptCopy_Click(object sender, RoutedEventArgs e)
+    {
+        if (_lastPrompt is null) return;
+        try
+        {
+            System.Windows.Clipboard.SetText(_lastPrompt.Text);
+            PromptCopyBtn.Content = "Copied";
+            var reset = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+            reset.Tick += (_, _) => { reset.Stop(); PromptCopyBtn.Content = "Copy"; };
+            reset.Start();
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            // Clipboard held open by another process; the user can press Copy again.
+        }
+    }
+
     private static string FormatTokens(long tokens) => tokens switch
     {
         >= 1_000_000 => $"{tokens / 1_000_000d:0.#}M",
@@ -252,7 +323,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     // Dropdown order: home (the default), the browsed folder if any, then registered repositories.
     private void RebuildLocations(LaunchLocation? select)
     {
-        var home = new LaunchLocation { Name = "🏠 Home (no repo)", Path = BaseDirectory };
+        var home = new LaunchLocation { Name = "🏠 Home", Path = BaseDirectory };
         var items = new List<LaunchLocation> { home };
         if (_customLocation is not null) items.Add(_customLocation);
         items.AddRange(_repositories.Select(r => new LaunchLocation { Name = r.Name, Path = r.LocalPath, Repository = r }));

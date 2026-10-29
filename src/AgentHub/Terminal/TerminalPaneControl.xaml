@@ -6,6 +6,7 @@
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
@@ -65,8 +66,19 @@
                 </DockPanel>
             </Border>
 
+            <!-- Last prompt the user sent, read from the CLI's transcript so it never needs scrolling back for -->
+            <Border x:Name="PromptStrip" Grid.Row="1" Visibility="Collapsed" Background="#0B121C" BorderBrush="#1E2C40" BorderThickness="0,0,0,1" Padding="8,4">
+                <DockPanel LastChildFill="True">
+                    <Button DockPanel.Dock="Right" x:Name="PromptCopyBtn" Click="PromptCopy_Click" Content="Copy" ToolTip="Copy the full prompt" VerticalAlignment="Top" Background="#16202F" Foreground="#7E8CA6" Padding="7,1" Margin="8,0,0,0" FontSize="10" FontWeight="SemiBold" />
+                    <TextBlock DockPanel.Dock="Left" x:Name="PromptLabel" Text="LAST PROMPT" Foreground="#5A6B85" FontSize="9" FontWeight="Bold" VerticalAlignment="Top" Margin="0,2,8,0" />
+                    <ScrollViewer x:Name="PromptScroller" MaxHeight="18" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled" Cursor="Hand" MouseLeftButtonUp="PromptText_Click">
+                        <TextBlock x:Name="PromptText" Foreground="#B6C2D6" FontSize="11" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
             <!-- Embedded Terminal -->
-            <terminal:EmbeddedTerminalControl Grid.Row="1" x:Name="Terminal" />
+            <terminal:EmbeddedTerminalControl Grid.Row="2" x:Name="Terminal" />
         </Grid>
     </Border>
 </UserControl>

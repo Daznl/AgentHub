@@ -25,6 +25,9 @@ public sealed record ContextReading(
     public double UsedFraction => WindowTokens <= 0 ? 0 : Math.Clamp((double)UsedTokens / WindowTokens, 0, 1);
 }
 
+/// <summary>The last prompt the user typed into a coding session, as the CLI recorded it.</summary>
+public sealed record LastPrompt(string Text, DateTimeOffset? SentAt);
+
 /// <summary>
 /// Reads per-session context usage from the transcripts coding CLIs already write, so nothing is scraped from the terminal:
 /// <list type="bullet">
@@ -227,6 +230,77 @@ public static class SessionContextReader
 
                 return new ContextReading(GetLong(last, "total_tokens"), window, WindowIsAssumed: false, Model: null,
                     ReadTimestamp(root) ?? File.GetLastWriteTimeUtc(rolloutPath), CodexSourceLabel, rolloutPath);
+            }
+            catch (JsonException) { /* partial line mid-write */ }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Last prompt the user typed into a Claude Code session. Skipped: tool results, sub-agent turns, meta and
+    /// compaction lines, background-task notifications, interrupt markers, and slash/bang command echoes (which start
+    /// with an XML-like tag such as <c>&lt;command-name&gt;</c> or <c>&lt;bash-input&gt;</c>).
+    /// </summary>
+    public static LastPrompt? ReadClaudePrompt(string transcriptPath)
+    {
+        foreach (var line in ReadLinesNewestFirst(transcriptPath))
+        {
+            if (!line.Contains("\"type\":\"user\"", StringComparison.Ordinal) ||
+                line.Contains("\"tool_result\"", StringComparison.Ordinal) ||
+                line.Contains("\"isSidechain\":true", StringComparison.Ordinal) ||
+                line.Contains("\"isMeta\":true", StringComparison.Ordinal) ||
+                line.Contains("\"isCompactSummary\":true", StringComparison.Ordinal))
+                continue;
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                var root = doc.RootElement;
+                // Newer CLIs tag typed prompts with origin.kind = "human"; older ones have no origin at all.
+                if (root.TryGetProperty("origin", out var origin) &&
+                    !(origin.TryGetProperty("kind", out var kind) && kind.GetString() == "human"))
+                    continue;
+                if (!root.TryGetProperty("message", out var message) ||
+                    !message.TryGetProperty("content", out var content))
+                    continue;
+
+                var text = content.ValueKind switch
+                {
+                    JsonValueKind.String => content.GetString(),
+                    JsonValueKind.Array => string.Join("\n", content.EnumerateArray()
+                        .Where(b => b.TryGetProperty("type", out var t) && t.GetString() == "text" &&
+                                    b.TryGetProperty("text", out _))
+                        .Select(b => b.GetProperty("text").GetString())),
+                    _ => null
+                };
+                text = text?.Trim();
+                if (string.IsNullOrEmpty(text) || text.StartsWith('<') ||
+                    text.StartsWith("[Request interrupted", StringComparison.Ordinal))
+                    continue;
+
+                return new LastPrompt(text, ReadTimestamp(root));
+            }
+            catch (JsonException) { /* partial line mid-write */ }
+        }
+        return null;
+    }
+
+    /// <summary>Last <c>user_message</c> event: the prompt as typed, without the environment context Codex injects.</summary>
+    public static LastPrompt? ReadCodexPrompt(string rolloutPath)
+    {
+        foreach (var line in ReadLinesNewestFirst(rolloutPath))
+        {
+            if (!line.Contains("\"user_message\"", StringComparison.Ordinal)) continue;
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                var root = doc.RootElement;
+                if (!root.TryGetProperty("payload", out var payload) ||
+                    !payload.TryGetProperty("type", out var type) || type.GetString() != "user_message" ||
+                    !payload.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.String)
+                    continue;
+
+                var text = message.GetString()!.Trim();
+                if (text.Length > 0) return new LastPrompt(text, ReadTimestamp(root));
             }
             catch (JsonException) { /* partial line mid-write */ }
         }

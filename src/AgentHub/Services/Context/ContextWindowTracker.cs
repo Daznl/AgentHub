@@ -4,7 +4,7 @@ using System.Windows.Threading;
 namespace AgentHub.Services.Context;
 
 /// <summary>
-/// Follows one Cockpit session's transcript and reports its context usage. Polls on the UI dispatcher, reads off it.
+/// Follows one Cockpit session's transcript and reports its context usage and the user's last prompt. Polls on the UI dispatcher, reads off it.
 /// Each tracker claims the transcript it binds to so two panes in the same folder never show the same session.
 /// After <c>/clear</c> (or a new session in the same CLI) a newer unclaimed transcript appears and the tracker moves to it.
 /// </summary>
@@ -24,6 +24,9 @@ public sealed class ContextWindowTracker : IDisposable
 
     /// <summary>Raised on the UI thread with the latest reading, or null when there is nothing to show.</summary>
     public event Action<ContextReading?>? ReadingChanged;
+
+    /// <summary>Raised on the UI thread with the last prompt the user sent, or null when there is none.</summary>
+    public event Action<LastPrompt?>? PromptChanged;
 
     public ContextWindowTracker()
     {
@@ -50,6 +53,7 @@ public sealed class ContextWindowTracker : IDisposable
         Release();
         _source = ContextSource.None;
         ReadingChanged?.Invoke(null);
+        PromptChanged?.Invoke(null);
     }
 
     private async Task PollAsync()
@@ -65,21 +69,21 @@ public sealed class ContextWindowTracker : IDisposable
             var window = _configuredClaudeWindow;
             var excluded = Claims.Where(c => c.Value != this).Select(c => c.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            var (path, reading) = await Task.Run<(string?, ContextReading?)>(() =>
+            var (path, changed, reading, prompt) = await Task.Run<(string?, bool, ContextReading?, LastPrompt?)>(() =>
             {
                 var found = source == ContextSource.ClaudeCode
                     ? SessionContextReader.FindClaudeTranscript(dir, since, excluded)
                     : SessionContextReader.FindCodexRollout(dir, since, excluded);
-                if (found is null) return (null, null);
+                if (found is null) return (null, false, null, null);
 
                 // Skip the parse when the bound file has not changed since last poll.
                 var writeTime = File.GetLastWriteTimeUtc(found);
-                if (found == _boundPath && writeTime == _boundWriteTime) return (found, (ContextReading?)null);
+                if (found == _boundPath && writeTime == _boundWriteTime) return (found, false, null, null);
                 _boundWriteTime = writeTime;
 
-                return (found, source == ContextSource.ClaudeCode
-                    ? SessionContextReader.ReadClaude(found, window)
-                    : SessionContextReader.ReadCodex(found));
+                return source == ContextSource.ClaudeCode
+                    ? (found, true, SessionContextReader.ReadClaude(found, window), SessionContextReader.ReadClaudePrompt(found))
+                    : (found, true, SessionContextReader.ReadCodex(found), SessionContextReader.ReadCodexPrompt(found));
             });
 
             if (generation != _generation || path is null) return;
@@ -92,6 +96,8 @@ public sealed class ContextWindowTracker : IDisposable
             }
 
             if (reading is not null) ReadingChanged?.Invoke(reading);
+            // A new transcript (after /clear) has no prompt yet, so null is passed on to clear the old one.
+            if (changed) PromptChanged?.Invoke(prompt);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
