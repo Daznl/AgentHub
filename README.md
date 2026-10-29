@@ -27,6 +27,7 @@ It never stores API keys or provider credentials. Authentication stays with the 
 - [Requirements](#requirements)
 - [Getting started](#getting-started)
 - [Configuration](#configuration)
+- [Context window badge](#context-window-badge)
 - [GitHub accounts and permissions](#github-accounts-and-permissions)
 - [Usage limit cards](#usage-limit-cards)
 - [Handoff convention](#handoff-convention)
@@ -189,11 +190,23 @@ Defaults:
 | `hiddenUsageCards` | Provider ids whose card you have closed. Reopen from the chips beside "Usage limits". |
 | `attentionFlashEnabled` | Enable the waiting-for-you pane and taskbar alert. |
 | `attentionIdleSeconds` | Seconds of silence after a burst of agent output before a pane counts as waiting. |
+| `claudeContextWindowTokens` | Context window size assumed for Claude Code in the pane context badge, which Claude Code does not record. Raised automatically if a session grows past it. Applies to sessions launched after the change. |
 | `lastTerminalFolder`, `lastScanFolder` | Remembered folder-picker locations. Written automatically. |
 
 A pane is considered waiting when its coding CLI produced at least 1.5 seconds of continuous output after your last keystroke and has then been silent for `attentionIdleSeconds`, or when it rings the bell. Output within 0.75 seconds of a keystroke is treated as echo of your own typing.
 
 If you want an agent profile that skips permission prompts, add a second agent definition with the relevant flag in `arguments` rather than editing the default.
+
+## Context window badge
+
+The badge reads the transcript the CLI already writes; nothing is scraped from the terminal. It refreshes every 3 seconds and only changes after each reply.
+
+| CLI | Source | Window size |
+|---|---|---|
+| **Claude Code** | `~/.claude/projects/<folder>/<session>.jsonl`. The prompt size of the last main-conversation reply (input plus cache read plus cache write tokens). Sub-agent turns are ignored. | Not recorded by Claude Code, so taken from `claudeContextWindowTokens` and labelled *assumed* in the tooltip. |
+| **Codex** | `~/.codex/sessions/yyyy/mm/dd/rollout-*.jsonl`, matched to the pane by working folder. The last `token_count` event. | Recorded by Codex (`model_context_window`). |
+
+After a compaction the badge reads **compacted** until the next reply. The session is matched by folder and launch time, so if you run the same CLI in the same folder outside AgentHub at the same time, the badge may follow that session instead. Two panes in the same folder never show the same session. The pane must be launched with the CLI itself (Launch or a repository card); a CLI started by typing into a PowerShell pane is not tracked.
 
 ## GitHub accounts and permissions
 
@@ -248,6 +261,7 @@ src/AgentHub/                     WPF application
   Models/                         settings, repository, account and usage models
   Services/                       Git, GitHub CLI, discovery, settings and agent launching
   Services/Usage/                 per-provider usage readers and the output parser
+  Services/Context/               per-session context window readers (Claude Code, Codex transcripts)
   Terminal/                       ConPTY host, xterm.js assets and the terminal controls
   Sessions/                       interfaces for the planned session layer
 tests/AgentHub.Tests/             xUnit tests

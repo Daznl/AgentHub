@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using AgentHub.Models;
+using AgentHub.Services.Context;
 using Color = System.Windows.Media.Color;
 using UserControl = System.Windows.Controls.UserControl;
 
@@ -23,8 +24,16 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     private static readonly SolidColorBrush StoppedBrush = new(Color.FromRgb(113, 113, 122));
     private static readonly SolidColorBrush FailedBrush = new(Color.FromRgb(239, 68, 68));
 
+    // Context badge bar colours: comfortable, getting full, near auto-compact.
+    private static readonly SolidColorBrush ContextOkBrush = new(Color.FromRgb(0x22, 0xC5, 0x5E));
+    private static readonly SolidColorBrush ContextWarnBrush = new(Color.FromRgb(0xF5, 0x9E, 0x0B));
+    private static readonly SolidColorBrush ContextFullBrush = new(Color.FromRgb(0xEF, 0x44, 0x44));
+    private const double ContextBarWidth = 36;
+
     private SolidColorBrush? _workingBorderBrush;
     private SolidColorBrush? _workingHeaderBrush;
+    private readonly ContextWindowTracker _context = new();
+    private long _claudeContextWindowTokens = 1_000_000;
 
     public event Action<TerminalPaneControl>? CloseRequested;
     public event Action<TerminalPaneControl, int>? MoveRequested;
@@ -48,8 +57,17 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     public TerminalPaneControl()
     {
         InitializeComponent();
-        Terminal.SessionStarted += () => SessionStateChanged?.Invoke();
-        Terminal.SessionExited += () => SessionStateChanged?.Invoke();
+        Terminal.SessionStarted += () =>
+        {
+            _context.Start(Terminal.CommandLine, Terminal.WorkingDirectory, DateTimeOffset.Now, _claudeContextWindowTokens);
+            SessionStateChanged?.Invoke();
+        };
+        Terminal.SessionExited += () =>
+        {
+            _context.Stop();
+            SessionStateChanged?.Invoke();
+        };
+        _context.ReadingChanged += ShowContext;
         Terminal.StatusChanged += OnTerminalStatusChanged;
         Terminal.SubtitleChanged += subtitle => SubtitleText.Text = subtitle;
         Terminal.AttentionRequested += () =>
@@ -108,6 +126,51 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         Terminal.AttentionEnabled = enabled;
         Terminal.AttentionIdleSeconds = idleSeconds;
     }
+
+    /// <summary>Window size assumed for Claude Code sessions, which do not record it. Applies from the next launch.</summary>
+    public void ConfigureContext(long claudeContextWindowTokens) => _claudeContextWindowTokens = claudeContextWindowTokens;
+
+    private void ShowContext(ContextReading? reading)
+    {
+        if (reading is null)
+        {
+            ContextBadge.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var fraction = reading.UsedFraction;
+        ContextBarFill.Width = ContextBarWidth * fraction;
+        ContextBarFill.Background = fraction switch
+        {
+            >= 0.85 => ContextFullBrush,
+            >= 0.6 => ContextWarnBrush,
+            _ => ContextOkBrush
+        };
+        ContextText.Text = reading.CompactedSinceLastTurn
+            ? "compacted"
+            : $"{FormatTokens(reading.UsedTokens)} / {FormatTokens(reading.WindowTokens)} · {fraction:P0}";
+
+        var window = reading.WindowIsAssumed
+            ? $"Window {reading.WindowTokens:N0} tokens is assumed (the CLI does not record it). Change it with claudeContextWindowTokens in settings."
+            : $"Window {reading.WindowTokens:N0} tokens, as recorded by the CLI.";
+        var compacted = reading.CompactedSinceLastTurn
+            ? "\nConversation compacted; size updates after the next reply."
+            : "";
+        ContextBadge.ToolTip =
+            $"Context window: {reading.UsedTokens:N0} tokens in the last request{compacted}\n" +
+            $"{window}\n" +
+            (reading.Model is null ? "" : $"Model: {reading.Model}\n") +
+            $"As of {reading.RecordedAt.ToLocalTime():HH:mm:ss}\n" +
+            $"Source: {reading.Source}\n{reading.FilePath}";
+        ContextBadge.Visibility = Visibility.Visible;
+    }
+
+    private static string FormatTokens(long tokens) => tokens switch
+    {
+        >= 1_000_000 => $"{tokens / 1_000_000d:0.#}M",
+        >= 1_000 => $"{tokens / 1_000d:0}k",
+        _ => tokens.ToString()
+    };
 
     // Three amber pulses on the pane border and header, then a persistent badge until the user types.
     private void ShowAttention()
@@ -365,6 +428,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     public void Dispose()
     {
+        _context.Dispose();
         Terminal.Dispose();
     }
 }
@@ -375,4 +439,7 @@ public sealed class LaunchLocation
     public required string Name { get; init; }
     public required string Path { get; init; }
     public RepositoryDefinition? Repository { get; init; }
+
+    // Screen readers and UI Automation name combo items by ToString, not DisplayMemberPath.
+    public override string ToString() => Name;
 }

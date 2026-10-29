@@ -209,6 +209,7 @@ public partial class MainWindow : Window
         pane.SessionStateChanged += UpdateUsagePollingInterval;
         pane.AttentionRequested += OnPaneAttentionRequested;
         pane.ConfigureAttention(_settings.AttentionFlashEnabled, _settings.AttentionIdleSeconds);
+        pane.ConfigureContext(_settings.ClaudeContextWindowTokens);
         pane.UpdateRepositories(_settings.Repositories);
         pane.UpdateSshConnections(_settings.SshConnections);
         pane.SshManageRequested += () => ManageSsh_Click(pane, new RoutedEventArgs());
