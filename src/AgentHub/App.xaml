@@ -134,7 +134,8 @@
                             <Grid>
                                 <!-- Translucent overlay gives every button (whatever its base colour) a consistent hover/press highlight -->
                                 <Border x:Name="Overlay" CornerRadius="6" Background="#FFFFFF" Opacity="0" />
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                <!-- Button's default HorizontalContentAlignment is Center; menus (SSH, resume) set Left/Stretch -->
+                                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"
                                                   Margin="{TemplateBinding Padding}" />
                             </Grid>
                         </Border>

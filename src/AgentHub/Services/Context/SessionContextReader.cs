@@ -92,9 +92,11 @@ public static class SessionContextReader
     /// <summary>
     /// Newest Claude transcript for <paramref name="workingDirectory"/> written since <paramref name="since"/>, skipping
     /// <paramref name="excluded"/> (files other Cockpit panes already own). Null when the session has not written one yet.
+    /// With <paramref name="createdSince"/>, only files created after the launch count, so a session already running in
+    /// the same folder outside this pane (another window, another AgentHub) is never mistaken for this one.
     /// </summary>
     public static string? FindClaudeTranscript(string workingDirectory, DateTimeOffset since,
-        IReadOnlySet<string> excluded, string? projectsDir = null)
+        IReadOnlySet<string> excluded, string? projectsDir = null, bool createdSince = false)
     {
         projectsDir ??= ClaudeProjectsDir;
         var encoded = EncodeClaudeProjectName(workingDirectory);
@@ -107,9 +109,55 @@ public static class SessionContextReader
             return Directory.EnumerateDirectories(projectsDir, pattern)
                 .SelectMany(dir => new DirectoryInfo(dir).EnumerateFiles("*.jsonl"))
                 .Where(f => new DateTimeOffset(f.LastWriteTimeUtc) >= since - StartSlack)
+                .Where(f => !createdSince || new DateTimeOffset(f.CreationTimeUtc) >= since - StartSlack)
                 .Where(f => !excluded.Contains(f.FullName))
                 .OrderByDescending(f => f.LastWriteTimeUtc)
                 .Select(f => f.FullName)
+                .FirstOrDefault();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The transcript a resume command line continues (<c>claude --resume &lt;id&gt;</c>, <c>codex resume &lt;id&gt;</c>),
+    /// so the session is followed exactly instead of guessed from folder and launch time. Null when the command line
+    /// is not a resume or the transcript is not on disk.
+    /// </summary>
+    public static string? FindResumedTranscript(string commandLine, string workingDirectory,
+        string? claudeProjectsDir = null, string? codexSessionsDir = null)
+    {
+        var source = DetectSource(commandLine);
+        var args = commandLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var flag = source switch
+        {
+            ContextSource.ClaudeCode => Array.FindIndex(args, a => a is "--resume" or "-r"),
+            ContextSource.Codex => Array.IndexOf(args, "resume"),
+            _ => -1
+        };
+        if (flag < 0 || flag + 1 >= args.Length) return null;
+        var id = args[flag + 1].Trim('"');
+        if (!Guid.TryParse(id, out _)) return null;
+
+        try
+        {
+            if (source == ContextSource.ClaudeCode)
+            {
+                claudeProjectsDir ??= ClaudeProjectsDir;
+                var encoded = EncodeClaudeProjectName(workingDirectory);
+                var pattern = encoded.Length > 200 ? encoded[..200] + "*" : encoded;
+                if (!Directory.Exists(claudeProjectsDir)) return null;
+                return Directory.EnumerateDirectories(claudeProjectsDir, pattern)
+                    .Select(dir => Path.Combine(dir, id + ".jsonl"))
+                    .FirstOrDefault(File.Exists);
+            }
+
+            codexSessionsDir ??= CodexSessionsDir;
+            if (!Directory.Exists(codexSessionsDir)) return null;
+            return Directory.EnumerateFiles(codexSessionsDir, $"rollout-*{id}.jsonl", SearchOption.AllDirectories)
+                .OrderByDescending(File.GetLastWriteTimeUtc)
                 .FirstOrDefault();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -174,9 +222,10 @@ public static class SessionContextReader
     /// <summary>
     /// Newest Codex rollout whose <c>session_meta</c> cwd is <paramref name="workingDirectory"/> and which was written since
     /// <paramref name="since"/>. Only today's and yesterday's date folders are scanned (sessions crossing midnight).
+    /// <paramref name="createdSince"/> as for <see cref="FindClaudeTranscript"/>.
     /// </summary>
     public static string? FindCodexRollout(string workingDirectory, DateTimeOffset since,
-        IReadOnlySet<string> excluded, string? sessionsDir = null)
+        IReadOnlySet<string> excluded, string? sessionsDir = null, bool createdSince = false)
     {
         sessionsDir ??= CodexSessionsDir;
         var target = NormaliseDir(workingDirectory);
@@ -196,6 +245,7 @@ public static class SessionContextReader
             return dayDirs
                 .SelectMany(dir => new DirectoryInfo(dir).EnumerateFiles("rollout-*.jsonl"))
                 .Where(f => new DateTimeOffset(f.LastWriteTimeUtc) >= since - StartSlack)
+                .Where(f => !createdSince || new DateTimeOffset(f.CreationTimeUtc) >= since - StartSlack)
                 .Where(f => !excluded.Contains(f.FullName))
                 .OrderByDescending(f => f.LastWriteTimeUtc)
                 .Where(f => string.Equals(ReadCodexCwd(f.FullName), target, StringComparison.OrdinalIgnoreCase))

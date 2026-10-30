@@ -19,6 +19,8 @@ public sealed class ContextWindowTracker : IDisposable
     private long _configuredClaudeWindow;
     private string? _boundPath;
     private DateTime _boundWriteTime;
+    // Set for a resume launch: the transcript being continued, which was created before this pane started it.
+    private string? _resumedPath;
     private bool _polling;
     private int _generation;
 
@@ -45,6 +47,7 @@ public sealed class ContextWindowTracker : IDisposable
         _workingDirectory = workingDirectory;
         _since = startedAt;
         _configuredClaudeWindow = claudeWindowTokens;
+        _resumedPath = SessionContextReader.FindResumedTranscript(commandLine, workingDirectory);
         _timer.Start();
     }
 
@@ -70,13 +73,16 @@ public sealed class ContextWindowTracker : IDisposable
             var dir = _workingDirectory;
             var since = _since;
             var window = _configuredClaudeWindow;
+            var resumed = _resumedPath;
             var excluded = Claims.Where(c => c.Value != this).Select(c => c.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             var (path, changed, reading, prompt) = await Task.Run<(string?, bool, ContextReading?, LastPrompt?)>(() =>
             {
-                var found = source == ContextSource.ClaudeCode
-                    ? SessionContextReader.FindClaudeTranscript(dir, since, excluded)
-                    : SessionContextReader.FindCodexRollout(dir, since, excluded);
+                // Only transcripts created since launch are this pane's new sessions (including after /clear);
+                // otherwise a resumed session is followed in the file it continues.
+                var found = (source == ContextSource.ClaudeCode
+                    ? SessionContextReader.FindClaudeTranscript(dir, since, excluded, createdSince: true)
+                    : SessionContextReader.FindCodexRollout(dir, since, excluded, createdSince: true)) ?? resumed;
                 if (found is null) return (null, false, null, null);
 
                 // Skip the parse when the bound file has not changed since last poll.

@@ -17,8 +17,34 @@
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                         <ComboBox x:Name="RepoCombo" Width="130" Margin="0,0,4,0" DisplayMemberPath="Name" ToolTip="Select working repository or folder" SelectionChanged="RepoCombo_SelectionChanged" />
                         <Button Click="BrowseFolder_Click" Content="📂" ToolTip="Browse for any folder to launch in. It is added to the dropdown and selected; press Launch to start." Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
-                        <ComboBox x:Name="ShellCombo" Width="110" Margin="0,0,4,0" ToolTip="Select agent CLI or shell" />
-                        <Button Click="Launch_Click" Content="Launch" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#0E7490" FontSize="11" />
+                        <ComboBox x:Name="ShellCombo" Width="124" Margin="0,0,4,0" ToolTip="Select agent CLI or shell" />
+                        <Button x:Name="LaunchBtn" Click="Launch_Click" Content="Launch" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#0E7490" FontSize="11"
+                                ToolTip="Start the selected shell or agent. For Claude Code and Codex, choose a new session or continue an earlier one." />
+                        <!-- Shown by Launch for Claude Code / Codex: new session, or continue one recorded for this folder -->
+                        <Popup x:Name="ResumePopup" PlacementTarget="{Binding ElementName=LaunchBtn}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                            <Border x:Name="ResumeMenu" Background="#111A28" BorderBrush="#24344B" BorderThickness="1" CornerRadius="6" Padding="4" Width="380" Margin="0,4,0,0">
+                                <StackPanel>
+                                    <TextBlock x:Name="ResumeHeader" Margin="10,6,10,4" Foreground="#7E8CA6" FontSize="10" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+                                    <Button x:Name="NewSessionBtn" Click="NewSession_Click" Content="➕ New session" HorizontalContentAlignment="Left" Background="Transparent" Padding="10,6" Margin="0" FontSize="12" FontWeight="SemiBold" />
+                                    <Border Height="1" Background="#24344B" Margin="4,4" />
+                                    <TextBlock x:Name="ResumeStatus" Margin="10,4,10,4" Foreground="#7E8CA6" FontSize="11" TextWrapping="Wrap" />
+                                    <ScrollViewer MaxHeight="340" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                        <ItemsControl x:Name="ResumeList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Button Click="ResumeItem_Click" Tag="{Binding}" ToolTip="{Binding FilePath}" AutomationProperties.Name="{Binding}" HorizontalContentAlignment="Stretch" Background="Transparent" BorderThickness="0" Padding="10,5" Margin="0">
+                                                        <StackPanel>
+                                                            <TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding Meta}" FontSize="10" Foreground="#7E8CA6" TextTrimming="CharacterEllipsis" Margin="0,1,0,0" />
+                                                        </StackPanel>
+                                                    </Button>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
                         <Button x:Name="SshBtn" Click="Ssh_Click" Content="SSH" ToolTip="Connect to a saved SSH connection" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#4C1D95" FontSize="11" />
                         <!-- Shown by the SSH button when more than one connection is saved -->
                         <Popup x:Name="SshPopup" PlacementTarget="{Binding ElementName=SshBtn}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
