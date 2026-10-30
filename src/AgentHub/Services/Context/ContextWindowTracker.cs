@@ -28,6 +28,9 @@ public sealed class ContextWindowTracker : IDisposable
     /// <summary>Raised on the UI thread with the last prompt the user sent, or null when there is none.</summary>
     public event Action<LastPrompt?>? PromptChanged;
 
+    /// <summary>Transcript this tracker is following, or null before the CLI has written one.</summary>
+    public string? BoundPath => _boundPath;
+
     public ContextWindowTracker()
     {
         _timer.Tick += async (_, _) => await PollAsync();

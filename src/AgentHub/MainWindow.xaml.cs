@@ -213,8 +213,31 @@ public partial class MainWindow : Window
         pane.UpdateRepositories(_settings.Repositories);
         pane.UpdateSshConnections(_settings.SshConnections);
         pane.SshManageRequested += () => ManageSsh_Click(pane, new RoutedEventArgs());
+        pane.HistoryRequested += p => ShowHistory(p.HistoryFolder, p.TranscriptPath);
         pane.UpdateShellOptions(_shellOptions, defaultShellIndex);
         return pane;
+    }
+
+    private HistoryWindow? _historyWindow;
+
+    private void OpenHistory_Click(object sender, RoutedEventArgs e) => ShowHistory(null, null);
+
+    // One history window, reused; it is not modal so it can sit beside the Cockpit while sessions run.
+    private void ShowHistory(string? folder, string? transcriptPath)
+    {
+        if (_historyWindow is null)
+        {
+            _historyWindow = new HistoryWindow(_settings.Repositories) { Owner = this };
+            _historyWindow.Closed += (_, _) => _historyWindow = null;
+            _historyWindow.Show();
+        }
+        else
+        {
+            _historyWindow.UpdateRepositories(_settings.Repositories);
+            if (_historyWindow.WindowState == WindowState.Minimized) _historyWindow.WindowState = WindowState.Normal;
+            _historyWindow.Activate();
+        }
+        if (folder is not null) _historyWindow.Navigate(folder, transcriptPath);
     }
 
     private void InitDefaultTerminalPanes(int count = 3)

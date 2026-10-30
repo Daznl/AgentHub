@@ -36,6 +36,7 @@
                                 </StackPanel>
                             </Border>
                         </Popup>
+                        <Button Click="History_Click" Content="🕘" ToolTip="Open the full history of this pane's session, or of the selected folder's sessions" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="MoveLeftBtn" Click="MoveLeft_Click" Content="◀" ToolTip="Move this terminal left" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="MoveRightBtn" Click="MoveRight_Click" Content="▶" ToolTip="Move this terminal right" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="RestartBtn" Click="RestartBtn_Click" Content="Restart" ToolTip="Re-launch the last command in this pane" Visibility="Collapsed" Padding="8,3" Margin="0,0,4,0" FontSize="11" />

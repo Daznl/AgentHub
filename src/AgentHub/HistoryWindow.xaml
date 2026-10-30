@@ -1,0 +1,230 @@
+<Window x:Class="AgentHub.HistoryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AgentHub - Session history" Height="860" Width="1380" MinHeight="560" MinWidth="980"
+        Icon="Assets/AppIcon.png" WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBackgroundBrush}" Foreground="{StaticResource TextBrush}" FontFamily="Segoe UI">
+    <Window.Resources>
+        <!-- Read-only, selectable message text: no box, no padding, so it reads like a chat bubble rather than an input -->
+        <Style x:Key="BodyText" TargetType="TextBox">
+            <Setter Property="IsReadOnly" Value="True" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="SelectionBrush" Value="{StaticResource AccentBrush}" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
+                                      HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Disabled" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Filter chips: lit when that kind of entry is shown -->
+        <Style x:Key="FilterChip" TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="Background" Value="#141D2B" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="IsChecked" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Chip" CornerRadius="12" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Chip" Property="Background" Value="#12324A" />
+                                <Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- List rows without the default blue system highlight -->
+        <Style x:Key="PlainRow" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <ContentPresenter />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="PickRow" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,0,0,3" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Row" CornerRadius="6" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" Padding="8,6">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Row" Property="Background" Value="#141D2B" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Row" Property="Background" Value="#12324A" />
+                                <Setter TargetName="Row" Property="BorderBrush" Value="#1E5A7A" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="16">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="230" />
+            <ColumnDefinition Width="12" />
+            <ColumnDefinition Width="320" />
+            <ColumnDefinition Width="12" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Repositories and folders -->
+        <Border Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Top" Margin="4,2,4,10">
+                    <TextBlock Text="Repositories" FontWeight="SemiBold" />
+                    <TextBlock Text="Where the sessions ran" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,3,0,0" />
+                </StackPanel>
+                <ListBox x:Name="LocationList" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource PickRow}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled" SelectionChanged="LocationList_SelectionChanged">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel ToolTip="{Binding Path}">
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding Path}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </Border>
+
+        <!-- Sessions in the selected location -->
+        <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
+            <DockPanel>
+                <DockPanel DockPanel.Dock="Top" Margin="4,2,0,10">
+                    <Button DockPanel.Dock="Right" Click="RefreshSessions_Click" Content="↻" ToolTip="Re-scan for sessions" Background="#16202F" Foreground="#7E8CA6" Padding="8,3" Margin="0" FontSize="12" FontWeight="Bold" VerticalAlignment="Top" />
+                    <StackPanel>
+                        <TextBlock Text="Sessions" FontWeight="SemiBold" />
+                        <TextBlock x:Name="SessionCountText" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,3,0,0" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </DockPanel>
+                <Grid>
+                    <ListBox x:Name="SessionList" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource PickRow}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" SelectionChanged="SessionList_SelectionChanged"
+                             VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel ToolTip="{Binding FilePath}">
+                                    <DockPanel>
+                                        <Border DockPanel.Dock="Right" Background="{Binding AgentBadgeBrush}" CornerRadius="4" Padding="5,1" Margin="6,1,0,0" VerticalAlignment="Top">
+                                            <TextBlock Text="{Binding AgentName}" Foreground="#E8F1FB" FontSize="10" FontWeight="SemiBold" />
+                                        </Border>
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="13" TextWrapping="Wrap" MaxHeight="36" TextTrimming="CharacterEllipsis" />
+                                    </DockPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                                        <Ellipse Width="7" Height="7" Fill="#22C55E" Margin="0,0,6,0" VerticalAlignment="Center" Visibility="{Binding LiveVisibility}" ToolTip="Written to in the last two minutes" />
+                                        <TextBlock Text="{Binding Meta}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock x:Name="SessionEmptyText" Visibility="Collapsed" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" Margin="4,0" />
+                </Grid>
+            </DockPanel>
+        </Border>
+
+        <!-- Full history of the selected session -->
+        <Border Grid.Column="4" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="14,12">
+            <DockPanel>
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                        <Button x:Name="ExportBtn" Click="Export_Click" Content="⤓ Export Markdown" ToolTip="Save the entries shown below as a Markdown file" Padding="10,5" Margin="0,0,6,0" FontSize="12" IsEnabled="False" />
+                        <Button x:Name="OpenTranscriptBtn" Click="OpenTranscript_Click" Content="📄 Transcript file" ToolTip="Show the CLI's own transcript file in Explorer" Padding="10,5" Margin="0" FontSize="12" IsEnabled="False" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,12,0">
+                        <TextBlock x:Name="SessionTitleText" Text="Session history" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="SessionMetaText" Text="Pick a repository, then a session." Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,3,0,0" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </DockPanel>
+
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <Grid DockPanel.Dock="Right" Width="220" Height="26" VerticalAlignment="Top">
+                        <TextBox x:Name="SearchBox" Padding="8,0" FontSize="12" VerticalContentAlignment="Center"
+                                 TextChanged="SearchBox_TextChanged" ToolTip="Show only entries containing this text" />
+                        <TextBlock x:Name="SearchHint" Text="🔍 Search this session" Foreground="#5A6B85" FontSize="12" Margin="11,0,0,0"
+                                   VerticalAlignment="Center" IsHitTestVisible="False" />
+                    </Grid>
+                    <WrapPanel VerticalAlignment="Center">
+                        <ToggleButton x:Name="ShowPrompts" Style="{StaticResource FilterChip}" Content="You" Click="Filter_Click" ToolTip="Prompts you typed" />
+                        <ToggleButton x:Name="ShowReplies" Style="{StaticResource FilterChip}" Content="Replies" Click="Filter_Click" ToolTip="Text the agent wrote back" />
+                        <ToggleButton x:Name="ShowThinking" Style="{StaticResource FilterChip}" Content="Thinking" Click="Filter_Click" ToolTip="The agent's visible reasoning" />
+                        <ToggleButton x:Name="ShowTools" Style="{StaticResource FilterChip}" Content="Tool calls" Click="Filter_Click" ToolTip="Tools the agent called, with their input" />
+                        <ToggleButton x:Name="ShowResults" Style="{StaticResource FilterChip}" Content="Tool results" Click="Filter_Click" ToolTip="What each tool returned" />
+                        <ToggleButton x:Name="ShowEvents" Style="{StaticResource FilterChip}" Content="Events" Click="Filter_Click" ToolTip="Slash commands, interrupts and compaction" />
+                        <TextBlock x:Name="EntryCountText" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" Margin="6,0,12,0" />
+                    </WrapPanel>
+                </DockPanel>
+
+                <Grid>
+                    <ListBox x:Name="EntryList" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource PlainRow}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.CanContentScroll="True"
+                             VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel"
+                             PreviewMouseWheel="EntryList_PreviewMouseWheel">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,0,10,8" Padding="12,8,12,9" CornerRadius="6" Background="{Binding Background}"
+                                        BorderBrush="{Binding Accent}" BorderThickness="3,0,0,0">
+                                    <StackPanel>
+                                        <DockPanel Margin="0,0,0,4">
+                                            <TextBlock DockPanel.Dock="Right" Text="{Binding TimeText}" ToolTip="{Binding TimeToolTip}" Foreground="#5A6B85" FontSize="10" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding Label}" Foreground="{Binding Accent}" FontSize="10" FontWeight="Bold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                        </DockPanel>
+                                        <TextBox Style="{StaticResource BodyText}" Text="{Binding Body, Mode=OneWay}" FontFamily="{Binding BodyFont}"
+                                                 FontStyle="{Binding BodyStyle}" Foreground="{Binding BodyBrush}" FontSize="{Binding BodySize}" />
+                                        <Button Visibility="{Binding ExpandVisibility}" Click="Expand_Click" Tag="{Binding}" Content="{Binding ExpandText}"
+                                                HorizontalAlignment="Left" Background="#16202F" Foreground="#7E8CA6" Padding="8,2" Margin="0,6,0,0" FontSize="11" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <TextBlock x:Name="EntryEmptyText" Visibility="Collapsed" Foreground="{StaticResource MutedBrush}" FontSize="13"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="420" />
+
+                    <Button x:Name="JumpLatestBtn" Click="JumpLatest_Click" Content="↓ Latest" Visibility="Collapsed" ToolTip="Scroll to the newest entry and follow the session"
+                            HorizontalAlignment="Right" VerticalAlignment="Bottom" Background="#0E7490" FontWeight="SemiBold" Padding="12,5" Margin="0,0,22,8" FontSize="12" />
+                </Grid>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

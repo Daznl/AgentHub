@@ -67,6 +67,15 @@ It never stores API keys or provider credentials. Authentication stays with the 
 - **Copy and paste.** Select text and press **Ctrl+Shift+C** to copy, **Ctrl+Shift+V** to paste, or right-click a pane for **Copy** / **Paste**. Plain **Ctrl+C** still interrupts the running command.
 - Launch an agent into a specific pane straight from a repository card, or into a new Windows Terminal tab.
 
+### Session history
+
+- **🕘 History** in the header opens a window listing every Claude Code and Codex session per repository (plus Home and any folder opened from a pane), newest first, with the CLI's generated title, start time, duration and size.
+- Pick a session to see its full history in order: every prompt you typed, every reply, the agent's visible thinking, each tool call with its input and each tool result (errors in red), plus slash commands, interrupts and compaction.
+- Filter by kind with the chips, search the session, expand long tool output, and export what is shown as Markdown. **📄 Transcript file** shows the underlying file in Explorer.
+- The open session is followed live: new messages append as the agent writes them, and the view follows the bottom unless you have scrolled up (**↓ Latest** jumps back).
+- Each Cockpit pane's **🕘** button opens straight to that pane's session.
+- Read from the transcripts the CLIs already write (`~/.claude/projects`, `~/.codex/sessions`), so sessions started outside AgentHub appear too and nothing is scraped from the terminal. AgentHub stores no copy, so history lasts as long as the CLI keeps its files: Claude Code deletes transcripts older than its `cleanupPeriodDays` setting (default 30). Raise that in `~/.claude/settings.json` to keep more. Antigravity is not covered yet.
+
 ### Usage limit cards
 
 - Live 5-hour and weekly quota for Codex, Claude Code and Antigravity, shown above the terminals.

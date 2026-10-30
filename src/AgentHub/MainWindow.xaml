@@ -34,6 +34,7 @@
                         <Border x:Name="NavSeparator" Width="1" Background="{StaticResource BorderBrush}" Margin="2,0,10,8" />
                         <Button x:Name="ViewCockpitBtn" Click="ViewCockpitBtn_Click" Content="⚡ Cockpit" FontWeight="SemiBold" />
                         <Button x:Name="ManageReposBtn" Click="ManageReposBtn_Click" Content="🔧 Manage GitHub Repos" FontWeight="SemiBold" />
+                        <Button Click="OpenHistory_Click" Content="🕘 History" FontWeight="SemiBold" ToolTip="Every Claude Code and Codex session per repository: each prompt, reply, thinking step, tool call and result" />
                         <Button Click="OpenSettings_Click" Content="⚙ Settings" Margin="0,0,0,8" />
                     </StackPanel>
                     <!-- Manage GitHub Repos view: repository management actions -->

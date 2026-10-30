@@ -39,6 +39,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     private const double PromptExpandedMaxHeight = 160;
     private LastPrompt? _lastPrompt;
     private bool _promptExpanded;
+    private string? _lastTranscript;
 
     public event Action<TerminalPaneControl>? CloseRequested;
     public event Action<TerminalPaneControl, int>? MoveRequested;
@@ -46,6 +47,8 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     public event Action<TerminalPaneControl>? FolderPickRequested;
     /// <summary>Raised when the user wants to add or remove SSH connections (also when SSH is pressed with none saved).</summary>
     public event Action? SshManageRequested;
+    /// <summary>Raised when the user wants this pane's session history. See <see cref="HistoryFolder"/> and <see cref="TranscriptPath"/>.</summary>
+    public event Action<TerminalPaneControl>? HistoryRequested;
     private List<SshConnection> _sshConnections = [];
     private List<RepositoryDefinition> _repositories = [];
     private LaunchLocation? _customLocation;
@@ -64,6 +67,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         InitializeComponent();
         Terminal.SessionStarted += () =>
         {
+            _lastTranscript = null;
             _context.Start(Terminal.CommandLine, Terminal.WorkingDirectory, DateTimeOffset.Now, _claudeContextWindowTokens);
             SessionStateChanged?.Invoke();
         };
@@ -144,6 +148,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             return;
         }
 
+        _lastTranscript = reading.FilePath;
         var fraction = reading.UsedFraction;
         ContextBarFill.Width = ContextBarWidth * fraction;
         ContextBarFill.Background = fraction switch
@@ -473,6 +478,14 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     }
 
     private void BrowseFolder_Click(object sender, RoutedEventArgs e) => FolderPickRequested?.Invoke(this);
+
+    private void History_Click(object sender, RoutedEventArgs e) => HistoryRequested?.Invoke(this);
+
+    /// <summary>Folder whose sessions the history button shows: where the current or last session ran, else the selected location.</summary>
+    public string HistoryFolder => string.IsNullOrEmpty(Terminal.WorkingDirectory) ? SelectedFolder : Terminal.WorkingDirectory;
+
+    /// <summary>Transcript of this pane's current or most recent Claude Code / Codex session, if one has been found.</summary>
+    public string? TranscriptPath => _context.BoundPath ?? _lastTranscript;
 
     private void Close_Click(object sender, RoutedEventArgs e)
     {
