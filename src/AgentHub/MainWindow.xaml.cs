@@ -209,11 +209,35 @@ public partial class MainWindow : Window
         pane.SessionStateChanged += UpdateUsagePollingInterval;
         pane.AttentionRequested += OnPaneAttentionRequested;
         pane.ConfigureAttention(_settings.AttentionFlashEnabled, _settings.AttentionIdleSeconds);
+        pane.ConfigureContext(_settings.ClaudeContextWindowTokens);
         pane.UpdateRepositories(_settings.Repositories);
         pane.UpdateSshConnections(_settings.SshConnections);
         pane.SshManageRequested += () => ManageSsh_Click(pane, new RoutedEventArgs());
+        pane.HistoryRequested += p => ShowHistory(p.HistoryFolder, p.TranscriptPath);
         pane.UpdateShellOptions(_shellOptions, defaultShellIndex);
         return pane;
+    }
+
+    private HistoryWindow? _historyWindow;
+
+    private void OpenHistory_Click(object sender, RoutedEventArgs e) => ShowHistory(null, null);
+
+    // One history window, reused; it is not modal so it can sit beside the Cockpit while sessions run.
+    private void ShowHistory(string? folder, string? transcriptPath)
+    {
+        if (_historyWindow is null)
+        {
+            _historyWindow = new HistoryWindow(_settings.Repositories) { Owner = this };
+            _historyWindow.Closed += (_, _) => _historyWindow = null;
+            _historyWindow.Show();
+        }
+        else
+        {
+            _historyWindow.UpdateRepositories(_settings.Repositories);
+            if (_historyWindow.WindowState == WindowState.Minimized) _historyWindow.WindowState = WindowState.Normal;
+            _historyWindow.Activate();
+        }
+        if (folder is not null) _historyWindow.Navigate(folder, transcriptPath);
     }
 
     private void InitDefaultTerminalPanes(int count = 3)
@@ -271,9 +295,6 @@ public partial class MainWindow : Window
                 TerminalsContainerGrid.Children.Add(splitter);
             }
         }
-
-        if (TerminalCountBadge != null)
-            TerminalCountBadge.Text = $"{_panes.Count} SESSION{(_panes.Count == 1 ? "" : "S")}";
     }
 
     private void AddTerminal_Click(object sender, RoutedEventArgs e)
@@ -703,7 +724,6 @@ public partial class MainWindow : Window
         RepoViewGrid.Visibility = Visibility.Visible;
         GitHubViewGrid.Visibility = Visibility.Collapsed;
         CockpitViewGrid.Visibility = Visibility.Collapsed;
-        CockpitHeaderInfo.Visibility = Visibility.Collapsed;
         CockpitHeaderActions.Visibility = Visibility.Collapsed;
         ManageBar.Visibility = Visibility.Visible;
         ManageReposBtn.Background = NavActiveBrush;
@@ -717,7 +737,6 @@ public partial class MainWindow : Window
         RepoViewGrid.Visibility = Visibility.Collapsed;
         GitHubViewGrid.Visibility = Visibility.Visible;
         CockpitViewGrid.Visibility = Visibility.Collapsed;
-        CockpitHeaderInfo.Visibility = Visibility.Collapsed;
         CockpitHeaderActions.Visibility = Visibility.Collapsed;
         ManageBar.Visibility = Visibility.Visible;
         ManageReposBtn.Background = NavActiveBrush;
@@ -740,12 +759,15 @@ public partial class MainWindow : Window
         }
     }
 
+    // The separator only divides the groups while they share a row; once the actions wrap below, it would dangle.
+    private void HeaderButtons_SizeChanged(object sender, SizeChangedEventArgs e) =>
+        NavSeparator.Opacity = HeaderButtons.ActualHeight > NavButtons.ActualHeight + 1 ? 0 : 1;
+
     private void ViewCockpitBtn_Click(object sender, RoutedEventArgs e)
     {
         RepoViewGrid.Visibility = Visibility.Collapsed;
         GitHubViewGrid.Visibility = Visibility.Collapsed;
         CockpitViewGrid.Visibility = Visibility.Visible;
-        CockpitHeaderInfo.Visibility = Visibility.Visible;
         CockpitHeaderActions.Visibility = Visibility.Visible;
         ManageBar.Visibility = Visibility.Collapsed;
         ViewCockpitBtn.Background = NavActiveBrush;

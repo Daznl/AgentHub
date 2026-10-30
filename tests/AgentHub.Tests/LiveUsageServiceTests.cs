@@ -15,7 +15,7 @@ public class LiveUsageServiceTests
         _output = output;
     }
 
-    [Fact]
+    [LiveFact("agy")]
     public async Task Live_AntigravityUsage_ReturnsAvailableSnapshots()
     {
         var runner = new ProcessRunner();
@@ -41,7 +41,7 @@ public class LiveUsageServiceTests
         Assert.NotEmpty(snap.Limits);
     }
 
-    [Fact]
+    [LiveFact("codex")]
     public async Task Live_CodexBackgroundTerminal_CapturesOutput()
     {
         var runner = new ProcessRunner();
@@ -69,7 +69,7 @@ public class LiveUsageServiceTests
         Assert.NotNull(snap.RawOutput);
     }
 
-    [Fact]
+    [LiveFact("claude")]
     public async Task Live_ClaudeBackgroundTerminal_CapturesOutput()
     {
         var runner = new ProcessRunner();

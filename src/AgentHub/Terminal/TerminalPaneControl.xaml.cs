@@ -1,9 +1,11 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using AgentHub.Models;
+using AgentHub.Services.Context;
 using Color = System.Windows.Media.Color;
 using UserControl = System.Windows.Controls.UserControl;
 
@@ -23,8 +25,21 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     private static readonly SolidColorBrush StoppedBrush = new(Color.FromRgb(113, 113, 122));
     private static readonly SolidColorBrush FailedBrush = new(Color.FromRgb(239, 68, 68));
 
+    // Context badge bar colours: comfortable, getting full, near auto-compact.
+    private static readonly SolidColorBrush ContextOkBrush = new(Color.FromRgb(0x22, 0xC5, 0x5E));
+    private static readonly SolidColorBrush ContextWarnBrush = new(Color.FromRgb(0xF5, 0x9E, 0x0B));
+    private static readonly SolidColorBrush ContextFullBrush = new(Color.FromRgb(0xEF, 0x44, 0x44));
+    private const double ContextBarWidth = 36;
+
     private SolidColorBrush? _workingBorderBrush;
     private SolidColorBrush? _workingHeaderBrush;
+    private readonly ContextWindowTracker _context = new();
+    private long _claudeContextWindowTokens = 1_000_000;
+    private const double PromptCollapsedMaxHeight = 18;
+    private const double PromptExpandedMaxHeight = 160;
+    private LastPrompt? _lastPrompt;
+    private bool _promptExpanded;
+    private string? _lastTranscript;
 
     public event Action<TerminalPaneControl>? CloseRequested;
     public event Action<TerminalPaneControl, int>? MoveRequested;
@@ -32,6 +47,8 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     public event Action<TerminalPaneControl>? FolderPickRequested;
     /// <summary>Raised when the user wants to add or remove SSH connections (also when SSH is pressed with none saved).</summary>
     public event Action? SshManageRequested;
+    /// <summary>Raised when the user wants this pane's session history. See <see cref="HistoryFolder"/> and <see cref="TranscriptPath"/>.</summary>
+    public event Action<TerminalPaneControl>? HistoryRequested;
     private List<SshConnection> _sshConnections = [];
     private List<RepositoryDefinition> _repositories = [];
     private LaunchLocation? _customLocation;
@@ -48,8 +65,19 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     public TerminalPaneControl()
     {
         InitializeComponent();
-        Terminal.SessionStarted += () => SessionStateChanged?.Invoke();
-        Terminal.SessionExited += () => SessionStateChanged?.Invoke();
+        Terminal.SessionStarted += () =>
+        {
+            _lastTranscript = null;
+            _context.Start(Terminal.CommandLine, Terminal.WorkingDirectory, DateTimeOffset.Now, _claudeContextWindowTokens);
+            SessionStateChanged?.Invoke();
+        };
+        Terminal.SessionExited += () =>
+        {
+            _context.Stop();
+            SessionStateChanged?.Invoke();
+        };
+        _context.ReadingChanged += ShowContext;
+        _context.PromptChanged += ShowPrompt;
         Terminal.StatusChanged += OnTerminalStatusChanged;
         Terminal.SubtitleChanged += subtitle => SubtitleText.Text = subtitle;
         Terminal.AttentionRequested += () =>
@@ -108,6 +136,117 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         Terminal.AttentionEnabled = enabled;
         Terminal.AttentionIdleSeconds = idleSeconds;
     }
+
+    /// <summary>Window size assumed for Claude Code sessions, which do not record it. Applies from the next launch.</summary>
+    public void ConfigureContext(long claudeContextWindowTokens) => _claudeContextWindowTokens = claudeContextWindowTokens;
+
+    private void ShowContext(ContextReading? reading)
+    {
+        if (reading is null)
+        {
+            ContextBadge.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        _lastTranscript = reading.FilePath;
+        var fraction = reading.UsedFraction;
+        ContextBarFill.Width = ContextBarWidth * fraction;
+        ContextBarFill.Background = fraction switch
+        {
+            >= 0.85 => ContextFullBrush,
+            >= 0.6 => ContextWarnBrush,
+            _ => ContextOkBrush
+        };
+        ContextText.Text = reading.CompactedSinceLastTurn
+            ? "compacted"
+            : $"{FormatTokens(reading.UsedTokens)} / {FormatTokens(reading.WindowTokens)} · {fraction:P0}";
+
+        var window = reading.WindowIsAssumed
+            ? $"Window {reading.WindowTokens:N0} tokens is assumed (the CLI does not record it). Change it with claudeContextWindowTokens in settings."
+            : $"Window {reading.WindowTokens:N0} tokens, as recorded by the CLI.";
+        var compacted = reading.CompactedSinceLastTurn
+            ? "\nConversation compacted; size updates after the next reply."
+            : "";
+        ContextBadge.ToolTip =
+            $"Context window: {reading.UsedTokens:N0} tokens in the last request{compacted}\n" +
+            $"{window}\n" +
+            (reading.Model is null ? "" : $"Model: {reading.Model}\n") +
+            $"As of {reading.RecordedAt.ToLocalTime():HH:mm:ss}\n" +
+            $"Source: {reading.Source}\n{reading.FilePath}";
+        ContextBadge.Visibility = Visibility.Visible;
+    }
+
+    private void ShowPrompt(LastPrompt? prompt)
+    {
+        if (prompt is null)
+        {
+            _lastPrompt = null;
+            PromptStrip.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (_lastPrompt?.Text != prompt.Text) _promptExpanded = false;
+        _lastPrompt = prompt;
+        PromptLabel.ToolTip = prompt.SentAt is { } sent ? $"Sent {sent.ToLocalTime():HH:mm:ss}" : null;
+        ApplyPromptLayout();
+        PromptStrip.Visibility = Visibility.Visible;
+    }
+
+    // Collapsed: one line, line breaks shown as ↵. Expanded: full text, wrapped, scrolling past a few lines.
+    private void ApplyPromptLayout()
+    {
+        if (_lastPrompt is null) return;
+        var text = _lastPrompt.Text;
+        if (_promptExpanded)
+        {
+            PromptText.Text = text;
+            PromptText.TextWrapping = TextWrapping.Wrap;
+            PromptText.TextTrimming = TextTrimming.None;
+            PromptScroller.MaxHeight = PromptExpandedMaxHeight;
+            PromptScroller.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+            PromptScroller.ToolTip = "Click to collapse";
+        }
+        else
+        {
+            PromptText.Text = string.Join(" ↵ ", text.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
+            PromptText.TextWrapping = TextWrapping.NoWrap;
+            PromptText.TextTrimming = TextTrimming.CharacterEllipsis;
+            PromptScroller.MaxHeight = PromptCollapsedMaxHeight;
+            PromptScroller.VerticalScrollBarVisibility = ScrollBarVisibility.Disabled;
+            PromptScroller.ScrollToTop();
+            PromptScroller.ToolTip = "Click to show the full prompt";
+        }
+    }
+
+    private void PromptText_Click(object sender, MouseButtonEventArgs e)
+    {
+        _promptExpanded = !_promptExpanded;
+        ApplyPromptLayout();
+    }
+
+    private void PromptCopy_Click(object sender, RoutedEventArgs e)
+    {
+        if (_lastPrompt is null) return;
+        try
+        {
+            System.Windows.Clipboard.SetText(_lastPrompt.Text);
+            PromptCopyBtn.Content = "Copied";
+            var reset = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+            reset.Tick += (_, _) => { reset.Stop(); PromptCopyBtn.Content = "Copy"; };
+            reset.Start();
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            // Clipboard held open by another process; the user can press Copy again.
+        }
+    }
+
+    private static string FormatTokens(long tokens) => tokens switch
+    {
+        >= 1_000_000 => $"{tokens / 1_000_000d:0.#}M",
+        >= 1_000 => $"{tokens / 1_000d:0}k",
+        _ => tokens.ToString()
+    };
 
     // Three amber pulses on the pane border and header, then a persistent badge until the user types.
     private void ShowAttention()
@@ -189,7 +328,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     // Dropdown order: home (the default), the browsed folder if any, then registered repositories.
     private void RebuildLocations(LaunchLocation? select)
     {
-        var home = new LaunchLocation { Name = "🏠 Home (no repo)", Path = BaseDirectory };
+        var home = new LaunchLocation { Name = "🏠 Home", Path = BaseDirectory };
         var items = new List<LaunchLocation> { home };
         if (_customLocation is not null) items.Add(_customLocation);
         items.AddRange(_repositories.Select(r => new LaunchLocation { Name = r.Name, Path = r.LocalPath, Repository = r }));
@@ -340,6 +479,14 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     private void BrowseFolder_Click(object sender, RoutedEventArgs e) => FolderPickRequested?.Invoke(this);
 
+    private void History_Click(object sender, RoutedEventArgs e) => HistoryRequested?.Invoke(this);
+
+    /// <summary>Folder whose sessions the history button shows: where the current or last session ran, else the selected location.</summary>
+    public string HistoryFolder => string.IsNullOrEmpty(Terminal.WorkingDirectory) ? SelectedFolder : Terminal.WorkingDirectory;
+
+    /// <summary>Transcript of this pane's current or most recent Claude Code / Codex session, if one has been found.</summary>
+    public string? TranscriptPath => _context.BoundPath ?? _lastTranscript;
+
     private void Close_Click(object sender, RoutedEventArgs e)
     {
         CloseRequested?.Invoke(this);
@@ -365,6 +512,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     public void Dispose()
     {
+        _context.Dispose();
         Terminal.Dispose();
     }
 }
@@ -375,4 +523,7 @@ public sealed class LaunchLocation
     public required string Name { get; init; }
     public required string Path { get; init; }
     public RepositoryDefinition? Repository { get; init; }
+
+    // Screen readers and UI Automation name combo items by ToString, not DisplayMemberPath.
+    public override string ToString() => Name;
 }

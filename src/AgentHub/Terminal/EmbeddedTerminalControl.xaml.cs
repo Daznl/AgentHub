@@ -34,6 +34,9 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     public event Action? SessionStarted;
     public event Action? SessionExited;
     public bool IsRunning => _session?.IsRunning == true;
+    /// <summary>Command line and folder of the current (or last) session.</summary>
+    public string CommandLine => _commandLine;
+    public string WorkingDirectory => _workingDirectory;
 
     // Attention detection: only armed for coding-CLI sessions (not plain shells).
     private readonly AttentionDetector _attention = new();

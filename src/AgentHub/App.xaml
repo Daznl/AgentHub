@@ -212,6 +212,8 @@
                             <Border IsHitTestVisible="False" ClipToBounds="True" Margin="0,0,26,0">
                                 <ContentPresenter Content="{TemplateBinding SelectionBoxItem}"
                                                   ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                  ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                                  ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
                                                   Margin="{TemplateBinding Padding}"
                                                   TextElement.Foreground="{StaticResource TextBrush}"
                                                   VerticalAlignment="Center" HorizontalAlignment="Left" />

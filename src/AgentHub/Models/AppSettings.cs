@@ -61,6 +61,12 @@ public sealed class AppSettings
     /// <summary>Seconds of output silence after a burst of agent activity before the pane counts as waiting.</summary>
     public double AttentionIdleSeconds { get; set; } = 3;
 
+    /// <summary>
+    /// Context window size assumed for Claude Code sessions in the Cockpit context badge. Claude Code's transcripts do not
+    /// record it; if a session grows past this the badge raises it automatically. Codex records its own window.
+    /// </summary>
+    public long ClaudeContextWindowTokens { get; set; } = 1_000_000;
+
     /// <summary>Last folder chosen for "open a shell in a folder"; the picker starts here next time.</summary>
     public string? LastTerminalFolder { get; set; }
 

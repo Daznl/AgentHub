@@ -22,7 +22,7 @@
 ## v0.3 — Session manager
 
 - Track agent process/session start and end
-- Session history per repo/task
+- [x] Session history per repo: 🕘 History window and per-pane button, full timeline (prompts, replies, thinking, tool calls/results, events) from Claude Code and Codex transcripts, followed live, filter/search/Markdown export (`SessionHistoryReader`, `HistoryWindow`). Remaining: per task/worktree, Claude sub-agent transcripts (`<session>/subagents/`), Antigravity, optional AgentHub-owned archive so history outlives CLI cleanup
 - Quick switch: Codex → Claude → Antigravity in same worktree
 - Generate a handoff template from `git diff`, recent commits and task notes
 - Optional provider-specific context files (`AGENTS.md`, `CLAUDE.md`, etc.) without duplicating project truth
@@ -62,6 +62,7 @@
 - **Stage 1b (Completed in v0.1.6):** Open a shell in any folder: Cockpit toolbar "📂 PowerShell in Folder…" (folder picker → plain PowerShell in a new pane, idle pane reused when all 6 exist) and a per-pane 📂 button launching that pane's selected shell/agent in a chosen folder (confirms before replacing a running session). Last folder persisted as `LastTerminalFolder` in settings.
 - **Stage 2 (Next):** Interactive CLI compatibility testing & ANSI escape sequence verification across Antigravity (`agy`), Claude Code (`claude`), and Codex (`codex`).
 - **Stage 3 (In progress):** Attention detector & alerting engine. Shipped: `AttentionDetector` (input-idle after a work burst, terminal bell) armed only for agent CLI sessions, amber pane pulse plus a persistent **⏳ WAITING FOR YOU** badge, and taskbar flashing when AgentHub is backgrounded; thresholds in `AttentionIdleSeconds` / `AttentionFlashEnabled`. Remaining: bell chime, `[y/N]`-style prompt heuristics, Windows Toast.
+- **Stage 3b (Shipped):** Per-pane context window badge for Claude Code and Codex, read from each CLI's own session transcript (`SessionContextReader` / `ContextWindowTracker`). Claude window size is a setting (`ClaudeContextWindowTokens`) because Claude Code does not record it. Remaining: bind to an exact session id instead of folder + launch time, track CLIs started by hand inside a shell pane, Antigravity. Also a per-pane **last prompt** strip from the same transcripts (`ReadClaudePrompt` / `ReadCodexPrompt`), with expand and copy.
 - **Stage 4:** Automated Git worktree isolation per task with cross-agent handoff orchestration.
 
 ## Later
