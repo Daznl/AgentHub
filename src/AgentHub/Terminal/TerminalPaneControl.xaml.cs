@@ -6,6 +6,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using AgentHub.Models;
 using AgentHub.Services.Context;
+using AgentHub.Services.History;
 using Color = System.Windows.Media.Color;
 using UserControl = System.Windows.Controls.UserControl;
 
@@ -40,6 +41,8 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     private LastPrompt? _lastPrompt;
     private bool _promptExpanded;
     private string? _lastTranscript;
+    private string? _archiveRoot;
+    private int _resumeGeneration;
 
     public event Action<TerminalPaneControl>? CloseRequested;
     public event Action<TerminalPaneControl, int>? MoveRequested;
@@ -395,7 +398,13 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     private void RestartBtn_Click(object sender, RoutedEventArgs e) => Terminal.RestartSession();
 
-    private void Launch_Click(object sender, RoutedEventArgs e)
+    /// <summary>AgentHub's transcript archive, so sessions the CLI has deleted can still be continued. Null when archiving is off.</summary>
+    public void ConfigureHistory(string? archiveRoot) => _archiveRoot = archiveRoot;
+
+    private const int ResumeListLimit = 30;
+
+    // Plain shells start straight away. Claude Code and Codex first offer a new session or an earlier one in this folder.
+    private async void Launch_Click(object sender, RoutedEventArgs e)
     {
         var location = RepoCombo.SelectedItem as LaunchLocation;
         var dir = location?.Path ?? BaseDirectory;
@@ -405,20 +414,75 @@ public partial class TerminalPaneControl : UserControl, IDisposable
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        var repoName = location?.Repository?.Name ?? location?.Name ?? "Home";
         var shell = ShellCombo.SelectedItem as ShellOption;
-        var cmd = shell?.Command ?? "powershell.exe -NoLogo";
-        var title = shell?.DisplayName ?? "Shell";
+        var source = shell is null ? ContextSource.None : SessionContextReader.DetectSource(shell.Command);
+        if (shell is null || source == ContextSource.None)
+        {
+            LaunchCommand(shell?.Command ?? "powershell.exe -NoLogo", shell?.DisplayName ?? "Shell", shell?.IsAgent ?? false);
+            return;
+        }
+
+        var generation = ++_resumeGeneration;
+        ResumeHeader.Text = $"{shell.DisplayName} in {location?.Name ?? "Home"}".ToUpperInvariant();
+        ResumeList.ItemsSource = null;
+        ResumeStatus.Text = "Looking for earlier sessions…";
+        // Right-align the menu under Launch so it opens into the pane, not past the window edge.
+        ResumePopup.HorizontalOffset = LaunchBtn.ActualWidth - ResumeMenu.Width;
+        ResumePopup.IsOpen = true;
+        NewSessionBtn.Focus();
+
+        var archiveRoot = _archiveRoot;
+        var sessions = await Task.Run(() => SessionHistoryReader.ListSessions(dir, archiveRoot: archiveRoot)
+            .Where(s => s.Agent == source)
+            .ToList());
+        if (generation != _resumeGeneration || !ResumePopup.IsOpen) return;
+
+        ResumeList.ItemsSource = sessions.Take(ResumeListLimit).Select(s => new SessionRow(s)).ToList();
+        ResumeStatus.Text = sessions.Count switch
+        {
+            0 => "No earlier sessions in this folder.",
+            > ResumeListLimit => $"Continue an earlier session (newest {ResumeListLimit} of {sessions.Count}; all are in 🕘 History):",
+            _ => "Continue an earlier session:"
+        };
+    }
+
+    private void NewSession_Click(object sender, RoutedEventArgs e)
+    {
+        ResumePopup.IsOpen = false;
+        if (ShellCombo.SelectedItem is ShellOption shell) LaunchCommand(shell.Command, shell.DisplayName, shell.IsAgent);
+    }
+
+    private void ResumeItem_Click(object sender, RoutedEventArgs e)
+    {
+        ResumePopup.IsOpen = false;
+        if ((sender as FrameworkElement)?.Tag is not SessionRow row || ShellCombo.SelectedItem is not ShellOption shell) return;
+
+        if (!SessionResume.RestoreFromArchive(row.Summary, _archiveRoot))
+        {
+            System.Windows.MessageBox.Show(Window.GetWindow(this),
+                $"Could not restore this session from the archive so {shell.DisplayName} can resume it:\n{row.FilePath}",
+                "AgentHub", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        LaunchCommand(SessionResume.BuildCommand(shell.Command, row.Summary), $"{shell.DisplayName} · resumed", shell.IsAgent,
+            $"continue “{row.Title}”");
+    }
+
+    private void LaunchCommand(string command, string title, bool isAgent, string? what = null)
+    {
+        var location = RepoCombo.SelectedItem as LaunchLocation;
+        var dir = location?.Path ?? BaseDirectory;
+        var repoName = location?.Repository?.Name ?? location?.Name ?? "Home";
 
         if (Terminal.IsRunning)
         {
             var replace = System.Windows.MessageBox.Show(Window.GetWindow(this),
-                $"This terminal has a running session. Replace it with {title} in {dir}?",
+                $"This terminal has a running session. Replace it and {what ?? $"start {title}"} in {dir}?",
                 "Replace session", MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (replace != MessageBoxResult.Yes) return;
         }
 
-        Terminal.StartSession(cmd, dir, $"Terminal {_paneIndex} · {title}", repoName, shell?.IsAgent ?? false);
+        Terminal.StartSession(command, dir, $"Terminal {_paneIndex} · {title}", repoName, isAgent);
     }
 
     public void UpdateSshConnections(List<SshConnection> connections)

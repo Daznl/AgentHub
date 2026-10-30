@@ -66,6 +66,7 @@ It never stores API keys or provider credentials. Authentication stays with the 
 - **SSH.** Save connections with the **🔐 SSH** header button: an optional name plus `user@host` or `user@host:port`. Each pane's **SSH** button connects straight away when one connection is saved, or lets you pick when there are several. The session runs your own OpenSSH client inside PowerShell, so `exit` drops you back to a local prompt. AgentHub stores only the address; passwords and keys stay with `ssh`.
 - **Copy and paste.** Select text and press **Ctrl+Shift+C** to copy, **Ctrl+Shift+V** to paste, or right-click a pane for **Copy** / **Paste**. Plain **Ctrl+C** still interrupts the running command.
 - Launch an agent into a specific pane straight from a repository card, or into a new Windows Terminal tab.
+- **Continue earlier sessions.** With Claude Code or Codex selected, **Launch** opens a menu: **➕ New session**, or any earlier session recorded for that folder (newest 30, titled, with time and length). Picking one runs the CLI's own resume (`claude --resume <id>`, `codex resume <id>`) in the pane. Sessions only left in the history archive are copied back first so the CLI can find them. A resumed pane's context badge and last prompt follow that exact session.
 
 ### Session history
 
