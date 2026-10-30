@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Threading;
 using AgentHub.Models;
 using AgentHub.Services;
+using AgentHub.Services.History;
 using AgentHub.Services.Usage;
 using AgentHub.Terminal;
 using Color = System.Windows.Media.Color;
@@ -117,6 +118,7 @@ public partial class MainWindow : Window
         RefreshAgentList();
         ViewCockpitBtn_Click(this, new RoutedEventArgs());
         StatusText.Text = $"Settings: {_settingsService.SettingsPath}";
+        StartHistoryArchive();
 
         UsageIntervalBox.Text = _settings.UsageRefreshMinutes.ToString("0.##", CultureInfo.InvariantCulture);
         UpdateUsagePollingInterval();
@@ -219,6 +221,28 @@ public partial class MainWindow : Window
     }
 
     private HistoryWindow? _historyWindow;
+    private HistoryArchiveService? _historyArchive;
+
+    private string? HistoryArchiveRoot => _settings.HistoryArchiveEnabled && !string.IsNullOrWhiteSpace(_settings.HistoryArchiveDirectory)
+        ? _settings.HistoryArchiveDirectory
+        : null;
+
+    // Copies every transcript into AgentHub's archive now and each minute, so history outlives the CLIs' cleanup.
+    private void StartHistoryArchive()
+    {
+        if (HistoryArchiveRoot is not { } root) return;
+        _historyArchive = new HistoryArchiveService(root);
+        var first = true;
+        _historyArchive.Synced += result =>
+        {
+            if (result.Failed > 0 && first)
+                StatusText.Text = $"History archive: {result.Failed} file(s) could not be copied to {root}; retrying every minute.";
+            else if (first && result.Copied + result.Appended > 0)
+                StatusText.Text = $"History archive up to date in {root} ({result.Copied + result.Appended} file(s) saved).";
+            first = false;
+        };
+        _historyArchive.Start();
+    }
 
     private void OpenHistory_Click(object sender, RoutedEventArgs e) => ShowHistory(null, null);
 
@@ -227,7 +251,7 @@ public partial class MainWindow : Window
     {
         if (_historyWindow is null)
         {
-            _historyWindow = new HistoryWindow(_settings.Repositories) { Owner = this };
+            _historyWindow = new HistoryWindow(_settings.Repositories, HistoryArchiveRoot) { Owner = this };
             _historyWindow.Closed += (_, _) => _historyWindow = null;
             _historyWindow.Show();
         }
@@ -1771,6 +1795,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _usageRefreshTimer.Stop();
+        _historyArchive?.Dispose();
         foreach (var pane in _panes)
         {
             pane.Dispose();

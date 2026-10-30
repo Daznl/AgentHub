@@ -22,7 +22,8 @@
 ## v0.3 — Session manager
 
 - Track agent process/session start and end
-- [x] Session history per repo: 🕘 History window and per-pane button, full timeline (prompts, replies, thinking, tool calls/results, events) from Claude Code and Codex transcripts, followed live, filter/search/Markdown export (`SessionHistoryReader`, `HistoryWindow`). Remaining: per task/worktree, Claude sub-agent transcripts (`<session>/subagents/`), Antigravity, optional AgentHub-owned archive so history outlives CLI cleanup
+- [x] Session history per repo: 🕘 History window and per-pane button, full timeline (prompts, replies, thinking, tool calls/results, events) from Claude Code and Codex transcripts, followed live, filter/search/Markdown export (`SessionHistoryReader`, `HistoryWindow`). Remaining: per task/worktree, Claude sub-agent transcripts (`<session>/subagents/`), Antigravity
+- [x] Permanent history archive (`HistoryArchiver`): append-only mirror of `~/.claude/projects` and `~/.codex/sessions` into `HistoryArchiveDirectory`, never deletes, keeps superseded copies; History lists archive-only sessions. Remaining: archive while AgentHub is closed (scheduled task), compression
 - Quick switch: Codex → Claude → Antigravity in same worktree
 - Generate a handoff template from `git diff`, recent commits and task notes
 - Optional provider-specific context files (`AGENTS.md`, `CLAUDE.md`, etc.) without duplicating project truth

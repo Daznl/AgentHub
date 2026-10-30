@@ -39,9 +39,13 @@ public partial class HistoryWindow : Window
     private bool _pendingFollow;
     private int _ticks;
 
-    public HistoryWindow(IEnumerable<RepositoryDefinition> repositories)
+    private readonly string? _archiveRoot;
+
+    /// <param name="archiveRoot">AgentHub's transcript archive, or null when archiving is off.</param>
+    public HistoryWindow(IEnumerable<RepositoryDefinition> repositories, string? archiveRoot)
     {
         InitializeComponent();
+        _archiveRoot = archiveRoot;
         LocationList.ItemsSource = _locations;
         UpdateRepositories(repositories);
         _liveTimer.Tick += async (_, _) => await LiveTickAsync();
@@ -110,7 +114,7 @@ public partial class HistoryWindow : Window
             SessionEmptyText.Visibility = Visibility.Collapsed;
         }
 
-        var sessions = await Task.Run(() => SessionHistoryReader.ListSessions(location.Path));
+        var sessions = await Task.Run(() => SessionHistoryReader.ListSessions(location.Path, archiveRoot: _archiveRoot));
         if (generation != _locationGeneration) return;
 
         var keep = _pendingSessionPath ?? (quiet ? _session?.FilePath : null);
@@ -428,7 +432,8 @@ public sealed class SessionRow(SessionSummary summary)
             var duration = span.TotalMinutes < 1 ? "<1m"
                 : span.TotalHours < 1 ? $"{(int)span.TotalMinutes}m"
                 : $"{(int)span.TotalHours}h {span.Minutes}m";
-            return $"{when} · {duration} · {FormatSize(Summary.SizeBytes)}";
+            // Archived only: the CLI has deleted its own copy and AgentHub's archive is all that is left.
+            return $"{when} · {duration} · {FormatSize(Summary.SizeBytes)}{(Summary.ArchivedOnly ? " · archived" : "")}";
         }
     }
 
