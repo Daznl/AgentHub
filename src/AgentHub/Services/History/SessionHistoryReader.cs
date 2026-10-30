@@ -40,7 +40,8 @@ public sealed record SessionSummary(
     string? FirstPrompt,
     DateTimeOffset StartedAt,
     DateTimeOffset LastActivity,
-    long SizeBytes);
+    long SizeBytes,
+    bool ArchivedOnly = false);
 
 /// <summary>
 /// Reads the complete history of coding sessions from the transcripts the CLIs already write (the same files
@@ -67,16 +68,49 @@ public static class SessionHistoryReader
     private static readonly ConcurrentDictionary<string, (long Length, DateTime WriteTime, SessionSummary? Summary)> SummaryCache =
         new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Every Claude Code and Codex session recorded for <paramref name="workingDirectory"/>, newest first.</summary>
+    /// <summary>
+    /// Every Claude Code and Codex session recorded for <paramref name="workingDirectory"/>, newest first. With an
+    /// <paramref name="archiveRoot"/> (see <see cref="HistoryArchiver"/>), sessions the CLI has since deleted come from
+    /// the archive; a session in both places is read from whichever copy is longer, the live one on a tie.
+    /// </summary>
     public static IReadOnlyList<SessionSummary> ListSessions(string workingDirectory,
-        string? claudeProjectsDir = null, string? codexSessionsDir = null)
+        string? claudeProjectsDir = null, string? codexSessionsDir = null, string? archiveRoot = null)
     {
         var sessions = new List<SessionSummary>();
-        foreach (var path in FindClaudeSessions(workingDirectory, claudeProjectsDir))
-            if (CachedSummary(path, ContextSource.ClaudeCode) is { } s) sessions.Add(s);
-        foreach (var path in FindCodexSessions(workingDirectory, codexSessionsDir))
-            if (CachedSummary(path, ContextSource.Codex) is { } s) sessions.Add(s);
+        Collect(FindClaudeSessions(workingDirectory, claudeProjectsDir),
+            archiveRoot is null ? [] : FindClaudeSessions(workingDirectory, HistoryArchiver.ClaudeArchiveDir(archiveRoot)),
+            ContextSource.ClaudeCode, sessions);
+        Collect(FindCodexSessions(workingDirectory, codexSessionsDir),
+            archiveRoot is null ? [] : FindCodexSessions(workingDirectory, HistoryArchiver.CodexArchiveDir(archiveRoot)),
+            ContextSource.Codex, sessions);
         return sessions.OrderByDescending(s => s.LastActivity).ToList();
+    }
+
+    // Session files are matched by name: Claude names them by session id, Codex by timestamp and id.
+    private static void Collect(IEnumerable<string> live, IEnumerable<string> archived, ContextSource agent, List<SessionSummary> into)
+    {
+        var liveByName = live.GroupBy(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var path in archived)
+        {
+            var name = Path.GetFileName(path);
+            if (name.Contains(".superseded-", StringComparison.OrdinalIgnoreCase)) continue;
+            if (liveByName.TryGetValue(name, out var livePath))
+            {
+                if (FileLength(path) > FileLength(livePath)) liveByName[name] = path;
+                continue;
+            }
+            if (CachedSummary(path, agent) is { } s) into.Add(s with { ArchivedOnly = true });
+        }
+        foreach (var path in liveByName.Values)
+            if (CachedSummary(path, agent) is { } s) into.Add(s);
+    }
+
+    private static long FileLength(string path)
+    {
+        try { return new FileInfo(path).Length; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return 0; }
     }
 
     private static SessionSummary? CachedSummary(string path, ContextSource agent)

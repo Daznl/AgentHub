@@ -67,6 +67,15 @@ public sealed class AppSettings
     /// </summary>
     public long ClaudeContextWindowTokens { get; set; } = 1_000_000;
 
+    /// <summary>
+    /// Keep AgentHub's own copy of every Claude Code and Codex transcript in <see cref="HistoryArchiveDirectory"/>, so
+    /// session history survives the CLIs' cleanup. Synced at startup and every minute; nothing is ever deleted from it.
+    /// </summary>
+    public bool HistoryArchiveEnabled { get; set; } = true;
+
+    /// <summary>Where the history archive lives. Keep it outside synced folders and Git: transcripts can be gigabytes and hold secrets.</summary>
+    public string HistoryArchiveDirectory { get; set; } = Services.History.HistoryArchiver.DefaultRoot;
+
     /// <summary>Last folder chosen for "open a shell in a folder"; the picker starts here next time.</summary>
     public string? LastTerminalFolder { get; set; }
 
