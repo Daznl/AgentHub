@@ -34,7 +34,7 @@
             <Setter Property="FontSize" Value="10" />
             <Setter Property="FontWeight" Value="Bold" />
             <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Width" Value="80" />
+            <Setter Property="Width" Value="100" />
         </Style>
         <Style x:Key="StepValue" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
@@ -112,23 +112,6 @@
                         <Button x:Name="BrowseBtn" Click="BrowseFolder_Click" Content="📂" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="LaunchBtn" Click="Launch_Click" Content="Relaunch" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#0E7490" FontSize="11" />
                         <Button x:Name="RepoContextBtn" Click="RepoContext_Click" Content="📁 Repo context" Background="#16202F" Foreground="#B6C2D6" Padding="8,3" Margin="0,0,4,0" FontSize="11" FontWeight="SemiBold" />
-                        <Button x:Name="SshBtn" Click="Ssh_Click" Content="SSH" ToolTip="Connect to a saved SSH connection" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#4C1D95" FontSize="11" />
-                        <!-- Shown by the SSH button when more than one connection is saved -->
-                        <Popup x:Name="SshPopup" PlacementTarget="{Binding ElementName=SshBtn}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
-                            <Border Background="#111A28" BorderBrush="#24344B" BorderThickness="1" CornerRadius="6" Padding="4" MinWidth="200">
-                                <StackPanel>
-                                    <ItemsControl x:Name="SshList">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <Button Click="SshItem_Click" Tag="{Binding}" Content="{Binding DisplayName}" HorizontalContentAlignment="Left" Background="Transparent" Padding="10,5" Margin="0" FontSize="12" />
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                    <Border Height="1" Background="#24344B" Margin="4,4" />
-                                    <Button Click="SshManage_Click" Content="⚙ Manage SSH connections…" HorizontalContentAlignment="Left" Background="Transparent" Foreground="#7E8CA6" Padding="10,5" Margin="0" FontSize="12" />
-                                </StackPanel>
-                            </Border>
-                        </Popup>
                         <Button x:Name="HistoryBtn" Click="History_Click" Content="🕘" ToolTip="Open the full history of this pane's session, or of the selected folder's sessions" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="MoveLeftBtn" Click="MoveLeft_Click" Content="◀" ToolTip="Move this terminal left" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="MoveRightBtn" Click="MoveRight_Click" Content="▶" ToolTip="Move this terminal right" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
@@ -200,13 +183,13 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- Step 2: agent CLI or shell -->
+                        <!-- Step 2: function type: agent CLI, shell, or (from Home) a saved SSH connection -->
                         <Border x:Name="Step2Card" Style="{StaticResource StepCard}">
                             <StackPanel>
                                 <DockPanel LastChildFill="True">
-                                    <Button x:Name="Step2Change" DockPanel.Dock="Right" Click="Step2Change_Click" Content="Change" Style="{StaticResource StepChangeButton}" AutomationProperties.Name="Change agent CLI" />
+                                    <Button x:Name="Step2Change" DockPanel.Dock="Right" Click="Step2Change_Click" Content="Change" Style="{StaticResource StepChangeButton}" AutomationProperties.Name="Change function type" />
                                     <Border x:Name="Step2Badge" Style="{StaticResource StepBadge}"><TextBlock x:Name="Step2Number" Text="2" Style="{StaticResource StepBadgeText}" /></Border>
-                                    <TextBlock Text="AGENT CLI" Style="{StaticResource StepLabel}" />
+                                    <TextBlock Text="FUNCTION TYPE" Style="{StaticResource StepLabel}" />
                                     <TextBlock x:Name="Step2Value" Style="{StaticResource StepValue}" />
                                 </DockPanel>
                                 <ItemsControl x:Name="ShellList" Margin="0,10,0,0" ItemTemplate="{StaticResource PickRowTemplate}" />

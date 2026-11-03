@@ -379,6 +379,11 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         a is not null && b is not null &&
         string.Equals(a.TrimEnd('\\', '/'), b.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsHome(LaunchLocation? location) => location is { Repository: null } && SamePath(location.Path, BaseDirectory);
+
+    /// <summary>Function-type row that opens the SSH connection manager.</summary>
+    private static readonly object ManageSshItem = new();
+
     private static bool HasSessions(ShellOption shell) => SessionContextReader.DetectSource(shell.Command) != ContextSource.None;
 
     /// <summary>Folder whose instruction files Repo context shows: where the running session is, else the chosen location.</summary>
@@ -472,7 +477,15 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         LocationFilter.Visibility = all.Count > LocationFilterThreshold ? Visibility.Visible : Visibility.Collapsed;
         LocationList.ItemsSource = shown.Select(l => new PickRow(l, l.Name, l.Path, SamePath(l.Path, _location?.Path))).ToList();
         LocationEmpty.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        ShellList.ItemsSource = _shells.Select(s => new PickRow(s, s.DisplayName, s.Command, s.DisplayName == _shell?.DisplayName)).ToList();
+        var functions = _shells.Select(s => new PickRow(s, s.DisplayName, s.Command, s.DisplayName == _shell?.DisplayName)).ToList();
+        // SSH runs from the home folder, so it is offered only there.
+        if (IsHome(_location))
+        {
+            functions.AddRange(_sshConnections.Select(c => new PickRow(c, $"SSH · {c.DisplayName}", $"ssh {c.Target}", false)));
+            functions.Add(new PickRow(ManageSshItem, "⚙ Manage SSH connections…",
+                _sshConnections.Count == 0 ? "Add a connection to SSH from here" : "Add or remove saved connections", false));
+        }
+        ShellList.ItemsSource = functions;
 
         ApplyStep(1, Step1Card, Step1Badge, Step1Number, Step1Value, Step1Change, Step1Body, _location?.Name);
         ApplyStep(2, Step2Card, Step2Badge, Step2Number, Step2Value, Step2Change, ShellList, _shell?.DisplayName);
@@ -534,6 +547,12 @@ public partial class TerminalPaneControl : UserControl, IDisposable
                 break;
             case PickRow { Item: ShellOption shell }:
                 ChooseShell(shell);
+                break;
+            case PickRow { Item: SshConnection connection }:
+                ConnectSsh(connection);
+                break;
+            case PickRow { Item: var item } when ReferenceEquals(item, ManageSshItem):
+                SshManageRequested?.Invoke();
                 break;
         }
     }
@@ -680,7 +699,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     }
 
     /// <summary>
-    /// No session: the launcher fills the pane; the header keeps Repo context, SSH, history, move and close
+    /// No session: the launcher fills the pane; the header keeps Repo context, history, move and close
     /// (plus New session over an ended session's output). Session running: the repository name, context badge,
     /// 📂 to open its folder, Relaunch, Repo context, move and close.
     /// </summary>
@@ -688,7 +707,6 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     {
         var setup = working ? Visibility.Collapsed : Visibility.Visible;
         BrowseBtn.Visibility = working ? Visibility.Visible : Visibility.Collapsed;
-        SshBtn.Visibility = setup;
         HistoryBtn.Visibility = setup;
         if (working)
         {
@@ -704,47 +722,11 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         RefreshLauncher();
     }
 
+    /// <summary>Saved SSH connections, offered as function types when the launcher's location is Home.</summary>
     public void UpdateSshConnections(List<SshConnection> connections)
     {
         _sshConnections = connections;
-        SshList.ItemsSource = null;
-        SshList.ItemsSource = connections;
-        SshBtn.ToolTip = connections.Count switch
-        {
-            0 => "Add an SSH connection",
-            1 => $"SSH to {connections[0].DisplayName}",
-            _ => "Choose a saved SSH connection"
-        };
-    }
-
-    // One saved connection: connect straight away. Several: show the picker. None: open the manager.
-    private void Ssh_Click(object sender, RoutedEventArgs e)
-    {
-        switch (_sshConnections.Count)
-        {
-            case 0:
-                SshManageRequested?.Invoke();
-                break;
-            case 1:
-                ConnectSsh(_sshConnections[0]);
-                break;
-            default:
-                SshPopup.IsOpen = true;
-                break;
-        }
-    }
-
-    private void SshItem_Click(object sender, RoutedEventArgs e)
-    {
-        SshPopup.IsOpen = false;
-        if ((sender as FrameworkElement)?.Tag is SshConnection connection)
-            ConnectSsh(connection);
-    }
-
-    private void SshManage_Click(object sender, RoutedEventArgs e)
-    {
-        SshPopup.IsOpen = false;
-        SshManageRequested?.Invoke();
+        RefreshLauncher();
     }
 
     private void ConnectSsh(SshConnection connection)
@@ -757,6 +739,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             if (replace != MessageBoxResult.Yes) return;
         }
 
+        _shell = null; // reopening the launcher lands on function type again
         _fresh = new FreshLaunch(connection.BuildCommandLine(), $"Terminal {_paneIndex} · SSH", false);
         BeginSession();
         Terminal.StartSession(_fresh.Command, BaseDirectory, _fresh.Title, $"SSH · {connection.DisplayName}");
