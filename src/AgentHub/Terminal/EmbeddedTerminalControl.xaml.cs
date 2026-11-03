@@ -224,7 +224,8 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
                 });
             };
 
-            RaiseSubtitle($"PID {_session.ProcessId} · {_workingDirectory}");
+            // The title row already names the repository; process id and full path are noise there. Exit and error text still show.
+            RaiseSubtitle("");
             SessionStarted?.Invoke();
 
             // A freshly-launched TUI (e.g. Claude Code) reads the terminal size at
