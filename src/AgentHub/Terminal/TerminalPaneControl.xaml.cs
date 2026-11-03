@@ -7,6 +7,7 @@ using System.Windows.Media.Animation;
 using AgentHub.Models;
 using AgentHub.Services.Context;
 using AgentHub.Services.History;
+using AgentHub.Services.Instructions;
 using Color = System.Windows.Media.Color;
 using UserControl = System.Windows.Controls.UserControl;
 
@@ -52,6 +53,8 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     public event Action? SshManageRequested;
     /// <summary>Raised when the user wants this pane's session history. See <see cref="HistoryFolder"/> and <see cref="TranscriptPath"/>.</summary>
     public event Action<TerminalPaneControl>? HistoryRequested;
+    /// <summary>Raised by the footer's Context (false) or Repo context (true) button. See <see cref="ContextFolder"/> and <see cref="ContextCli"/>.</summary>
+    public event Action<TerminalPaneControl, bool>? ContextRequested;
     private List<SshConnection> _sshConnections = [];
     private List<RepositoryDefinition> _repositories = [];
     private LaunchLocation? _customLocation;
@@ -68,15 +71,18 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     public TerminalPaneControl()
     {
         InitializeComponent();
+        RefreshContextFolder();
         Terminal.SessionStarted += () =>
         {
             _lastTranscript = null;
             _context.Start(Terminal.CommandLine, Terminal.WorkingDirectory, DateTimeOffset.Now, _claudeContextWindowTokens);
+            RefreshContextFolder();
             SessionStateChanged?.Invoke();
         };
         Terminal.SessionExited += () =>
         {
             _context.Stop();
+            RefreshContextFolder();
             SessionStateChanged?.Invoke();
         };
         _context.ReadingChanged += ShowContext;
@@ -348,7 +354,29 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         RepoCombo.ToolTip = RepoCombo.SelectedItem is LaunchLocation loc
             ? $"Launches in {loc.Path}"
             : "Select working repository or folder";
+        RefreshContextFolder();
     }
+
+    /// <summary>Folder whose instruction files Repo context shows: where the running session is, else the selected location.</summary>
+    public string ContextFolder => Terminal.IsRunning && !string.IsNullOrEmpty(Terminal.WorkingDirectory) ? Terminal.WorkingDirectory : SelectedFolder;
+
+    /// <summary>CLI whose file the context windows open on: the running session's, else the selected one's.</summary>
+    public InstructionCli? ContextCli =>
+        (Terminal.IsRunning ? InstructionFiles.DetectCli(Terminal.CommandLine) : null)
+        ?? InstructionFiles.DetectCli((ShellCombo.SelectedItem as ShellOption)?.Command);
+
+    private void RefreshContextFolder()
+    {
+        var folder = ContextFolder;
+        var name = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } n ? n : folder;
+        ContextFolderText.Text = name;
+        ContextFolderText.ToolTip = folder;
+        RepoContextBtn.ToolTip = $"View and edit the instruction files in {folder}: CLAUDE.md, AGENTS.md and GEMINI.md";
+    }
+
+    private void GlobalContext_Click(object sender, RoutedEventArgs e) => ContextRequested?.Invoke(this, false);
+
+    private void RepoContext_Click(object sender, RoutedEventArgs e) => ContextRequested?.Invoke(this, true);
 
     public void UpdateShellOptions(List<ShellOption> shells, int defaultIndex = 0)
     {

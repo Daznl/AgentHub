@@ -217,8 +217,45 @@ public partial class MainWindow : Window
         pane.UpdateSshConnections(_settings.SshConnections);
         pane.SshManageRequested += () => ManageSsh_Click(pane, new RoutedEventArgs());
         pane.HistoryRequested += p => ShowHistory(p.HistoryFolder, p.TranscriptPath);
+        pane.ContextRequested += (p, repo) => ShowContext(repo ? p.ContextFolder : null, p.ContextCli);
         pane.UpdateShellOptions(_shellOptions, defaultShellIndex);
         return pane;
+    }
+
+    private ContextWindow? _globalContextWindow;
+    private ContextWindow? _repoContextWindow;
+
+    // One window for the user-wide files and one for a folder's files, each reused. Not modal, so they sit beside the Cockpit.
+    private void ShowContext(string? folder, Services.Instructions.InstructionCli? cli)
+    {
+        var existing = folder is null ? _globalContextWindow : _repoContextWindow;
+        var window = existing ?? new ContextWindow { Owner = this };
+        if (folder is null)
+        {
+            // Reopening the global window keeps whichever file is being edited.
+            if (existing is null) window.ShowGlobal(cli);
+        }
+        else if (existing is null || !string.Equals(existing.Folder, folder, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!window.ShowRepo(folder, cli)) { window.Activate(); return; }
+        }
+
+        if (existing is null)
+        {
+            if (folder is null)
+            {
+                _globalContextWindow = window;
+                window.Closed += (_, _) => _globalContextWindow = null;
+            }
+            else
+            {
+                _repoContextWindow = window;
+                window.Closed += (_, _) => _repoContextWindow = null;
+            }
+            window.Show();
+        }
+        if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
+        window.Activate();
     }
 
     private HistoryWindow? _historyWindow;

@@ -26,6 +26,7 @@
 - [x] Permanent history archive (`HistoryArchiver`): append-only mirror of `~/.claude/projects` and `~/.codex/sessions` into `HistoryArchiveDirectory`, never deletes, keeps superseded copies; History lists archive-only sessions. Remaining: archive while AgentHub is closed (scheduled task), compression
 - Quick switch: Codex → Claude → Antigravity in same worktree
 - Generate a handoff template from `git diff`, recent commits and task notes
+- [x] View and edit context files from each pane's footer (`InstructionFiles`, `ContextWindow`): **📄 Context** for each CLI's user-wide file, **📁 Repo context** for the pane folder's `CLAUDE.md` / `AGENTS.md` / `GEMINI.md`; saves keep line endings, are atomic and never silently replace a file changed elsewhere. Remaining: Markdown preview, Claude Code `@import` and nested-folder files
 - Optional provider-specific context files (`AGENTS.md`, `CLAUDE.md`, etc.) without duplicating project truth
 
 ## v0.4 — Usage + budget dashboard

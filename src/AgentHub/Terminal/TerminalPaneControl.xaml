@@ -8,6 +8,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <!-- Pane Top Control Bar -->
@@ -106,6 +107,16 @@
 
             <!-- Embedded Terminal -->
             <terminal:EmbeddedTerminalControl Grid.Row="2" x:Name="Terminal" />
+
+            <!-- Footer below the session: the instruction files the CLI reads, user-wide and for this pane's folder -->
+            <Border x:Name="ContextFooter" Grid.Row="3" Background="#0B121C" BorderBrush="#1E2C40" BorderThickness="0,1,0,0" Padding="8,4">
+                <DockPanel LastChildFill="True">
+                    <Button DockPanel.Dock="Left" Click="GlobalContext_Click" Content="📄 Context" Background="#16202F" Foreground="#B6C2D6" Padding="9,2" Margin="0,0,6,0" FontSize="11" FontWeight="SemiBold"
+                            ToolTip="View and edit the user-wide instruction file of each CLI: Claude Code CLAUDE.md, Codex AGENTS.md, Gemini / Antigravity GEMINI.md" />
+                    <Button DockPanel.Dock="Left" x:Name="RepoContextBtn" Click="RepoContext_Click" Content="📁 Repo context" Background="#16202F" Foreground="#B6C2D6" Padding="9,2" Margin="0" FontSize="11" FontWeight="SemiBold" />
+                    <TextBlock x:Name="ContextFolderText" Foreground="#5A6B85" FontSize="10" VerticalAlignment="Center" Margin="10,0,0,0" TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+            </Border>
         </Grid>
     </Border>
 </UserControl>

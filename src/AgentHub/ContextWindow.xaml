@@ -1,0 +1,123 @@
+<Window x:Class="AgentHub.ContextWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AgentHub - Context" Height="680" Width="820" MinHeight="380" MinWidth="560"
+        Icon="Assets/AppIcon.png" WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBackgroundBrush}" Foreground="{StaticResource TextBrush}" FontFamily="Segoe UI">
+    <Window.Resources>
+        <!-- File tabs: lit when that file is the one being edited -->
+        <Style x:Key="FileTab" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="Background" Value="#141D2B" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="Padding" Value="12,5" />
+            <Setter Property="Margin" Value="0,0,6,6" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="GroupName" Value="ContextFiles" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Chip" CornerRadius="14" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Chip" Property="Background" Value="#12324A" />
+                                <Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Full-height editor: the app-wide TextBox template centres its content vertically, which suits one-line boxes only -->
+        <Style x:Key="Editor" TargetType="TextBox">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Background" Value="#0A111B" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CaretBrush" Value="{StaticResource AccentBrush}" />
+            <Setter Property="SelectionBrush" Value="{StaticResource AccentBrush}" />
+            <Setter Property="FontFamily" Value="Cascadia Mono, Consolas" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="AcceptsReturn" Value="True" />
+            <Setter Property="AcceptsTab" Value="True" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+            <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="Frame" CornerRadius="6" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="10,8,4,8" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="Frame" Property="BorderBrush" Value="#24506B" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Window.InputBindings>
+        <KeyBinding Key="S" Modifiers="Control" Command="ApplicationCommands.Save" />
+    </Window.InputBindings>
+    <Window.CommandBindings>
+        <CommandBinding Command="ApplicationCommands.Save" Executed="SaveCommand_Executed" />
+    </Window.CommandBindings>
+
+    <Grid Margin="16,14,16,16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,10">
+            <TextBlock x:Name="HeadingText" FontSize="18" FontWeight="SemiBold" />
+            <TextBlock x:Name="SubheadingText" Margin="0,3,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+
+        <WrapPanel x:Name="TabsPanel" Grid.Row="1" Margin="0,0,0,4" />
+
+        <!-- Which file the editor holds, and whether it exists yet -->
+        <DockPanel Grid.Row="2" Margin="2,0,0,8" LastChildFill="True">
+            <Border x:Name="FileStateBadge" DockPanel.Dock="Left" CornerRadius="4" Padding="6,1" Margin="0,0,8,0" VerticalAlignment="Center">
+                <TextBlock x:Name="FileStateText" FontSize="10" FontWeight="Bold" />
+            </Border>
+            <TextBlock x:Name="FilePathText" Foreground="{StaticResource MutedBrush}" FontSize="11" FontFamily="Cascadia Mono, Consolas"
+                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        </DockPanel>
+
+        <Grid Grid.Row="3">
+            <TextBox x:Name="Editor" Style="{StaticResource Editor}" TextChanged="Editor_TextChanged" />
+            <!-- Hint over an empty editor; never takes clicks, so typing starts straight away -->
+            <TextBlock x:Name="EmptyHint" IsHitTestVisible="False" Margin="14,10,14,0" Foreground="#4A5A73" FontSize="13"
+                       FontFamily="Cascadia Mono, Consolas" TextWrapping="Wrap" VerticalAlignment="Top" />
+        </Grid>
+
+        <DockPanel Grid.Row="4" Margin="0,12,0,0" LastChildFill="True">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Click="OpenFolder_Click" Content="Open folder" Margin="0,0,8,0" Padding="12,6" FontSize="12" ToolTip="Show this file's folder in File Explorer" />
+                <Button x:Name="ReloadBtn" Click="Reload_Click" Content="↻ Reload" Margin="0,0,8,0" Padding="12,6" FontSize="12" ToolTip="Discard unsaved edits and read the file again" />
+                <Button x:Name="SaveBtn" Click="Save_Click" Content="Save" Margin="0" Padding="18,6" FontSize="12" FontWeight="SemiBold" Background="#0E7490"
+                        ToolTip="Write your edits to the file (Ctrl+S). Every new session of the CLI reads it." />
+            </StackPanel>
+            <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="2,0,12,0" />
+        </DockPanel>
+    </Grid>
+</Window>
