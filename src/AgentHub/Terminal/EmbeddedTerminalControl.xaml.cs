@@ -195,15 +195,19 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
             }
             catch { }
 
-            _session = ConPtySession.Start(_commandLine, _workingDirectory, _cols, _rows);
+            var session = ConPtySession.Start(_commandLine, _workingDirectory, _cols, _rows);
+            _session = session;
 
             _attention.OnSessionStarted(DateTimeOffset.Now);
             _attentionTimer.IsEnabled = IsAgentSession && AttentionEnabled;
 
-            _session.OutputDataReceived += text =>
+            // Events of a replaced session (Relaunch, Restart) arrive after the new one has started; drop them,
+            // or its late exit marks the new session stopped and its last output lands in the cleared terminal.
+            session.OutputDataReceived += text =>
             {
                 Dispatcher.InvokeAsync(() =>
                 {
+                    if (!ReferenceEquals(_session, session)) return;
                     _attention.OnOutput(text, DateTimeOffset.Now);
                     try
                     {
@@ -213,10 +217,11 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
                 });
             };
 
-            _session.ProcessExited += exitCode =>
+            session.ProcessExited += exitCode =>
             {
                 Dispatcher.InvokeAsync(() =>
                 {
+                    if (!ReferenceEquals(_session, session)) return;
                     StopAttentionTracking();
                     RaiseStatus(exitCode == 0 ? TerminalStatus.Stopped : TerminalStatus.Failed);
                     RaiseSubtitle($"Exited (code {exitCode})");
@@ -349,7 +354,9 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     public void StopSession()
     {
         StopAttentionTracking();
-        _session?.Kill();
+        // Dropping the session as well as killing it means its exit event is ignored and cannot overwrite "Stopped by user".
+        _session?.Dispose();
+        _session = null;
         RaiseStatus(TerminalStatus.Stopped);
         RaiseSubtitle("Stopped by user");
         SessionExited?.Invoke();
