@@ -1,89 +1,87 @@
 # AgentHub Handoff Context
 
-**Generated:** 2026-09-05  
-**Current Branch:** `main`  
-**Current Milestone:** Multi-Session Cockpit & GitHub Hub (v0.1.5)
+**Updated:** 2026-11-03
+**Branch with the newest work:** `feature/timeline` (local only; built on `feature/context-review`, which is built on `main`)
+**Next task:** finish the project Timeline, phase 1 (section 3)
+
+Read `README.md`, `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` first; `AGENTS.md` has the engineering rules.
 
 ---
 
-## 1. Current State of the System
+## 1. Where everything is
 
-AgentHub is a Windows-first personal control centre built with **.NET 8 WPF** that manages local and remote GitHub repositories and hosts interchangeable AI coding CLIs (Codex, Claude Code, Google Antigravity, PowerShell, and Cmd).
+| What | State |
+|---|---|
+| `main` = `origin/main` `1159f31` | Pushed 2026-11-03. Session picker (PR #6, now merged), 📄 Context / 📁 Repo context editors, two-row pane header (setup vs working mode, Relaunch), three-step pane launcher (① Repository → ② Function type → ③ Session; SSH listed under Function type only when 🏠 Home is chosen), fix for events from replaced sessions (Relaunch/Restart/Stop status). Daniel tested all of it. |
+| `feature/context-review` `462a03f` | Local, **not pushed**. ✨ Review in the context window (`InstructionReview`, `LineDiff`). Daniel tested the first version (it timed out on the 91 KB De Beers `CLAUDE.md`); the fixed version passed live tests (91 KB in ~170 s, all edits placed) but **Daniel has not retried it in the app yet**. |
+| `feature/timeline` | Local, **not pushed**. Timeline data layer only, not wired into the UI (section 3). |
+| Taskbar build | `src\AgentHub\bin\Release\net8.0-windows\win-x64\publish` (inside the repo), updated with `C:\data\agenthub\publish-local.ps1 -Repo <repo>`. At `1159f31`: **no Review, no Timeline**. Republish only when Daniel asks. |
+| Test builds | `C:\data\agenthub\build-test*`, `build-check`: throwaway, safe to delete once no test instance runs from them. |
 
-### Key Subsystems
+Pushing: the repo is `Daznl/AgentHub` (Daniel's personal account). `gh auth switch -u Daznl`, push, then `gh auth switch -u DanielWallisBarker` straight after. Push or merge only when Daniel asks; he decides when a branch goes to `main`.
 
-1. **Local Repositories View (`RepoViewGrid`)**:
-   - Lists registered local repositories with real-time Git sync state badges (`✓ Up to date`, `⇣ Behind`, `⇡ Ahead`, `✎ Modified`).
-   - Detailed repository inspector with branch name, dirty file count, ahead/behind counts, origin URL, and raw git status output.
-   - 1-click Git actions: `Fetch`, `Pull (fast-forward-only)`, and `Push`.
-   - Quick launch agent into Cockpit terminals (`⚡ Launch in T1`, `⚡ Launch in T2`, `⚡ Launch in T3`) or external Windows Terminal (`wt.exe`).
-   - Automated folder scanning (`🔍 Scan for repos`) using [`RepoDiscoveryService.cs`](file:///C:/Users/danie/Desktop/AgentHub/src/AgentHub/Services/RepoDiscoveryService.cs) that detects repositories up to 2 levels deep and imports them.
+## 2. Working rules learned this session
 
-2. **Remote GitHub Browser (`GitHubViewGrid`)**:
-   - Queries repositories directly via the local `gh` CLI ([`GitHubService.cs`](file:///C:/Users/danie/Desktop/AgentHub/src/AgentHub/Services/GitHubService.cs)).
-   - Displays authenticated account status and repository counts.
-   - Search/filter by name/description, visibility (All, Public, Private), and sync state (Up to date, Needs Pull, Ahead, Uncommitted Changes, In AgentHub, Not in AgentHub).
-   - 1-click Fast-Forward Pull (`⇣ Pull`) directly from remote cards when local is behind.
-   - 1-click Push (`⬆ Push`) directly from remote cards when local branch is ahead.
-   - 1-click Clone & Register for remote repositories not yet added locally.
-   - Auto-detection linking local folders to GitHub remotes.
+- **Never automate Daniel's desktop** (no UI Automation clicks, no mouse). It once clicked into his real terminal and a modal dialog blocked his test window. Screenshots with `C:\data\agenthub\screens\shot.ps1 -ProcId <pid> -Out <png>` (PrintWindow, read-only) are fine. For anything needing clicks, launch a test build and ask Daniel to try it.
+- **Never kill running AgentHub instances** to free the build output; his main instance holds live Claude Code sessions. Build to a separate folder instead: `dotnet build src/AgentHub/AgentHub.csproj -c Release -o C:\data\agenthub\build-testN`, and run tests in Release.
+- Launch a test copy with `Start-Process C:\data\agenthub\build-testN\AgentHub.exe` and give Daniel the process id.
+- Live review test: set `AGENTHUB_LIVE_REVIEW=1` to run it (it spends Claude usage); without it the test is skipped.
+- Python is not installed; use PowerShell or C#. PowerShell 5.1 strips quotes from JSON passed to native programs: pass JSON arguments from Bash.
+- Data and scratch output go under `C:\data\agenthub\`, never AppData or Temp.
 
-3. **Multi-Session Cockpit (`CockpitViewGrid`)**:
-   - Dynamic N-terminal multiplexer running side-by-side sessions (defaults to 3 panes).
-   - Dynamic pane management: `➕ Add Terminal` button (supports up to 6 concurrent sessions) and individual `✕` close buttons per pane.
-   - Draggable horizontal splitters (`GridSplitter`) between all panes.
-   - Per-pane repository selection (`RepoCombo`) and shell selection (`ShellCombo`).
-   - Session hosting powered by Windows ConPTY ([`ConPtySession.cs`](file:///C:/Users/danie/Desktop/AgentHub/src/AgentHub/Terminal/ConPtySession.cs), [`ConPtyNative.cs`](file:///C:/Users/danie/Desktop/AgentHub/src/AgentHub/Terminal/ConPtyNative.cs)) and Microsoft WebView2 + xterm.js ([`EmbeddedTerminalControl.xaml.cs`](file:///C:/Users/danie/Desktop/AgentHub/src/AgentHub/Terminal/EmbeddedTerminalControl.xaml.cs), [`terminal.html`](file:///C:/Users/danie/Desktop/AgentHub/src/AgentHub/Terminal/Assets/terminal.html)).
-   - Top navigation button labeled `⚡ Cockpit`.
+## 3. Timeline: design agreed, phase 1 in progress
 
----
+Daniel's ask: a story of the project from session 1 to now, matching the GitHub commits, shown as a tree from a starting point, every session collapsible, parallel sessions visible side by side. A **🌳 Timeline** button in the pane header opens it for that pane's repository. Eventually an agent summarises each new reply as sessions run.
 
-## 2. Recent Bugfixes & Improvements
+**Phase 1 (agreed, in progress): the tree from data only, no model calls.**
+- Scope = one Git repository including all worktrees (`git worktree list`); outside Git, the one folder. `igo-debeers-explorer` and `debeers-prospector` are separate timelines.
+- Rows top to bottom in time: Start (first commit / first session), each session, each same-day run of commits made outside sessions.
+- Column 0 is the trunk. A session running alone sits on the trunk; one that overlaps another gets a lane that forks off when it starts and merges back when it ends; a live session's lane stays open.
+- Commit attribution: a commit belongs to the session running at its commit time (2 min before start to 5 min after the last entry); with several running, to the one whose transcript mentions its 7-character hash; otherwise it stays on the trunk.
 
-- **Navigation Button Label:** Updated top navigation button from `⚡ Cockpit (Dual Terminal)` to `⚡ Cockpit` in [`MainWindow.xaml`](file:///C:/Users/danie/Desktop/AgentHub/src/AgentHub/MainWindow.xaml).
-- **Terminal Duplicate Typing Fix:** Resolved an issue where typed characters were duplicated when interacting with Cockpit terminals.
-  - **Root Cause:** WPF `Loaded` events fired multiple times during tab switching and pane layout re-evaluations while `EnsureCoreWebView2Async` was completing. This resulted in duplicate subscriptions to `WebView.CoreWebView2.WebMessageReceived`, causing each character sent via `term.onData` to be dispatched multiple times to `_session.Write(data)`.
-  - **Resolution:** Added `_isInitialized` and `_isInitializing` guards, enforced single-subscription idempotency (`-= CoreWebView2_WebMessageReceived; += CoreWebView2_WebMessageReceived;`), and cleaned up pseudoconsole pipe handles safely in `ConPtySession.cs`.
-- **Repo Combo Synchronization:** When a session is launched into a terminal pane from the main repo detail view, the pane's repository combobox now automatically syncs with the launched repository.
-- **Provider Usage Limits & Adaptive Background Monitoring:** Added automated usage limit monitoring to Cockpit.
-  - **Native Headless Invocations:** Antigravity (`agy`) supports native non-interactive slash command expansion via `agy -p /usage`, returning tab-separated live limits for Gemini and Claude/GPT models (weekly and 5-hour limits) in ~1s without token consumption or prompts.
-  - **Background Terminal Collector (`BackgroundTerminalCollector`):** Codex and Claude Code require interactive TTY environments for slash commands (`/status`). Built a dedicated background ConPTY worker that spawns an isolated pseudoconsole, delivers sequential keystrokes (`/status`, Left-Arrow tab navigation for Claude session usage), captures raw terminal streams, and parses progress bars and reset times safely.
-  - **Adaptive Polling Engine:** Polling frequency scales dynamically with the number of active interactive sessions running in Cockpit:
-    - 0 active terminals: 15 minutes (`IDLE · EVERY 15M`)
-    - 1 active terminal: 5 minutes (`⚡ 1 ACTIVE · EVERY 5M`)
-    - 2 active terminals: 2 minutes (`⚡ 2 ACTIVE · EVERY 2M`)
-    - 3+ active terminals: 1 minute (`⚡ {N} ACTIVE · EVERY 1M`)
-  - **Terminal Feed Inspection & Split Provider Tabs:** Added a collapsible "Terminal Feed ▾" panel to Cockpit with dedicated tabs for each provider (`✦ Antigravity`, `⚡ Codex`, `✻ Claude Code`), 1-click clipboard copy (`📋 Copy`), and a `Sanitized / Raw ANSI` view toggle.
-  - **Cursor Positioning & Whitespace Preservation:** Standard ANSI strippers erase VT cursor forward (`\x1b[<n>C`) and horizontal absolute (`\x1b[<n>G`) sequences, causing styled words in TUI frameworks like Ink to smash together (`Run/inittocreateaCLAUDE.md...`). Updated `UsageOutputParser.StripAnsi` to translate cursor forward commands into equivalent whitespace, keeping columns aligned and readable.
-  - **Active Screen Extraction (`ExtractRelevantScreen`):** Background terminal collectors record the entire process lifecycle (including startup banners, tips, and what's-new messages). Added `ExtractRelevantScreen` in `UsageOutputParser` to isolate the active usage frame (e.g. `Current session` / `Current week` for Claude; `5h limit` / `Weekly limit` for Codex) so users see clean, focused usage data without clutter.
-  - **Claude API Latency Handling & Keystroke Sequencing:** Claude Code's `/status` Usage tab fetches limits asynchronously from Anthropic's stats API, showing `✶ Loading your Claude Code stats…` while in flight. Extended probe timeout to 16 seconds and sequenced individual keystrokes (`/status\r`, 800ms delay, `\x1b[D`, 800ms delay, `\x1b[D`) so network latency across international regions (e.g. Australia) resolves completely before capture.
-  - **Automatic Settings Migration:** `SettingsService.LoadAsync()` automatically populates default usage providers if an existing `settings.json` lacked them.
+**Done (compiles, no tests yet):**
+- `src/AgentHub/Services/Timeline/TimelineBuilder.cs`: `Attribute`, `Build`, and lane layout into `TimelineRow`s with `TimelineLine`s (column, from top, to bottom, fork, merge).
+- `src/AgentHub/Services/Timeline/TimelineSource.cs`:
+  - `ResolveAsync` (repository root and worktrees).
+  - `ReadCommitsAsync` (`git log --all --source`).
+  - `ReadSessions`: sessions across all worktrees, live and archived, de-duplicated.
+  - `LastEntryTime`.
+  - `TranscriptHashes`: an incremental scan for hex words.
 
----
+**Next, in order:**
+1. Tests for `TimelineBuilder` (attribution with and without hash mentions; overlap gives a lane; lane merges back; live lane stays open; same-day outside commits group; Start row) and for `TranscriptHashes` / `ParseLog`.
+2. `TimelineGutter : FrameworkElement` that draws one row's lanes in `OnRender` from `TimelineRow` (stretches with the row as cards expand). Lane colours: column 0 trunk neutral `#2A3A52`, nodes by column (`#2FD4F5 #C084FC #34D399 #FBBF24 #60A5FA #F472B6 #FB923C #A3E635`).
+3. `TimelineWindow` (non-modal, one per repository, like `ContextWindow`):
+   - **Header:** repository name; "N sessions · M commits · since <date>"; Refresh.
+   - **Rows:** gutter beside a card.
+   - **Session card:** title, times and duration, agent, live badge, branch chips from its commits, commit count.
+   - **Expanded session:** prompts, loaded lazily with `SessionHistoryReader.ReadEntries`; the commits; and "Open in History", which calls `MainWindow.ShowHistory(folder, transcript)`.
+   - **Outside-commits card:** "N commits outside sessions", expanding to the list.
+   - **Behaviour:** scroll to the bottom (now) on open; rebuild every ~20 s while open, keeping expanded rows by `TimelineRow.Key`; build off the UI thread.
+4. Pane header button **🌳 Timeline** (both header modes) and MainWindow wiring.
+5. README and roadmap; build; launch a test copy for Daniel.
 
-## 3. Key Architecture & Coding Constraints
+**Facts found while designing (they shaped the rules above):**
+- Daniel's sessions run in the main repository folder and work in sibling worktrees (`wt-*`, `C:\data\wt\...`); no Claude Code session has a worktree as its folder. So the `gitBranch` Claude Code records shows the main folder's branch, not what the session built. Commits are the evidence.
+- Commits are made with `git commit -q`, so transcripts have no `[branch hash]` lines; hashes appear through `git log` output and PR text. A mention alone does not prove authorship (sessions quote old hashes), hence time window first.
+- An archived transcript's file time is when it was copied; use `TimelineSource.LastEntryTime` for when a session really ended.
+- Scale: De Beers Explorer has 52 sessions (277 MB of transcripts) and 393 commits; the archive holds 585 transcripts.
 
-1. **WPF & WinForms Namespace Disambiguation:**
-   - Both `<UseWPF>true</UseWPF>` and `<UseWindowsForms>true</UseWindowsForms>` are enabled in `AgentHub.csproj` (needed for `FolderBrowserDialog`).
-   - Files referencing UI types must explicitly alias them:
-     - `using UserControl = System.Windows.Controls.UserControl;`
-     - `using Color = System.Windows.Media.Color;`
-     - `using MessageBox = System.Windows.MessageBox;`
-     - `using Forms = System.Windows.Forms;`
-2. **Build File Locking:**
-   - Always terminate running instances of `AgentHub.exe` (`Get-Process -Name "AgentHub" -ErrorAction SilentlyContinue | Stop-Process -Force`) before running `dotnet build`.
-3. **Git & CLI Safety:**
-   - Pull operations must always use fast-forward only (`--ff-only`).
-   - Destructive Git operations must never execute without explicit user action.
-   - Quota or usage metrics must display their confidence source and never imply exact provider balances.
+**Phase 2 (not started, needs Daniel's answers):** after each finished reply, summarise the new turn with `claude -p` (the same locked-down setup as Review: `--tools ""`, `--setting-sources ""`, `--strict-mcp-config`, `--no-session-persistence`) and add "what was built" lines to the session node. Cache under `C:\data\agenthub\timeline\`. One-off backfill for past sessions from condensed transcripts (prompts, final replies, commits). Open questions to ask him:
+1. Summaries model: Haiku or default?
+2. Backfill: all sessions or from a date?
+3. Also a global Timeline button with a repository picker?
 
----
+## 4. Known loose ends
 
-## 4. Next Priorities (Roadmap Alignment)
+- A second AgentHub instance sometimes exits silently within ~10 s of starting (no `crash.log`). Not investigated.
+- The Start Menu shortcut points at an old copy under `%LOCALAPPDATA%\AgentHub`; the taskbar pin uses the repo's `publish` folder.
+- `*.old-*` files in the `publish` folder are left by live swaps; delete them once the main instance has been restarted.
 
-- **Cockpit Stage 2 (CLI Compatibility Verification):**
-  - Verify interactive behavior and full ANSI/VT escape sequences with Codex, Claude Code, and Antigravity (`agy`) across multiple repos.
-- **Cockpit Stage 3 (Attention & Bell Engine):**
-  - Visual badges / audio chimes when a CLI requires interactive user confirmation or encounters an error.
-- **Milestone v0.2 (Task Worktrees):**
-  - Automatic creation of Git worktrees per task to isolate agent file edits and avoid parallel conflict in the same working tree.
+## 5. Architecture and coding constraints (still true)
+
+1. **WPF and WinForms namespaces:** `AgentHub.csproj` enables both (for `FolderBrowserDialog`). Files using UI types alias them: `using Button = System.Windows.Controls.Button;`, `using Color = System.Windows.Media.Color;`, `using MessageBox = System.Windows.MessageBox;`, `using UserControl = System.Windows.Controls.UserControl;` and so on.
+2. **Terminal size:** a ConPTY resize after a CLI starts can wipe its first screen. Pane header modes keep the same height. The launcher hides the terminal (never collapses it). Same-size refits are ignored.
+3. **Session events:** `EmbeddedTerminalControl` drops output and exit events from a replaced session (`ReferenceEquals(_session, session)`).
+4. **Model calls go through installed CLIs on the user's login**, never an API key (`AGENTS.md`: no stored credentials). Lock them down as Review does.
+5. **Git and CLI safety:** pull is fast-forward only. Destructive Git operations only on explicit user action. Usage figures name their source.
