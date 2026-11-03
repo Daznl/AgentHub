@@ -10,7 +10,8 @@ public sealed class ProcessRunner
         IEnumerable<string> arguments,
         string? workingDirectory = null,
         CancellationToken cancellationToken = default,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null,
+        string? standardInput = null)
     {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         linkedCts.CancelAfter(timeout ?? TimeSpan.FromSeconds(30));
@@ -26,6 +27,8 @@ public sealed class ProcessRunner
             // gh and git emit UTF-8; without this .NET decodes with the console codepage and em dashes etc. become mojibake.
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
+            // Same for what we send: no byte order mark, which a CLI would read as part of the text.
+            StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             CreateNoWindow = true
         };
 
@@ -41,9 +44,11 @@ public sealed class ProcessRunner
         try
         {
             process.Start();
-            process.StandardInput.Close();
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
+            // Stdin is always closed, so a CLI waiting for input never hangs; text too long for a command line goes here.
+            if (standardInput is not null) await process.StandardInput.WriteAsync(standardInput.AsMemory(), linkedCts.Token);
+            process.StandardInput.Close();
             await process.WaitForExitAsync(linkedCts.Token);
 
             return (process.ExitCode, stdout.ToString(), stderr.ToString());

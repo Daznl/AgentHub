@@ -231,7 +231,10 @@ public partial class MainWindow : Window
     private void ShowContext(string? folder, Services.Instructions.InstructionCli? cli)
     {
         var existing = folder is null ? _globalContextWindow : _repoContextWindow;
+        // Review runs the configured Claude Code command (a full path, say) without its interactive arguments.
+        var claude = _settings.Agents.FirstOrDefault(a => a.Enabled && Services.Instructions.InstructionFiles.DetectCli(a.Command) == Services.Instructions.InstructionCli.ClaudeCode);
         var window = existing ?? new ContextWindow { Owner = this };
+        window.ReviewCommand = string.IsNullOrWhiteSpace(claude?.Command) ? "claude" : claude.Command;
         if (folder is null)
         {
             // Reopening the global window keeps whichever file is being edited.

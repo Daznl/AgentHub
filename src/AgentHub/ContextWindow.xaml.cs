@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using AgentHub.Services;
 using AgentHub.Services.Instructions;
 using Color = System.Windows.Media.Color;
 using ColorConverter = System.Windows.Media.ColorConverter;
@@ -129,6 +130,10 @@ public partial class ContextWindow : Window
             return;
         }
 
+        // A review belongs to the text it was run on; opening a file (another folder, a reload) ends it.
+        _reviewCts?.Cancel();
+        if (ShowingReview) CloseReview();
+
         _current = file;
         _loaded = loaded;
         _loading = true;
@@ -225,10 +230,141 @@ public partial class ContextWindow : Window
         Process.Start(startInfo);
     }
 
+    // ---- Review: Claude Code suggests changes; the user ticks which go into the editor ----
+
+    /// <summary>Command that starts Claude Code (from the configured agent, else <c>claude</c>).</summary>
+    public string ReviewCommand { get; set; } = "claude";
+
+    private CancellationTokenSource? _reviewCts;
+    private IReadOnlyList<DiffSegment>? _reviewSegments;
+    private List<ReviewHunk> _reviewHunks = [];
+
+    private bool Reviewing => _reviewCts is not null;
+    private bool ShowingReview => _reviewSegments is not null;
+
+    private async void Review_Click(object sender, RoutedEventArgs e)
+    {
+        if (_reviewCts is { } running)
+        {
+            running.Cancel();
+            return;
+        }
+        if (_current is not { } file) return;
+
+        var text = Editor.Text;
+        var cts = new CancellationTokenSource();
+        _reviewCts = cts;
+        SetReviewing(true);
+        StatusText.Text = $"Reviewing {file.Label} with Claude Code… usually under a minute.";
+        try
+        {
+            var suggestion = await InstructionReview.RunAsync(new ProcessRunner(), ReviewCommand, file, text, Folder, cts.Token);
+            if (_current == file) ShowReview(file, text, suggestion);
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText.Text = "Review cancelled.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            StatusText.Text = "Review failed.";
+            MessageBox.Show(this, ex.Message, "AgentHub - Review", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _reviewCts = null;
+            cts.Dispose();
+            SetReviewing(false);
+        }
+    }
+
+    // The editor is frozen while Claude Code reads it, so the suggestions always apply to the text it saw.
+    private void SetReviewing(bool reviewing)
+    {
+        Editor.IsReadOnly = reviewing;
+        TabsPanel.IsEnabled = !reviewing && !ShowingReview;
+        ReviewBtn.Content = reviewing ? "■ Cancel review" : "✨ Review";
+        OpenFolderBtn.IsEnabled = !reviewing;
+        if (reviewing)
+        {
+            SaveBtn.IsEnabled = false;
+            ReloadBtn.IsEnabled = false;
+        }
+        else RefreshState();
+    }
+
+    private void ShowReview(InstructionFile file, string original, ReviewSuggestion suggestion)
+    {
+        var segments = LineDiff.Compute(original, suggestion.RevisedText);
+        var hunks = segments.Where(s => s.IsChange).Select(ReviewHunk.From).ToList();
+        if (hunks.Count == 0)
+        {
+            StatusText.Text = suggestion.Changes.Count > 0
+                ? $"No changes suggested: {suggestion.Changes[0]}"
+                : $"No changes suggested for {file.Label}.";
+            return;
+        }
+
+        _reviewSegments = segments;
+        _reviewHunks = hunks;
+        ReviewHeading.Text = $"Claude Code suggests {hunks.Count} change{(hunks.Count == 1 ? "" : "s")} to {file.Label}";
+        ReviewChanges.ItemsSource = suggestion.Changes;
+        ReviewChanges.Visibility = suggestion.Changes.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        HunkList.ItemsSource = hunks;
+        ReviewPanel.Visibility = Visibility.Visible;
+        Editor.Visibility = Visibility.Hidden;
+        EmptyHint.Visibility = Visibility.Hidden;
+        EditButtons.Visibility = Visibility.Collapsed;
+        ReviewButtons.Visibility = Visibility.Visible;
+        TabsPanel.IsEnabled = false;
+        UpdateApplyButton();
+        StatusText.Text = "Untick any change you do not want, then apply. Nothing is saved until you press Save.";
+    }
+
+    private void HunkToggle_Click(object sender, RoutedEventArgs e) => UpdateApplyButton();
+
+    private void UpdateApplyButton()
+    {
+        var chosen = _reviewHunks.Count(h => h.Accepted);
+        ApplyReviewBtn.Content = chosen == _reviewHunks.Count ? "Apply all" : $"Apply {chosen} of {_reviewHunks.Count}";
+        ApplyReviewBtn.IsEnabled = chosen > 0;
+    }
+
+    private void ApplyReview_Click(object sender, RoutedEventArgs e)
+    {
+        if (_reviewSegments is not { } segments) return;
+        var chosen = _reviewHunks.Count(h => h.Accepted);
+        var merged = LineDiff.Merge(segments, i => _reviewHunks[i].Accepted);
+        CloseReview();
+        Editor.Text = merged;
+        Editor.Focus();
+        StatusText.Text = $"Applied {chosen} of {_reviewHunks.Count} suggested change{(_reviewHunks.Count == 1 ? "" : "s")}. Check the editor, then Save.";
+    }
+
+    private void DiscardReview_Click(object sender, RoutedEventArgs e)
+    {
+        CloseReview();
+        StatusText.Text = "Review discarded; the editor is unchanged.";
+    }
+
+    private void CloseReview()
+    {
+        _reviewSegments = null;
+        HunkList.ItemsSource = null;
+        ReviewChanges.ItemsSource = null;
+        ReviewPanel.Visibility = Visibility.Collapsed;
+        Editor.Visibility = Visibility.Visible;
+        EmptyHint.Visibility = Visibility.Visible;
+        EditButtons.Visibility = Visibility.Visible;
+        ReviewButtons.Visibility = Visibility.Collapsed;
+        TabsPanel.IsEnabled = true;
+    }
+
     // Picks up edits made elsewhere (an agent, another editor) whenever the window comes back into focus.
+    // Not during a review: the suggestions belong to the text that was sent, and Save still catches the change on disk.
     private void CheckDisk()
     {
-        if (_current is null || _loaded is null) return;
+        if (_current is null || _loaded is null || Reviewing || ShowingReview) return;
         if (InstructionFiles.CurrentHash(_current.Path) == _loaded.Hash) return;
         if (IsDirty)
             StatusText.Text = "⚠ The file changed on disk since you opened it. Saving will ask what to keep.";
@@ -253,15 +389,11 @@ public partial class ContextWindow : Window
     protected override void OnClosing(CancelEventArgs e)
     {
         if (!ConfirmLeave()) e.Cancel = true;
+        else _reviewCts?.Cancel();
         base.OnClosing(e);
     }
 
-    private static string CliName(InstructionCli cli) => cli switch
-    {
-        InstructionCli.ClaudeCode => "Claude Code",
-        InstructionCli.Codex => "Codex",
-        _ => "Gemini / Antigravity"
-    };
+    private static string CliName(InstructionCli cli) => InstructionReview.CliName(cli);
 
     private static string ExistingAncestor(string dir)
     {
@@ -274,5 +406,40 @@ public partial class ContextWindow : Window
         var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
         brush.Freeze();
         return brush;
+    }
+}
+
+/// <summary>One suggested change in the review list: the lines it removes and adds, and whether the user keeps it.</summary>
+public sealed class ReviewHunk
+{
+    public required string Title { get; init; }
+    public required string RemovedText { get; init; }
+    public required string AddedText { get; init; }
+    public bool Accepted { get; set; } = true;
+
+    public Visibility RemovedVisibility => RemovedText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility AddedVisibility => AddedText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    public static ReviewHunk From(DiffSegment change)
+    {
+        var removed = change.OldLines.Count;
+        var title = removed switch
+        {
+            0 => change.OldStart == 1 ? "Added at the top" : $"Added after line {change.OldStart - 1}",
+            1 => $"Line {change.OldStart}",
+            _ => $"Lines {change.OldStart}–{change.OldStart + removed - 1}"
+        };
+        var what = (removed, change.NewLines.Count) switch
+        {
+            (0, _) => "added",
+            (_, 0) => "removed",
+            _ => "changed"
+        };
+        return new ReviewHunk
+        {
+            Title = removed == 0 ? title : $"{title} · {what}",
+            RemovedText = string.Join("\n", change.OldLines.Select(l => "− " + l)),
+            AddedText = string.Join("\n", change.NewLines.Select(l => "+ " + l))
+        };
     }
 }
