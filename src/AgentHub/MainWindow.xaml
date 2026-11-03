@@ -35,6 +35,7 @@
                         <Button x:Name="ViewCockpitBtn" Click="ViewCockpitBtn_Click" Content="⚡ Cockpit" FontWeight="SemiBold" />
                         <Button x:Name="ManageReposBtn" Click="ManageReposBtn_Click" Content="🔧 Manage GitHub Repos" FontWeight="SemiBold" />
                         <Button Click="OpenHistory_Click" Content="🕘 History" FontWeight="SemiBold" ToolTip="Every Claude Code and Codex session per repository: each prompt, reply, thinking step, tool call and result" />
+                        <Button Click="OpenContext_Click" Content="📄 Context" FontWeight="SemiBold" ToolTip="View and edit the user-wide instruction file of each CLI: Claude Code CLAUDE.md, Codex AGENTS.md, Gemini / Antigravity GEMINI.md" />
                         <Button Click="OpenSettings_Click" Content="⚙ Settings" Margin="0,0,0,8" />
                     </StackPanel>
                     <!-- Manage GitHub Repos view: repository management actions -->

@@ -53,8 +53,8 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     public event Action? SshManageRequested;
     /// <summary>Raised when the user wants this pane's session history. See <see cref="HistoryFolder"/> and <see cref="TranscriptPath"/>.</summary>
     public event Action<TerminalPaneControl>? HistoryRequested;
-    /// <summary>Raised by the footer's Context (false) or Repo context (true) button. See <see cref="ContextFolder"/> and <see cref="ContextCli"/>.</summary>
-    public event Action<TerminalPaneControl, bool>? ContextRequested;
+    /// <summary>Raised by the footer's Repo context button. See <see cref="ContextFolder"/> and <see cref="ContextCli"/>.</summary>
+    public event Action<TerminalPaneControl>? RepoContextRequested;
     private List<SshConnection> _sshConnections = [];
     private List<RepositoryDefinition> _repositories = [];
     private LaunchLocation? _customLocation;
@@ -374,9 +374,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         RepoContextBtn.ToolTip = $"View and edit the instruction files in {folder}: CLAUDE.md, AGENTS.md and GEMINI.md";
     }
 
-    private void GlobalContext_Click(object sender, RoutedEventArgs e) => ContextRequested?.Invoke(this, false);
-
-    private void RepoContext_Click(object sender, RoutedEventArgs e) => ContextRequested?.Invoke(this, true);
+    private void RepoContext_Click(object sender, RoutedEventArgs e) => RepoContextRequested?.Invoke(this);
 
     public void UpdateShellOptions(List<ShellOption> shells, int defaultIndex = 0)
     {

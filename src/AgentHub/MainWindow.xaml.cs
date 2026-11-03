@@ -217,10 +217,12 @@ public partial class MainWindow : Window
         pane.UpdateSshConnections(_settings.SshConnections);
         pane.SshManageRequested += () => ManageSsh_Click(pane, new RoutedEventArgs());
         pane.HistoryRequested += p => ShowHistory(p.HistoryFolder, p.TranscriptPath);
-        pane.ContextRequested += (p, repo) => ShowContext(repo ? p.ContextFolder : null, p.ContextCli);
+        pane.RepoContextRequested += p => ShowContext(p.ContextFolder, p.ContextCli);
         pane.UpdateShellOptions(_shellOptions, defaultShellIndex);
         return pane;
     }
+
+    private void OpenContext_Click(object sender, RoutedEventArgs e) => ShowContext(null, null);
 
     private ContextWindow? _globalContextWindow;
     private ContextWindow? _repoContextWindow;
