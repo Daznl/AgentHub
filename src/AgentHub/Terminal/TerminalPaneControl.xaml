@@ -12,15 +12,30 @@
             </Grid.RowDefinitions>
 
             <!-- Pane Top Control Bar -->
+            <!-- Two rows: title above, buttons below. Both modes (setup / session running) keep the same height,
+                 so starting a session never resizes the terminal while the CLI draws its first screen. -->
             <Border x:Name="PaneHeader" Grid.Row="0" Background="#0E1622" BorderBrush="#1E2C40" BorderThickness="0,0,0,1" Padding="8,6">
-                <DockPanel LastChildFill="True">
+                <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Title row: status dot, repository or folder name, then the session's status line -->
+                <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,6">
+                    <Ellipse x:Name="StatusDot" DockPanel.Dock="Left" Width="8" Height="8" Fill="#5A6B85" Margin="1,0,8,0" VerticalAlignment="Center" />
+                    <TextBlock x:Name="SessionTitle" DockPanel.Dock="Left" Foreground="{StaticResource TextBrush}" FontSize="13" FontWeight="SemiBold"
+                               VerticalAlignment="Center" Margin="0,0,10,0" MaxWidth="360" TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="SubtitleText" Text="" Foreground="#7E8CA6" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+
+                <DockPanel Grid.Row="1" LastChildFill="True" MinHeight="26">
                     <!-- Actions docked right FIRST so they always keep their full width -->
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                         <ComboBox x:Name="RepoCombo" Width="130" Margin="0,0,4,0" DisplayMemberPath="Name" ToolTip="Select working repository or folder" SelectionChanged="RepoCombo_SelectionChanged" />
-                        <Button Click="BrowseFolder_Click" Content="📂" ToolTip="Browse for any folder to launch in. It is added to the dropdown and selected; press Launch to start." Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
+                        <Button x:Name="BrowseBtn" Click="BrowseFolder_Click" Content="📂" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <ComboBox x:Name="ShellCombo" Width="124" Margin="0,0,4,0" ToolTip="Select agent CLI or shell" />
-                        <Button x:Name="LaunchBtn" Click="Launch_Click" Content="Launch" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#0E7490" FontSize="11"
-                                ToolTip="Start the selected shell or agent. For Claude Code and Codex, choose a new session or continue an earlier one." />
+                        <Button x:Name="LaunchBtn" Click="Launch_Click" Content="Launch" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#0E7490" FontSize="11" />
                         <!-- Shown by Launch for Claude Code / Codex: new session, or continue one recorded for this folder -->
                         <Popup x:Name="ResumePopup" PlacementTarget="{Binding ElementName=LaunchBtn}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
                             <Border x:Name="ResumeMenu" Background="#111A28" BorderBrush="#24344B" BorderThickness="1" CornerRadius="6" Padding="4" Width="380" Margin="0,4,0,0">
@@ -63,7 +78,7 @@
                                 </StackPanel>
                             </Border>
                         </Popup>
-                        <Button Click="History_Click" Content="🕘" ToolTip="Open the full history of this pane's session, or of the selected folder's sessions" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
+                        <Button x:Name="HistoryBtn" Click="History_Click" Content="🕘" ToolTip="Open the full history of this pane's session, or of the selected folder's sessions" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="MoveLeftBtn" Click="MoveLeft_Click" Content="◀" ToolTip="Move this terminal left" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="MoveRightBtn" Click="MoveRight_Click" Content="▶" ToolTip="Move this terminal right" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="RestartBtn" Click="RestartBtn_Click" Content="Restart" ToolTip="Re-launch the last command in this pane" Visibility="Collapsed" Padding="8,3" Margin="0,0,4,0" FontSize="11" />
@@ -71,8 +86,6 @@
                         <Button Click="Close_Click" Content="✕" ToolTip="Close this terminal session" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0" FontSize="11" FontWeight="Bold" />
                     </StackPanel>
 
-                    <!-- Status dot stays pinned to the left -->
-                    <Ellipse x:Name="StatusDot" DockPanel.Dock="Left" Width="8" Height="8" Fill="#5A6B85" Margin="0,0,8,0" VerticalAlignment="Center" />
                     <!-- Shown when the agent CLI in this pane has stopped and is waiting for the user -->
                     <Border x:Name="AttentionBadge" DockPanel.Dock="Left" Visibility="Collapsed" Background="#78350F" BorderBrush="#F59E0B" BorderThickness="1" CornerRadius="4" Padding="6,1" Margin="0,0,8,0" VerticalAlignment="Center">
                         <TextBlock Text="⏳ WAITING FOR YOU" Foreground="#FCD34D" FontSize="10" FontWeight="Bold" />
@@ -89,9 +102,10 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- Subtitle fills the remaining middle and truncates before the dropdowns -->
-                    <TextBlock x:Name="SubtitleText" Text="" Foreground="#7E8CA6" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
+                    <!-- Fills the space between the badges and the buttons -->
+                    <Border />
                 </DockPanel>
+                </Grid>
             </Border>
 
             <!-- Last prompt the user sent, read from the CLI's transcript so it never needs scrolling back for -->

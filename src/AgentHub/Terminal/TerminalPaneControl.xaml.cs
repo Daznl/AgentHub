@@ -72,6 +72,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     {
         InitializeComponent();
         RefreshContextFolder();
+        ApplyHeaderMode(working: false);
         Terminal.SessionStarted += () =>
         {
             _lastTranscript = null;
@@ -355,6 +356,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             ? $"Launches in {loc.Path}"
             : "Select working repository or folder";
         RefreshContextFolder();
+        RefreshTitle();
     }
 
     /// <summary>Folder whose instruction files Repo context shows: where the running session is, else the selected location.</summary>
@@ -418,6 +420,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
                 StopBtn.Visibility = Visibility.Collapsed;
                 break;
         }
+        ApplyHeaderMode(status == TerminalStatus.Running);
     }
 
     private void StopBtn_Click(object sender, RoutedEventArgs e) => Terminal.StopSession();
@@ -432,6 +435,11 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     // Plain shells start straight away. Claude Code and Codex first offer a new session or an earlier one in this folder.
     private async void Launch_Click(object sender, RoutedEventArgs e)
     {
+        if (Terminal.IsRunning)
+        {
+            Relaunch();
+            return;
+        }
         var location = RepoCombo.SelectedItem as LaunchLocation;
         var dir = location?.Path ?? BaseDirectory;
         if (!Directory.Exists(dir))
@@ -491,10 +499,10 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             return;
         }
         LaunchCommand(SessionResume.BuildCommand(shell.Command, row.Summary), $"{shell.DisplayName} · resumed", shell.IsAgent,
-            $"continue “{row.Title}”");
+            $"continue “{row.Title}”", new FreshLaunch(shell.Command, $"Terminal {_paneIndex} · {shell.DisplayName}", shell.IsAgent));
     }
 
-    private void LaunchCommand(string command, string title, bool isAgent, string? what = null)
+    private void LaunchCommand(string command, string title, bool isAgent, string? what = null, FreshLaunch? fresh = null)
     {
         var location = RepoCombo.SelectedItem as LaunchLocation;
         var dir = location?.Path ?? BaseDirectory;
@@ -508,7 +516,71 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             if (replace != MessageBoxResult.Yes) return;
         }
 
-        Terminal.StartSession(command, dir, $"Terminal {_paneIndex} · {title}", repoName, isAgent);
+        var fullTitle = $"Terminal {_paneIndex} · {title}";
+        _fresh = fresh ?? new FreshLaunch(command, fullTitle, isAgent);
+        Terminal.StartSession(command, dir, fullTitle, repoName, isAgent);
+    }
+
+    /// <summary>What Relaunch starts: the CLI's plain command (never a resume of the old session), its title, and whether it is an agent.</summary>
+    private sealed record FreshLaunch(string Command, string Title, bool IsAgent);
+    private FreshLaunch? _fresh;
+
+    // Running session: start a new session of the same CLI in the same folder, after confirming.
+    // Title row: the running session's repository or folder, else the location selected to launch in.
+    private void RefreshTitle()
+    {
+        if (Terminal.IsRunning)
+        {
+            SessionTitle.Text = Terminal.SessionName;
+            SessionTitle.ToolTip = Terminal.WorkingDirectory;
+        }
+        else
+        {
+            var location = RepoCombo.SelectedItem as LaunchLocation;
+            SessionTitle.Text = location?.Repository?.Name ?? location?.Name ?? "Home";
+            SessionTitle.ToolTip = location?.Path ?? BaseDirectory;
+        }
+    }
+
+    private void Relaunch()
+    {
+        var dir = Terminal.WorkingDirectory;
+        var fresh = _fresh ?? new FreshLaunch(Terminal.CommandLine, $"Terminal {_paneIndex}", Terminal.IsAgentSession);
+        var name = string.IsNullOrEmpty(Terminal.SessionName) ? dir : Terminal.SessionName;
+        var replace = System.Windows.MessageBox.Show(Window.GetWindow(this),
+            $"End the running session and start a new one in {name}?\n{dir}",
+            "Relaunch session", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (replace != MessageBoxResult.Yes) return;
+        Terminal.StartSession(fresh.Command, dir, fresh.Title, Terminal.SessionName, fresh.IsAgent);
+    }
+
+    /// <summary>
+    /// Setup header (no session): location and CLI dropdowns, Launch, SSH, history, Repo context footer.
+    /// Working header (session running): the session's repository name, context badge, 📂 to open its folder,
+    /// Relaunch, move and close. Everything else is hidden until the session ends.
+    /// </summary>
+    private void ApplyHeaderMode(bool working)
+    {
+        var setup = working ? Visibility.Collapsed : Visibility.Visible;
+        RepoCombo.Visibility = setup;
+        ShellCombo.Visibility = setup;
+        SshBtn.Visibility = setup;
+        HistoryBtn.Visibility = setup;
+        ContextFooter.Visibility = setup;
+        if (working)
+        {
+            StopBtn.Visibility = Visibility.Collapsed;
+            RestartBtn.Visibility = Visibility.Collapsed;
+        }
+
+        RefreshTitle();
+        LaunchBtn.Content = working ? "Relaunch" : "Launch";
+        LaunchBtn.ToolTip = working
+            ? "End this session and start a new one of the same CLI in the same folder"
+            : "Start the selected shell or agent. For Claude Code and Codex, choose a new session or continue an earlier one.";
+        BrowseBtn.ToolTip = working
+            ? $"Open {Terminal.WorkingDirectory} in File Explorer"
+            : "Browse for any folder to launch in. It is added to the dropdown and selected; press Launch to start.";
     }
 
     public void UpdateSshConnections(List<SshConnection> connections)
@@ -564,10 +636,18 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             if (replace != MessageBoxResult.Yes) return;
         }
 
-        Terminal.StartSession(connection.BuildCommandLine(), BaseDirectory, $"Terminal {_paneIndex} · SSH", $"SSH · {connection.DisplayName}");
+        _fresh = new FreshLaunch(connection.BuildCommandLine(), $"Terminal {_paneIndex} · SSH", false);
+        Terminal.StartSession(_fresh.Command, BaseDirectory, _fresh.Title, $"SSH · {connection.DisplayName}");
     }
 
-    private void BrowseFolder_Click(object sender, RoutedEventArgs e) => FolderPickRequested?.Invoke(this);
+    // Setup: pick a folder to launch in. Working: show the session's folder in File Explorer.
+    private void BrowseFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (Terminal.IsRunning && Directory.Exists(Terminal.WorkingDirectory))
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{Terminal.WorkingDirectory}\""));
+        else
+            FolderPickRequested?.Invoke(this);
+    }
 
     private void History_Click(object sender, RoutedEventArgs e) => HistoryRequested?.Invoke(this);
 
@@ -597,6 +677,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             else if (Directory.Exists(workingDirectory))
                 SetCustomFolder(workingDirectory);
         }
+        _fresh = new FreshLaunch(commandLine, title, isAgentSession);
         Terminal.StartSession(commandLine, workingDirectory, title, repoName, isAgentSession);
     }
 

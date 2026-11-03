@@ -37,6 +37,8 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     /// <summary>Command line and folder of the current (or last) session.</summary>
     public string CommandLine => _commandLine;
     public string WorkingDirectory => _workingDirectory;
+    /// <summary>The repository or place the current session was started for (its first subtitle), e.g. "AgentHub" or "SSH · host".</summary>
+    public string SessionName { get; private set; } = "";
 
     // Attention detection: only armed for coding-CLI sessions (not plain shells).
     private readonly AttentionDetector _attention = new();
@@ -163,6 +165,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     {
         _commandLine = commandLine;
         _workingDirectory = workingDirectory;
+        SessionName = subtitle;
         IsAgentSession = isAgentSession;
         SetHeader(title, subtitle);
 
