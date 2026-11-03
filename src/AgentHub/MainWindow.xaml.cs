@@ -198,11 +198,11 @@ public partial class MainWindow : Window
 
         for (int i = 0; i < _panes.Count; i++)
         {
-            _panes[i].UpdateShellOptions(_shellOptions, i);
+            _panes[i].UpdateShellOptions(_shellOptions);
         }
     }
 
-    private TerminalPaneControl CreateTerminalPane(int defaultRepoIndex = 0, int defaultShellIndex = 0)
+    private TerminalPaneControl CreateTerminalPane()
     {
         var pane = new TerminalPaneControl();
         pane.CloseRequested += OnPaneCloseRequested;
@@ -218,7 +218,7 @@ public partial class MainWindow : Window
         pane.SshManageRequested += () => ManageSsh_Click(pane, new RoutedEventArgs());
         pane.HistoryRequested += p => ShowHistory(p.HistoryFolder, p.TranscriptPath);
         pane.RepoContextRequested += p => ShowContext(p.ContextFolder, p.ContextCli);
-        pane.UpdateShellOptions(_shellOptions, defaultShellIndex);
+        pane.UpdateShellOptions(_shellOptions);
         return pane;
     }
 
@@ -311,7 +311,7 @@ public partial class MainWindow : Window
 
         for (int i = 0; i < count; i++)
         {
-            _panes.Add(CreateTerminalPane(defaultRepoIndex: i, defaultShellIndex: 0));
+            _panes.Add(CreateTerminalPane());
         }
 
         RebuildTerminalLayout();
@@ -369,7 +369,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var newPane = CreateTerminalPane(defaultRepoIndex: _panes.Count, defaultShellIndex: 0);
+        var newPane = CreateTerminalPane();
         _panes.Add(newPane);
         RebuildTerminalLayout();
         UpdateUsagePollingInterval();
@@ -433,7 +433,7 @@ public partial class MainWindow : Window
         TerminalPaneControl? target;
         if (_panes.Count < 6)
         {
-            target = CreateTerminalPane(defaultRepoIndex: _panes.Count, defaultShellIndex: 0);
+            target = CreateTerminalPane();
             _panes.Add(target);
             RebuildTerminalLayout();
             UpdateUsagePollingInterval();
@@ -477,8 +477,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Per-pane 📂 button: browse for a folder, starting from the pane's current location, and select it
-    /// in that pane's dropdown. Nothing launches until the user presses Launch, so no running session is touched.
+    /// Launcher "Browse for another folder": pick a folder, starting from the pane's current location, and choose it
+    /// as that pane's location. Nothing launches until the user picks a CLI and session, so no running session is touched.
     /// </summary>
     private async void OnPaneFolderPickRequested(TerminalPaneControl pane)
     {
@@ -487,7 +487,7 @@ public partial class MainWindow : Window
         if (folder is null) return;
 
         pane.SetCustomFolder(folder);
-        StatusText.Text = $"Terminal {pane.PaneIndex} will launch in {folder}. Press Launch to start.";
+        StatusText.Text = $"Terminal {pane.PaneIndex} will launch in {folder}. Pick the CLI and session to start.";
     }
 
     private void OnPaneCloseRequested(TerminalPaneControl pane)
@@ -1767,7 +1767,7 @@ public partial class MainWindow : Window
         bool added = false;
         while (_panes.Count <= paneIndex && _panes.Count < 6)
         {
-            _panes.Add(CreateTerminalPane(_panes.Count, 0));
+            _panes.Add(CreateTerminalPane());
             added = true;
         }
         if (added)

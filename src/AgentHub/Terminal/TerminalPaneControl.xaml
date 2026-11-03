@@ -2,6 +2,84 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:terminal="clr-namespace:AgentHub.Terminal">
+    <UserControl.Resources>
+        <!-- Launcher step card: active (list open), done (one line + Change) or pending (dimmed) -->
+        <Style x:Key="StepCard" TargetType="Border">
+            <Setter Property="Background" Value="#0E1622" />
+            <Setter Property="BorderBrush" Value="#1E2C40" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="12,10" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+        <Style x:Key="StepBadge" TargetType="Border">
+            <Setter Property="DockPanel.Dock" Value="Left" />
+            <Setter Property="Width" Value="20" />
+            <Setter Property="Height" Value="20" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Background" Value="#16202F" />
+            <Setter Property="Margin" Value="0,0,10,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="StepBadgeText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="StepLabel" TargetType="TextBlock">
+            <Setter Property="DockPanel.Dock" Value="Left" />
+            <Setter Property="Foreground" Value="#7E8CA6" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Width" Value="80" />
+        </Style>
+        <Style x:Key="StepValue" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+        <Style x:Key="StepChangeButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="8,2" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="PickButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="Margin" Value="0,0,0,2" />
+        </Style>
+        <!-- Repository and CLI rows; the current choice is outlined -->
+        <DataTemplate x:Key="PickRowTemplate">
+            <Button Click="PickRow_Click" Tag="{Binding}" ToolTip="{Binding Meta}" AutomationProperties.Name="{Binding Title}">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource PickButton}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                <Setter Property="Background" Value="#13263A" />
+                                <Setter Property="BorderBrush" Value="#24506A" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+                <StackPanel>
+                    <TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Meta}" FontSize="10" Foreground="#7E8CA6" TextTrimming="CharacterEllipsis" Margin="0,1,0,0" />
+                </StackPanel>
+            </Button>
+        </DataTemplate>
+    </UserControl.Resources>
     <Border x:Name="PaneBorder" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" ClipToBounds="True">
         <Grid>
             <Grid.RowDefinitions>
@@ -31,35 +109,8 @@
                 <DockPanel Grid.Row="1" LastChildFill="True" MinHeight="26">
                     <!-- Actions docked right FIRST so they always keep their full width -->
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                        <ComboBox x:Name="RepoCombo" Width="130" Margin="0,0,4,0" DisplayMemberPath="Name" ToolTip="Select working repository or folder" SelectionChanged="RepoCombo_SelectionChanged" />
                         <Button x:Name="BrowseBtn" Click="BrowseFolder_Click" Content="📂" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
-                        <ComboBox x:Name="ShellCombo" Width="124" Margin="0,0,4,0" ToolTip="Select agent CLI or shell" />
-                        <Button x:Name="LaunchBtn" Click="Launch_Click" Content="Launch" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#0E7490" FontSize="11" />
-                        <!-- Shown by Launch for Claude Code / Codex: new session, or continue one recorded for this folder -->
-                        <Popup x:Name="ResumePopup" PlacementTarget="{Binding ElementName=LaunchBtn}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
-                            <Border x:Name="ResumeMenu" Background="#111A28" BorderBrush="#24344B" BorderThickness="1" CornerRadius="6" Padding="4" Width="380" Margin="0,4,0,0">
-                                <StackPanel>
-                                    <TextBlock x:Name="ResumeHeader" Margin="10,6,10,4" Foreground="#7E8CA6" FontSize="10" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
-                                    <Button x:Name="NewSessionBtn" Click="NewSession_Click" Content="➕ New session" HorizontalContentAlignment="Left" Background="Transparent" Padding="10,6" Margin="0" FontSize="12" FontWeight="SemiBold" />
-                                    <Border Height="1" Background="#24344B" Margin="4,4" />
-                                    <TextBlock x:Name="ResumeStatus" Margin="10,4,10,4" Foreground="#7E8CA6" FontSize="11" TextWrapping="Wrap" />
-                                    <ScrollViewer MaxHeight="340" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                                        <ItemsControl x:Name="ResumeList">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Button Click="ResumeItem_Click" Tag="{Binding}" ToolTip="{Binding FilePath}" AutomationProperties.Name="{Binding}" HorizontalContentAlignment="Stretch" Background="Transparent" BorderThickness="0" Padding="10,5" Margin="0">
-                                                        <StackPanel>
-                                                            <TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                                            <TextBlock Text="{Binding Meta}" FontSize="10" Foreground="#7E8CA6" TextTrimming="CharacterEllipsis" Margin="0,1,0,0" />
-                                                        </StackPanel>
-                                                    </Button>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </ScrollViewer>
-                                </StackPanel>
-                            </Border>
-                        </Popup>
+                        <Button x:Name="LaunchBtn" Click="Launch_Click" Content="Relaunch" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#0E7490" FontSize="11" />
                         <Button x:Name="RepoContextBtn" Click="RepoContext_Click" Content="📁 Repo context" Background="#16202F" Foreground="#B6C2D6" Padding="8,3" Margin="0,0,4,0" FontSize="11" FontWeight="SemiBold" />
                         <Button x:Name="SshBtn" Click="Ssh_Click" Content="SSH" ToolTip="Connect to a saved SSH connection" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#4C1D95" FontSize="11" />
                         <!-- Shown by the SSH button when more than one connection is saved -->
@@ -119,8 +170,83 @@
                 </DockPanel>
             </Border>
 
-            <!-- Embedded Terminal -->
+            <!-- Embedded Terminal. Hidden (never collapsed) under the launcher, so it keeps its size and a new session starts at the final size. -->
             <terminal:EmbeddedTerminalControl Grid.Row="2" x:Name="Terminal" />
+
+            <!-- Launcher, shown in place of the terminal while the pane has no session: repository, then CLI, then session -->
+            <Border x:Name="LaunchPanel" Grid.Row="2" Background="#0A0F17">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+                    <StackPanel MaxWidth="520" Margin="16">
+                        <TextBlock Text="Start a session" Foreground="{StaticResource TextBrush}" FontSize="15" FontWeight="SemiBold" Margin="2,0,0,12" />
+
+                        <!-- Step 1: repository or folder -->
+                        <Border x:Name="Step1Card" Style="{StaticResource StepCard}">
+                            <StackPanel>
+                                <DockPanel LastChildFill="True">
+                                    <Button x:Name="Step1Change" DockPanel.Dock="Right" Click="Step1Change_Click" Content="Change" Style="{StaticResource StepChangeButton}" AutomationProperties.Name="Change repository" />
+                                    <Border x:Name="Step1Badge" Style="{StaticResource StepBadge}"><TextBlock x:Name="Step1Number" Text="1" Style="{StaticResource StepBadgeText}" /></Border>
+                                    <TextBlock Text="REPOSITORY" Style="{StaticResource StepLabel}" />
+                                    <TextBlock x:Name="Step1Value" Style="{StaticResource StepValue}" />
+                                </DockPanel>
+                                <StackPanel x:Name="Step1Body" Margin="0,10,0,0">
+                                    <TextBox x:Name="LocationFilter" TextChanged="LocationFilter_TextChanged" Margin="0,0,0,6" FontSize="12" Padding="8,4"
+                                             ToolTip="Type to filter repositories" AutomationProperties.Name="Filter repositories" />
+                                    <ItemsControl x:Name="LocationList" ItemTemplate="{StaticResource PickRowTemplate}" />
+                                    <TextBlock x:Name="LocationEmpty" Text="No repository matches." Foreground="#7E8CA6" FontSize="11" Margin="10,4,0,4" Visibility="Collapsed" />
+                                    <Button Click="BrowseFolder_Click" Style="{StaticResource PickButton}" Margin="0,4,0,0">
+                                        <TextBlock Text="📂 Browse for another folder…" FontSize="12" Foreground="#7E8CA6" />
+                                    </Button>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Step 2: agent CLI or shell -->
+                        <Border x:Name="Step2Card" Style="{StaticResource StepCard}">
+                            <StackPanel>
+                                <DockPanel LastChildFill="True">
+                                    <Button x:Name="Step2Change" DockPanel.Dock="Right" Click="Step2Change_Click" Content="Change" Style="{StaticResource StepChangeButton}" AutomationProperties.Name="Change agent CLI" />
+                                    <Border x:Name="Step2Badge" Style="{StaticResource StepBadge}"><TextBlock x:Name="Step2Number" Text="2" Style="{StaticResource StepBadgeText}" /></Border>
+                                    <TextBlock Text="AGENT CLI" Style="{StaticResource StepLabel}" />
+                                    <TextBlock x:Name="Step2Value" Style="{StaticResource StepValue}" />
+                                </DockPanel>
+                                <ItemsControl x:Name="ShellList" Margin="0,10,0,0" ItemTemplate="{StaticResource PickRowTemplate}" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Step 3: new session, or continue one recorded for this folder (Claude Code and Codex) -->
+                        <Border x:Name="Step3Card" Style="{StaticResource StepCard}">
+                            <StackPanel>
+                                <DockPanel LastChildFill="True">
+                                    <Border x:Name="Step3Badge" Style="{StaticResource StepBadge}"><TextBlock Text="3" Style="{StaticResource StepBadgeText}" /></Border>
+                                    <TextBlock Text="SESSION" Style="{StaticResource StepLabel}" />
+                                    <TextBlock Style="{StaticResource StepValue}" />
+                                </DockPanel>
+                                <StackPanel x:Name="Step3Body" Margin="0,10,0,0">
+                                    <Button x:Name="NewSessionBtn" Click="NewSession_Click" Style="{StaticResource PickButton}" Background="#0E7490" BorderBrush="#0E7490">
+                                        <TextBlock Text="➕ New session" FontSize="12" FontWeight="SemiBold" />
+                                    </Button>
+                                    <TextBlock x:Name="ResumeStatus" Margin="10,8,10,4" Foreground="#7E8CA6" FontSize="11" TextWrapping="Wrap" />
+                                    <ItemsControl x:Name="ResumeList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Button Click="ResumeItem_Click" Tag="{Binding}" ToolTip="{Binding FilePath}" AutomationProperties.Name="{Binding}" Style="{StaticResource PickButton}">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding Meta}" FontSize="10" Foreground="#7E8CA6" TextTrimming="CharacterEllipsis" Margin="0,1,0,0" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Button x:Name="BackToOutputBtn" Click="BackToOutput_Click" Content="← Back to the last session's output" Style="{StaticResource StepChangeButton}"
+                                HorizontalAlignment="Left" Margin="2,2,0,0" Visibility="Collapsed" />
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
         </Grid>
     </Border>
 </UserControl>

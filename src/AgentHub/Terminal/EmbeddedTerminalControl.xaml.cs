@@ -300,10 +300,16 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
                     break;
 
                 case "resize":
-                    if (root.TryGetProperty("cols", out var colsProp)) _cols = colsProp.GetInt32();
-                    if (root.TryGetProperty("rows", out var rowsProp)) _rows = rowsProp.GetInt32();
+                {
+                    var cols = root.TryGetProperty("cols", out var colsProp) ? colsProp.GetInt32() : _cols;
+                    var rows = root.TryGetProperty("rows", out var rowsProp) ? rowsProp.GetInt32() : _rows;
+                    // Refits often report the size the session already has; resizing ConPTY anyway makes some CLIs redraw and lose their first screen.
+                    if (cols == _cols && rows == _rows) break;
+                    _cols = cols;
+                    _rows = rows;
                     _session?.Resize(_cols, _rows);
                     break;
+                }
 
                 case "input":
                     if (root.TryGetProperty("data", out var dataProp))

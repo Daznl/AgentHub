@@ -8,6 +8,7 @@ using AgentHub.Models;
 using AgentHub.Services.Context;
 using AgentHub.Services.History;
 using AgentHub.Services.Instructions;
+using Button = System.Windows.Controls.Button;
 using Color = System.Windows.Media.Color;
 using UserControl = System.Windows.Controls.UserControl;
 
@@ -65,7 +66,6 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     public EmbeddedTerminalControl TerminalControl => Terminal;
     public int PaneIndex => _paneIndex;
     public bool IsRunning => Terminal.IsRunning;
-    public ShellOption? SelectedShell => ShellCombo.SelectedItem as ShellOption;
     public event Action? SessionStateChanged;
 
     public TerminalPaneControl()
@@ -77,7 +77,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         {
             _lastTranscript = null;
             _context.Start(Terminal.CommandLine, Terminal.WorkingDirectory, DateTimeOffset.Now, _claudeContextWindowTokens);
-            RefreshContextFolder();
+            BeginSession();
             SessionStateChanged?.Invoke();
         };
         Terminal.SessionExited += () =>
@@ -313,59 +313,81 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     /// <summary>Folder a session starts in when no repository or folder has been chosen.</summary>
     public static string BaseDirectory => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-    /// <summary>The folder the Launch button will start in.</summary>
-    public string SelectedFolder => (RepoCombo.SelectedItem as LaunchLocation)?.Path ?? BaseDirectory;
+    // Launcher state: the chosen location and CLI, the open step (1 repository, 2 CLI, 3 session),
+    // whether the launcher covers the terminal, and whether the terminal holds an earlier session's output.
+    private LaunchLocation? _location;
+    private ShellOption? _shell;
+    private List<ShellOption> _shells = [];
+    private int _step = 1;
+    private bool _launcherOpen = true;
+    private bool _hadSession;
+    private const int LocationFilterThreshold = 8;
+
+    private static readonly SolidColorBrush StepActiveBorder = Frozen(0x0E, 0x74, 0x90);
+    private static readonly SolidColorBrush StepIdleBorder = Frozen(0x1E, 0x2C, 0x40);
+    private static readonly SolidColorBrush StepBadgeActive = Frozen(0x0E, 0x74, 0x90);
+    private static readonly SolidColorBrush StepBadgeDone = Frozen(0x14, 0x53, 0x2D);
+    private static readonly SolidColorBrush StepBadgeIdle = Frozen(0x16, 0x20, 0x2F);
+
+    private static SolidColorBrush Frozen(byte r, byte g, byte b)
+    {
+        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
+    /// <summary>The folder a new session starts in.</summary>
+    public string SelectedFolder => _location?.Path ?? BaseDirectory;
 
     public void UpdateRepositories(List<RepositoryDefinition> repos)
     {
         _repositories = repos;
-        var prev = RepoCombo.SelectedItem as LaunchLocation;
-        RebuildLocations(prev);
+        if (_location?.Repository is { } chosen)
+        {
+            var still = repos.FirstOrDefault(r => r.Id == chosen.Id);
+            _location = still is null ? null : ToLocation(still);
+            if (_location is null && !Terminal.IsRunning) _step = 1;
+        }
+        RefreshLauncher();
     }
 
-    /// <summary>Adds (or replaces) the browsed-folder entry in the location dropdown and selects it.</summary>
+    private static LaunchLocation ToLocation(RepositoryDefinition repo) => new() { Name = repo.Name, Path = repo.LocalPath, Repository = repo };
+
+    /// <summary>Adds (or replaces) the browsed-folder entry and chooses it as the launcher's location.</summary>
     public void SetCustomFolder(string folder)
     {
+        _customLocation = CustomLocation(folder);
+        ChooseLocation(_customLocation);
+    }
+
+    private static LaunchLocation CustomLocation(string folder)
+    {
         var name = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        _customLocation = new LaunchLocation
-        {
-            Name = "📁 " + (string.IsNullOrWhiteSpace(name) ? folder : name),
-            Path = folder
-        };
-        RebuildLocations(_customLocation);
+        return new LaunchLocation { Name = "📁 " + (string.IsNullOrWhiteSpace(name) ? folder : name), Path = folder };
     }
 
-    // Dropdown order: home (the default), the browsed folder if any, then registered repositories.
-    private void RebuildLocations(LaunchLocation? select)
+    // Order: home, the browsed folder if any, then registered repositories by name.
+    private List<LaunchLocation> Locations()
     {
-        var home = new LaunchLocation { Name = "🏠 Home", Path = BaseDirectory };
-        var items = new List<LaunchLocation> { home };
+        var items = new List<LaunchLocation> { new() { Name = "🏠 Home", Path = BaseDirectory } };
         if (_customLocation is not null) items.Add(_customLocation);
-        items.AddRange(_repositories.Select(r => new LaunchLocation { Name = r.Name, Path = r.LocalPath, Repository = r }));
-
-        RepoCombo.ItemsSource = items;
-        RepoCombo.SelectedItem =
-            (select?.Repository is { } repo ? items.FirstOrDefault(i => i.Repository?.Id == repo.Id) : null)
-            ?? (select is not null && select == _customLocation ? _customLocation : null)
-            ?? home;
+        items.AddRange(_repositories.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).Select(ToLocation));
+        return items;
     }
 
-    private void RepoCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        RepoCombo.ToolTip = RepoCombo.SelectedItem is LaunchLocation loc
-            ? $"Launches in {loc.Path}"
-            : "Select working repository or folder";
-        RefreshContextFolder();
-        RefreshTitle();
-    }
+    private static bool SamePath(string? a, string? b) =>
+        a is not null && b is not null &&
+        string.Equals(a.TrimEnd('\\', '/'), b.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Folder whose instruction files Repo context shows: where the running session is, else the selected location.</summary>
+    private static bool HasSessions(ShellOption shell) => SessionContextReader.DetectSource(shell.Command) != ContextSource.None;
+
+    /// <summary>Folder whose instruction files Repo context shows: where the running session is, else the chosen location.</summary>
     public string ContextFolder => Terminal.IsRunning && !string.IsNullOrEmpty(Terminal.WorkingDirectory) ? Terminal.WorkingDirectory : SelectedFolder;
 
-    /// <summary>CLI whose file the context windows open on: the running session's, else the selected one's.</summary>
+    /// <summary>CLI whose file the context windows open on: the running session's, else the chosen one's.</summary>
     public InstructionCli? ContextCli =>
         (Terminal.IsRunning ? InstructionFiles.DetectCli(Terminal.CommandLine) : null)
-        ?? InstructionFiles.DetectCli((ShellCombo.SelectedItem as ShellOption)?.Command);
+        ?? InstructionFiles.DetectCli(_shell?.Command);
 
     private void RefreshContextFolder()
     {
@@ -375,20 +397,15 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     private void RepoContext_Click(object sender, RoutedEventArgs e) => RepoContextRequested?.Invoke(this);
 
-    public void UpdateShellOptions(List<ShellOption> shells, int defaultIndex = 0)
+    public void UpdateShellOptions(List<ShellOption> shells)
     {
-        var prevSelected = ShellCombo.SelectedItem as ShellOption;
-        ShellCombo.ItemsSource = null;
-        ShellCombo.ItemsSource = shells;
-        if (prevSelected != null && shells.Any(s => s.DisplayName == prevSelected.DisplayName))
+        _shells = shells;
+        if (_shell is not null)
         {
-            ShellCombo.SelectedItem = shells.First(s => s.DisplayName == prevSelected.DisplayName);
+            _shell = shells.FirstOrDefault(s => s.DisplayName == _shell.DisplayName);
+            if (_shell is null && _step == 3) _step = 2;
         }
-        else if (shells.Count > 0)
-        {
-            var idx = Math.Clamp(defaultIndex, 0, shells.Count - 1);
-            ShellCombo.SelectedIndex = idx;
-        }
+        RefreshLauncher();
     }
 
     // Reflects the embedded terminal's session state onto the shared header (dot colour + Stop/Restart buttons).
@@ -422,71 +439,170 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     private void StopBtn_Click(object sender, RoutedEventArgs e) => Terminal.StopSession();
 
-    private void RestartBtn_Click(object sender, RoutedEventArgs e) => Terminal.RestartSession();
+    private void RestartBtn_Click(object sender, RoutedEventArgs e)
+    {
+        CloseLauncher();
+        Terminal.RestartSession();
+    }
 
     /// <summary>AgentHub's transcript archive, so sessions the CLI has deleted can still be continued. Null when archiving is off.</summary>
     public void ConfigureHistory(string? archiveRoot) => _archiveRoot = archiveRoot;
 
     private const int ResumeListLimit = 30;
 
-    // Plain shells start straight away. Claude Code and Codex first offer a new session or an earlier one in this folder.
-    private async void Launch_Click(object sender, RoutedEventArgs e)
+    // ---- Launcher: repository, then CLI, then session ----
+
+    /// <summary>
+    /// Shows the launcher over the terminal while it is open and nothing runs. The terminal is hidden, not collapsed,
+    /// so it keeps its size and a CLI started from the launcher reads the final terminal size.
+    /// </summary>
+    private void RefreshLauncher()
     {
-        if (Terminal.IsRunning)
+        var show = _launcherOpen && !Terminal.IsRunning;
+        LaunchPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        Terminal.Visibility = show ? Visibility.Hidden : Visibility.Visible;
+        LaunchBtn.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
+        BackToOutputBtn.Visibility = _hadSession ? Visibility.Visible : Visibility.Collapsed;
+
+        var all = Locations();
+        var filter = LocationFilter.Text.Trim();
+        var shown = filter.Length == 0
+            ? all
+            : all.Where(l => l.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) || l.Path.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
+        LocationFilter.Visibility = all.Count > LocationFilterThreshold ? Visibility.Visible : Visibility.Collapsed;
+        LocationList.ItemsSource = shown.Select(l => new PickRow(l, l.Name, l.Path, SamePath(l.Path, _location?.Path))).ToList();
+        LocationEmpty.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ShellList.ItemsSource = _shells.Select(s => new PickRow(s, s.DisplayName, s.Command, s.DisplayName == _shell?.DisplayName)).ToList();
+
+        ApplyStep(1, Step1Card, Step1Badge, Step1Number, Step1Value, Step1Change, Step1Body, _location?.Name);
+        ApplyStep(2, Step2Card, Step2Badge, Step2Number, Step2Value, Step2Change, ShellList, _shell?.DisplayName);
+        ApplyStep(3, Step3Card, Step3Badge, null, null, null, Step3Body, null);
+
+        RefreshTitle();
+        RefreshContextFolder();
+    }
+
+    // Active: list open, accent border. Done: tick, the choice, and Change. Pending: dimmed.
+    private void ApplyStep(int step, Border card, Border badge, TextBlock? number, TextBlock? value, Button? change, UIElement body, string? chosen)
+    {
+        var active = _step == step;
+        var done = _step > step;
+        body.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+        card.Opacity = _step < step ? 0.5 : 1;
+        card.BorderBrush = active ? StepActiveBorder : StepIdleBorder;
+        badge.Background = active ? StepBadgeActive : done ? StepBadgeDone : StepBadgeIdle;
+        if (number is not null) number.Text = done ? "✓" : step.ToString();
+        if (value is not null) value.Text = done ? chosen ?? "" : "";
+        if (change is not null) change.Visibility = done ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void GoToStep(int step)
+    {
+        _step = step;
+        RefreshLauncher();
+        if (step == 3) _ = LoadSessionsAsync();
+    }
+
+    // The step after a location: straight to sessions when a CLI with sessions is already chosen, else pick a CLI.
+    private void ChooseLocation(LaunchLocation location)
+    {
+        if (!Directory.Exists(location.Path))
         {
-            Relaunch();
-            return;
-        }
-        var location = RepoCombo.SelectedItem as LaunchLocation;
-        var dir = location?.Path ?? BaseDirectory;
-        if (!Directory.Exists(dir))
-        {
-            System.Windows.MessageBox.Show(Window.GetWindow(this), $"The folder no longer exists:\n{dir}", "AgentHub",
+            System.Windows.MessageBox.Show(Window.GetWindow(this), $"The folder no longer exists:\n{location.Path}", "AgentHub",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        var shell = ShellCombo.SelectedItem as ShellOption;
-        var source = shell is null ? ContextSource.None : SessionContextReader.DetectSource(shell.Command);
-        if (shell is null || source == ContextSource.None)
-        {
-            LaunchCommand(shell?.Command ?? "powershell.exe -NoLogo", shell?.DisplayName ?? "Shell", shell?.IsAgent ?? false);
-            return;
-        }
+        _location = location;
+        LocationFilter.Text = "";
+        GoToStep(_shell is not null && HasSessions(_shell) ? 3 : 2);
+    }
 
+    // CLIs that record sessions (Claude Code, Codex) go on to pick one. Anything else starts straight away.
+    private void ChooseShell(ShellOption shell)
+    {
+        _shell = shell;
+        if (HasSessions(shell)) GoToStep(3);
+        else LaunchCommand(shell.Command, shell.DisplayName, shell.IsAgent);
+    }
+
+    private void PickRow_Click(object sender, RoutedEventArgs e)
+    {
+        switch ((sender as FrameworkElement)?.Tag)
+        {
+            case PickRow { Item: LaunchLocation location }:
+                ChooseLocation(location);
+                break;
+            case PickRow { Item: ShellOption shell }:
+                ChooseShell(shell);
+                break;
+        }
+    }
+
+    private void LocationFilter_TextChanged(object sender, TextChangedEventArgs e) => RefreshLauncher();
+
+    private void Step1Change_Click(object sender, RoutedEventArgs e)
+    {
+        GoToStep(1);
+        if (LocationFilter.IsVisible) LocationFilter.Focus();
+    }
+
+    private void Step2Change_Click(object sender, RoutedEventArgs e) => GoToStep(2);
+
+    private void BackToOutput_Click(object sender, RoutedEventArgs e) => CloseLauncher();
+
+    private void CloseLauncher()
+    {
+        _launcherOpen = false;
+        RefreshLauncher();
+    }
+
+    // Reopens the launcher at the first step still to choose; a CLI with sessions reopens on its session list.
+    private void OpenLauncher()
+    {
+        _launcherOpen = true;
+        GoToStep(_location is null ? 1 : _shell is null || !HasSessions(_shell) ? 2 : 3);
+    }
+
+    private async Task LoadSessionsAsync()
+    {
+        if (_shell is null) return;
+        var source = SessionContextReader.DetectSource(_shell.Command);
+        var dir = SelectedFolder;
         var generation = ++_resumeGeneration;
-        ResumeHeader.Text = $"{shell.DisplayName} in {location?.Name ?? "Home"}".ToUpperInvariant();
         ResumeList.ItemsSource = null;
         ResumeStatus.Text = "Looking for earlier sessions…";
-        // Right-align the menu under Launch so it opens into the pane, not past the window edge.
-        ResumePopup.HorizontalOffset = LaunchBtn.ActualWidth - ResumeMenu.Width;
-        ResumePopup.IsOpen = true;
         NewSessionBtn.Focus();
 
         var archiveRoot = _archiveRoot;
         var sessions = await Task.Run(() => SessionHistoryReader.ListSessions(dir, archiveRoot: archiveRoot)
             .Where(s => s.Agent == source)
             .ToList());
-        if (generation != _resumeGeneration || !ResumePopup.IsOpen) return;
+        if (generation != _resumeGeneration || _step != 3) return;
 
         ResumeList.ItemsSource = sessions.Take(ResumeListLimit).Select(s => new SessionRow(s)).ToList();
         ResumeStatus.Text = sessions.Count switch
         {
             0 => "No earlier sessions in this folder.",
-            > ResumeListLimit => $"Continue an earlier session (newest {ResumeListLimit} of {sessions.Count}; all are in 🕘 History):",
-            _ => "Continue an earlier session:"
+            > ResumeListLimit => $"Or continue an earlier one (newest {ResumeListLimit} of {sessions.Count}; all are in 🕘 History):",
+            _ => "Or continue an earlier one:"
         };
+    }
+
+    // Running: Relaunch. Otherwise the header button reopens the launcher over the last session's output.
+    private void Launch_Click(object sender, RoutedEventArgs e)
+    {
+        if (Terminal.IsRunning) Relaunch();
+        else OpenLauncher();
     }
 
     private void NewSession_Click(object sender, RoutedEventArgs e)
     {
-        ResumePopup.IsOpen = false;
-        if (ShellCombo.SelectedItem is ShellOption shell) LaunchCommand(shell.Command, shell.DisplayName, shell.IsAgent);
+        if (_shell is { } shell) LaunchCommand(shell.Command, shell.DisplayName, shell.IsAgent);
     }
 
     private void ResumeItem_Click(object sender, RoutedEventArgs e)
     {
-        ResumePopup.IsOpen = false;
-        if ((sender as FrameworkElement)?.Tag is not SessionRow row || ShellCombo.SelectedItem is not ShellOption shell) return;
+        if ((sender as FrameworkElement)?.Tag is not SessionRow row || _shell is not { } shell) return;
 
         if (!SessionResume.RestoreFromArchive(row.Summary, _archiveRoot))
         {
@@ -501,9 +617,14 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     private void LaunchCommand(string command, string title, bool isAgent, string? what = null, FreshLaunch? fresh = null)
     {
-        var location = RepoCombo.SelectedItem as LaunchLocation;
-        var dir = location?.Path ?? BaseDirectory;
-        var repoName = location?.Repository?.Name ?? location?.Name ?? "Home";
+        var dir = SelectedFolder;
+        var repoName = _location?.Repository?.Name ?? _location?.Name ?? "Home";
+        if (!Directory.Exists(dir))
+        {
+            System.Windows.MessageBox.Show(Window.GetWindow(this), $"The folder no longer exists:\n{dir}", "AgentHub",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
 
         if (Terminal.IsRunning)
         {
@@ -515,15 +636,22 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
         var fullTitle = $"Terminal {_paneIndex} · {title}";
         _fresh = fresh ?? new FreshLaunch(command, fullTitle, isAgent);
+        BeginSession();
         Terminal.StartSession(command, dir, fullTitle, repoName, isAgent);
+    }
+
+    // Uncovers the terminal before the process starts, so nothing on screen changes once the CLI draws.
+    private void BeginSession()
+    {
+        _hadSession = true;
+        CloseLauncher();
     }
 
     /// <summary>What Relaunch starts: the CLI's plain command (never a resume of the old session), its title, and whether it is an agent.</summary>
     private sealed record FreshLaunch(string Command, string Title, bool IsAgent);
     private FreshLaunch? _fresh;
 
-    // Running session: start a new session of the same CLI in the same folder, after confirming.
-    // Title row: the running session's repository or folder, else the location selected to launch in.
+    // Title row: the running session's repository or folder, else the location chosen in the launcher.
     private void RefreshTitle()
     {
         if (Terminal.IsRunning)
@@ -533,12 +661,12 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         }
         else
         {
-            var location = RepoCombo.SelectedItem as LaunchLocation;
-            SessionTitle.Text = location?.Repository?.Name ?? location?.Name ?? "Home";
-            SessionTitle.ToolTip = location?.Path ?? BaseDirectory;
+            SessionTitle.Text = _location?.Repository?.Name ?? _location?.Name ?? "New terminal";
+            SessionTitle.ToolTip = _location?.Path;
         }
     }
 
+    // Running session: start a new session of the same CLI in the same folder, after confirming.
     private void Relaunch()
     {
         var dir = Terminal.WorkingDirectory;
@@ -552,15 +680,14 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     }
 
     /// <summary>
-    /// Setup header (no session): location and CLI dropdowns, Launch, Repo context, SSH, history.
-    /// Working header (session running): the session's repository name, context badge, 📂 to open its folder,
-    /// Relaunch, Repo context, move and close. Everything else is hidden until the session ends.
+    /// No session: the launcher fills the pane; the header keeps Repo context, SSH, history, move and close
+    /// (plus New session over an ended session's output). Session running: the repository name, context badge,
+    /// 📂 to open its folder, Relaunch, Repo context, move and close.
     /// </summary>
     private void ApplyHeaderMode(bool working)
     {
         var setup = working ? Visibility.Collapsed : Visibility.Visible;
-        RepoCombo.Visibility = setup;
-        ShellCombo.Visibility = setup;
+        BrowseBtn.Visibility = working ? Visibility.Visible : Visibility.Collapsed;
         SshBtn.Visibility = setup;
         HistoryBtn.Visibility = setup;
         if (working)
@@ -569,14 +696,12 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             RestartBtn.Visibility = Visibility.Collapsed;
         }
 
-        RefreshTitle();
-        LaunchBtn.Content = working ? "Relaunch" : "Launch";
+        LaunchBtn.Content = working ? "Relaunch" : "New session";
         LaunchBtn.ToolTip = working
             ? "End this session and start a new one of the same CLI in the same folder"
-            : "Start the selected shell or agent. For Claude Code and Codex, choose a new session or continue an earlier one.";
-        BrowseBtn.ToolTip = working
-            ? $"Open {Terminal.WorkingDirectory} in File Explorer"
-            : "Browse for any folder to launch in. It is added to the dropdown and selected; press Launch to start.";
+            : "Choose a repository, CLI and session to start";
+        BrowseBtn.ToolTip = $"Open {Terminal.WorkingDirectory} in File Explorer";
+        RefreshLauncher();
     }
 
     public void UpdateSshConnections(List<SshConnection> connections)
@@ -633,10 +758,11 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         }
 
         _fresh = new FreshLaunch(connection.BuildCommandLine(), $"Terminal {_paneIndex} · SSH", false);
+        BeginSession();
         Terminal.StartSession(_fresh.Command, BaseDirectory, _fresh.Title, $"SSH · {connection.DisplayName}");
     }
 
-    // Setup: pick a folder to launch in. Working: show the session's folder in File Explorer.
+    // Launcher: pick any folder to launch in. Session running: show its folder in File Explorer.
     private void BrowseFolder_Click(object sender, RoutedEventArgs e)
     {
         if (Terminal.IsRunning && Directory.Exists(Terminal.WorkingDirectory))
@@ -647,7 +773,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     private void History_Click(object sender, RoutedEventArgs e) => HistoryRequested?.Invoke(this);
 
-    /// <summary>Folder whose sessions the history button shows: where the current or last session ran, else the selected location.</summary>
+    /// <summary>Folder whose sessions the history button shows: where the current or last session ran, else the chosen location.</summary>
     public string HistoryFolder => string.IsNullOrEmpty(Terminal.WorkingDirectory) ? SelectedFolder : Terminal.WorkingDirectory;
 
     /// <summary>Transcript of this pane's current or most recent Claude Code / Codex session, if one has been found.</summary>
@@ -662,18 +788,19 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     private void MoveRight_Click(object sender, RoutedEventArgs e) => MoveRequested?.Invoke(this, 1);
 
+    /// <summary>Starts a session chosen outside the launcher (toolbar folder launch, repository Launch); the launcher follows it.</summary>
     public void StartSession(string commandLine, string workingDirectory, string title, string repoName, bool isAgentSession = false)
     {
-        // Keep the location dropdown in step with where the session actually runs.
-        if (!string.IsNullOrEmpty(workingDirectory) && RepoCombo.ItemsSource is IEnumerable<LaunchLocation> locations)
+        if (!string.IsNullOrEmpty(workingDirectory))
         {
-            var match = locations.FirstOrDefault(l => string.Equals(l.Path, workingDirectory, StringComparison.OrdinalIgnoreCase));
-            if (match != null)
-                RepoCombo.SelectedItem = match;
-            else if (Directory.Exists(workingDirectory))
-                SetCustomFolder(workingDirectory);
+            var match = Locations().FirstOrDefault(l => SamePath(l.Path, workingDirectory));
+            if (match is not null) _location = match;
+            else if (Directory.Exists(workingDirectory)) _location = _customLocation = CustomLocation(workingDirectory);
         }
+        _shell = _shells.FirstOrDefault(s => s.Command == commandLine) ?? _shell;
+        _step = _location is null ? 1 : 2;
         _fresh = new FreshLaunch(commandLine, title, isAgentSession);
+        BeginSession();
         Terminal.StartSession(commandLine, workingDirectory, title, repoName, isAgentSession);
     }
 
@@ -693,4 +820,16 @@ public sealed class LaunchLocation
 
     // Screen readers and UI Automation name combo items by ToString, not DisplayMemberPath.
     public override string ToString() => Name;
+}
+
+/// <summary>A repository or CLI row in the pane launcher; <see cref="IsCurrent"/> outlines the current choice.</summary>
+public sealed class PickRow(object item, string title, string meta, bool isCurrent)
+{
+    public object Item { get; } = item;
+    public string Title { get; } = title;
+    public string Meta { get; } = meta;
+    public bool IsCurrent { get; } = isCurrent;
+
+    // Screen readers and UI Automation name items by ToString.
+    public override string ToString() => Title;
 }
