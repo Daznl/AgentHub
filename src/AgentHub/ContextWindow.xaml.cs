@@ -255,7 +255,12 @@ public partial class ContextWindow : Window
         var cts = new CancellationTokenSource();
         _reviewCts = cts;
         SetReviewing(true);
-        StatusText.Text = $"Reviewing {file.Label} with Claude Code… usually under a minute.";
+        var started = DateTime.Now;
+        void Tick() => StatusText.Text = $"Reviewing {file.Label} with Claude Code… {(int)(DateTime.Now - started).TotalSeconds} s. Small files take under a minute, large ones a few minutes.";
+        var ticker = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        ticker.Tick += (_, _) => Tick();
+        Tick();
+        ticker.Start();
         try
         {
             var suggestion = await InstructionReview.RunAsync(new ProcessRunner(), ReviewCommand, file, text, Folder, cts.Token);
@@ -272,6 +277,7 @@ public partial class ContextWindow : Window
         }
         finally
         {
+            ticker.Stop();
             _reviewCts = null;
             cts.Dispose();
             SetReviewing(false);
@@ -295,21 +301,26 @@ public partial class ContextWindow : Window
 
     private void ShowReview(InstructionFile file, string original, ReviewSuggestion suggestion)
     {
-        var segments = LineDiff.Compute(original, suggestion.RevisedText);
-        var hunks = segments.Where(s => s.IsChange).Select(ReviewHunk.From).ToList();
+        var plan = InstructionReview.Plan(original, suggestion.Edits);
+        var hunks = plan.Segments.Where(s => s.IsChange).Select((s, i) => ReviewHunk.From(s, plan.Reasons[i])).ToList();
         if (hunks.Count == 0)
         {
-            StatusText.Text = suggestion.Changes.Count > 0
-                ? $"No changes suggested: {suggestion.Changes[0]}"
-                : $"No changes suggested for {file.Label}.";
+            var why = plan.Unplaced.Count > 0
+                ? $"{plan.Unplaced.Count} suggested edit{(plan.Unplaced.Count == 1 ? "" : "s")} did not match the file's text, so nothing changed."
+                : "No changes suggested.";
+            StatusText.Text = suggestion.Summary.Length > 0 ? $"{why} {suggestion.Summary}" : why;
             return;
         }
 
-        _reviewSegments = segments;
+        _reviewSegments = plan.Segments;
         _reviewHunks = hunks;
         ReviewHeading.Text = $"Claude Code suggests {hunks.Count} change{(hunks.Count == 1 ? "" : "s")} to {file.Label}";
-        ReviewChanges.ItemsSource = suggestion.Changes;
-        ReviewChanges.Visibility = suggestion.Changes.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ReviewSummary.Text = suggestion.Summary;
+        ReviewSummary.Visibility = suggestion.Summary.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ReviewUnplaced.Text = plan.Unplaced.Count == 0 ? "" :
+            $"⚠ {plan.Unplaced.Count} more suggestion{(plan.Unplaced.Count == 1 ? "" : "s")} quoted text that is not in the file exactly once, so " +
+            $"{(plan.Unplaced.Count == 1 ? "it was" : "they were")} left out: " + string.Join("; ", plan.Unplaced.Select(u => u.Why));
+        ReviewUnplaced.Visibility = plan.Unplaced.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         HunkList.ItemsSource = hunks;
         ReviewPanel.Visibility = Visibility.Visible;
         Editor.Visibility = Visibility.Hidden;
@@ -351,7 +362,6 @@ public partial class ContextWindow : Window
     {
         _reviewSegments = null;
         HunkList.ItemsSource = null;
-        ReviewChanges.ItemsSource = null;
         ReviewPanel.Visibility = Visibility.Collapsed;
         Editor.Visibility = Visibility.Visible;
         EmptyHint.Visibility = Visibility.Visible;
@@ -413,14 +423,16 @@ public partial class ContextWindow : Window
 public sealed class ReviewHunk
 {
     public required string Title { get; init; }
+    public required string Why { get; init; }
     public required string RemovedText { get; init; }
     public required string AddedText { get; init; }
     public bool Accepted { get; set; } = true;
 
+    public Visibility WhyVisibility => Why.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     public Visibility RemovedVisibility => RemovedText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     public Visibility AddedVisibility => AddedText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
-    public static ReviewHunk From(DiffSegment change)
+    public static ReviewHunk From(DiffSegment change, string why)
     {
         var removed = change.OldLines.Count;
         var title = removed switch
@@ -438,6 +450,7 @@ public sealed class ReviewHunk
         return new ReviewHunk
         {
             Title = removed == 0 ? title : $"{title} · {what}",
+            Why = why,
             RemovedText = string.Join("\n", change.OldLines.Select(l => "− " + l)),
             AddedText = string.Join("\n", change.NewLines.Select(l => "+ " + l))
         };

@@ -1,155 +1,156 @@
 using System;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using AgentHub.Services;
 using AgentHub.Services.Instructions;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace AgentHub.Tests;
 
-public class LineDiffTests
-{
-    private const string Old = "# Rules\r\n- be concise\r\n- use tabs\r\n- write tests\r\n";
-
-    [Fact]
-    public void Same_text_has_no_changes()
-    {
-        Assert.DoesNotContain(LineDiff.Compute(Old, Old), s => s.IsChange);
-    }
-
-    [Fact]
-    public void Separate_edits_become_separate_changes_with_old_line_numbers()
-    {
-        var revised = "# Rules\r\n- be extremely concise\r\n- use tabs\r\n- write tests first\r\n- run lint\r\n";
-        var changes = LineDiff.Compute(Old, revised).Where(s => s.IsChange).ToList();
-
-        Assert.Equal(2, changes.Count);
-        Assert.Equal(2, changes[0].OldStart);
-        Assert.Equal(["- be concise"], changes[0].OldLines);
-        Assert.Equal(["- be extremely concise"], changes[0].NewLines);
-        Assert.Equal(4, changes[1].OldStart);
-        Assert.Equal(["- write tests"], changes[1].OldLines);
-        Assert.Equal(["- write tests first", "- run lint"], changes[1].NewLines);
-    }
-
-    [Fact]
-    public void Merge_all_gives_revised_and_none_gives_original()
-    {
-        var revised = "# Rules\r\n- be extremely concise\r\n- write tests\r\n- run lint\r\n";
-        var segments = LineDiff.Compute(Old, revised);
-
-        Assert.Equal(revised, LineDiff.Merge(segments, _ => true));
-        Assert.Equal(Old, LineDiff.Merge(segments, _ => false));
-    }
-
-    [Fact]
-    public void Merge_keeps_only_accepted_changes()
-    {
-        var revised = "# Rules\r\n- be extremely concise\r\n- use tabs\r\n- write tests first\r\n";
-        var merged = LineDiff.Merge(LineDiff.Compute(Old, revised), i => i == 1);
-        Assert.Equal("# Rules\r\n- be concise\r\n- use tabs\r\n- write tests first\r\n", merged);
-    }
-
-    [Fact]
-    public void Line_endings_alone_are_not_changes()
-    {
-        Assert.DoesNotContain(LineDiff.Compute(Old, Old.Replace("\r\n", "\n")), s => s.IsChange);
-    }
-
-    [Fact]
-    public void Empty_original_is_one_addition()
-    {
-        var changes = LineDiff.Compute("", "# Title\r\n").Where(s => s.IsChange).ToList();
-        Assert.Single(changes);
-        Assert.Equal("# Title\r\n", LineDiff.Merge(LineDiff.Compute("", "# Title\r\n"), _ => true));
-    }
-}
-
-public class InstructionReviewTests
+public class InstructionReviewTests(ITestOutputHelper output)
 {
     private static readonly InstructionFile File = new(InstructionCli.ClaudeCode, "CLAUDE.md", @"C:\Users\me\.claude\CLAUDE.md", "");
+    private const string Rules = "# Rules\r\n- be concise\r\n- use tabs\r\n- write tests\r\n";
+
+    private static ReviewEdit Edit(string start, string replace, string why = "why", string end = "") => new(why, start, end, replace);
+
+    private static string ApplyAll(string original, params ReviewEdit[] edits) =>
+        LineDiff.Merge(InstructionReview.Plan(original, edits).Segments, _ => true);
 
     [Fact]
-    public void Parse_reads_changes_and_revised_file()
+    public void Edits_are_placed_in_file_order_with_old_line_numbers_and_reasons()
     {
-        var reply = "Sure.\n<changes>\n- Merged two duplicate rules\n- Made the test rule specific\n</changes>\n<revised>\n# Rules\n- be concise\n</revised>";
-        var suggestion = InstructionReview.Parse(reply);
+        var plan = InstructionReview.Plan(Rules, [Edit("- write tests", "- write tests first", "second"), Edit("- be concise", "- be extremely concise", "first")]);
+        var changes = plan.Segments.Where(s => s.IsChange).ToList();
 
-        Assert.Equal(["Merged two duplicate rules", "Made the test rule specific"], suggestion.Changes);
-        Assert.Equal("# Rules\r\n- be concise", suggestion.RevisedText);
+        Assert.Empty(plan.Unplaced);
+        Assert.Equal([2, 4], changes.Select(c => c.OldStart));
+        Assert.Equal(["first", "second"], plan.Reasons);
+        Assert.Equal("# Rules\r\n- be extremely concise\r\n- use tabs\r\n- write tests first\r\n", LineDiff.Merge(plan.Segments, _ => true));
+        Assert.Equal(Rules, LineDiff.Merge(plan.Segments, _ => false));
     }
 
     [Fact]
-    public void Parse_strips_a_code_fence_round_the_whole_file()
+    public void Only_accepted_changes_are_merged()
     {
-        var suggestion = InstructionReview.Parse("<changes>\n- x\n</changes>\n<revised>\n```markdown\n# Rules\n```\n</revised>");
-        Assert.Equal("# Rules", suggestion.RevisedText);
+        var plan = InstructionReview.Plan(Rules, [Edit("- be concise", "- be brief"), Edit("- use tabs", "- use spaces")]);
+        Assert.Equal("# Rules\r\n- be concise\r\n- use spaces\r\n- write tests\r\n", LineDiff.Merge(plan.Segments, i => i == 1));
     }
 
     [Fact]
-    public void Parse_keeps_a_reply_cut_off_before_the_closing_tag()
+    public void Start_and_end_span_the_lines_between_without_quoting_them()
     {
-        Assert.Equal("# Rules\r\n- a", InstructionReview.Parse("<revised>\n# Rules\n- a").RevisedText);
+        Assert.Equal("# Rules\r\n- concise, tabs, tests\r\n", ApplyAll(Rules, Edit("- be concise", "- concise, tabs, tests", end: "- write tests")));
     }
 
     [Fact]
-    public void Parse_without_a_revised_file_fails()
+    public void End_is_the_first_match_after_the_start()
     {
-        Assert.Throws<InvalidOperationException>(() => InstructionReview.Parse("I could not review this."));
-    }
-
-    [Theory]
-    [InlineData("a\r\nb\r\n", "a\r\nb", "a\r\nb\r\n")]
-    [InlineData("a\r\nb", "a\r\nb\r\n\r\n", "a\r\nb")]
-    public void Revised_text_takes_the_original_file_ending(string original, string revised, string expected)
-    {
-        var aligned = InstructionReview.AlignTrailingNewline(original, new ReviewSuggestion([], revised));
-        Assert.Equal(expected, aligned.RevisedText);
+        Assert.Equal("## A\r\nx\r\n---\r\n## B\r\n---\r\n", ApplyAll("## A\r\nold\r\n---\r\n## B\r\n---\r\n", Edit("## A", "## A\nx\n---", end: "---")));
     }
 
     [Fact]
-    public void ExtractResult_reads_the_json_envelope()
+    public void Empty_replace_deletes_the_lines()
     {
-        Assert.Equal("<revised>x</revised>", InstructionReview.ExtractResult("{\"type\":\"result\",\"is_error\":false,\"result\":\"<revised>x</revised>\"}\r\n"));
-        Assert.Null(InstructionReview.ExtractResult("not json"));
+        Assert.Equal("# Rules\r\n- write tests\r\n", ApplyAll(Rules, Edit("- be concise\n", "", end: "- use tabs")));
     }
 
     [Fact]
-    public void ExtractResult_surfaces_cli_errors()
+    public void Two_line_start_with_lf_endings_matches_a_crlf_file()
     {
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            InstructionReview.ExtractResult("{\"type\":\"result\",\"is_error\":true,\"result\":\"Not logged in\"}"));
-        Assert.Contains("Not logged in", ex.Message);
+        Assert.Equal("# Rules\r\n- be concise, use tabs\r\n- write tests\r\n", ApplyAll(Rules, Edit("- be concise\n- use tabs", "- be concise, use tabs")));
+    }
+
+    [Fact]
+    public void Indentation_differences_still_match()
+    {
+        Assert.Equal("# Rules\r\n- be brief\r\n- use tabs\r\n- write tests\r\n", ApplyAll(Rules, Edit("  - be concise  ", "- be brief")));
+    }
+
+    [Fact]
+    public void A_quoted_part_of_a_line_finds_the_only_line_containing_it()
+    {
+        Assert.Equal("# Rules\r\n- be brief\r\n- use tabs\r\n- write tests\r\n", ApplyAll(Rules, Edit("be concise", "- be brief")));
+        Assert.Empty(InstructionReview.Plan(Rules, [Edit("- ", "x")]).Reasons); // too short to trust
+    }
+
+    [Fact]
+    public void Missing_repeated_overlapping_and_endless_passages_are_left_out()
+    {
+        var plan = InstructionReview.Plan("- a\r\n- a\r\n- b\r\n- c\r\n- d\r\n",
+        [
+            Edit("- zzz", "x", "missing"), Edit("- a", "x", "repeated"), Edit("- b", "x", "kept", end: "- c"),
+            Edit("- c", "y", "overlaps"), Edit("- d", "y", "no end", end: "- zzz")
+        ]);
+
+        Assert.Equal(["kept"], plan.Reasons);
+        Assert.Equal(["missing", "repeated", "overlaps", "no end"], plan.Unplaced.Select(u => u.Why));
+    }
+
+    [Fact]
+    public void An_empty_file_can_be_filled_and_keeps_its_final_newline()
+    {
+        Assert.Equal("# Title\r\n- todo\r\n", ApplyAll("\r\n", Edit("", "# Title\n- todo")));
+        Assert.Equal("# Title", ApplyAll("", Edit("", "# Title")));
+        Assert.Empty(InstructionReview.Plan(Rules, [Edit("", "x")]).Reasons);
+    }
+
+    [Fact]
+    public void Envelope_structured_output_is_read()
+    {
+        var json = """{"type":"result","is_error":false,"result":"","structured_output":{"summary":"Tidy.","edits":[{"why":"dup","start":"- a","end":"","replace":"- b"}]}}""";
+        var suggestion = InstructionReview.ParseEnvelope(json)!;
+        Assert.Equal("Tidy.", suggestion.Summary);
+        Assert.Equal(new ReviewEdit("dup", "- a", "", "- b"), Assert.Single(suggestion.Edits));
+    }
+
+    [Fact]
+    public void Envelope_falls_back_to_json_in_result()
+    {
+        var json = """{"type":"result","is_error":false,"result":"{\"summary\":\"Fine.\",\"edits\":[]}"}""";
+        Assert.Equal("Fine.", InstructionReview.ParseEnvelope(json)!.Summary);
+        Assert.Null(InstructionReview.ParseEnvelope("not json"));
+    }
+
+    [Fact]
+    public void Envelope_surfaces_cli_errors_and_unexpected_replies()
+    {
+        Assert.Contains("Not logged in", Assert.Throws<InvalidOperationException>(() =>
+            InstructionReview.ParseEnvelope("""{"type":"result","is_error":true,"result":"Not logged in"}""")).Message);
+        Assert.Throws<InvalidOperationException>(() => InstructionReview.ParseEnvelope("""{"type":"result","is_error":false,"result":"Sorry."}"""));
     }
 
     [Fact]
     public void Request_says_where_the_file_applies_and_holds_its_text()
     {
-        var global = InstructionReview.BuildRequest(File, "- be concise", repoFolder: null);
+        var global = InstructionReview.BuildRequest(File, "- be concise\r\n", repoFolder: null).Replace("\r\n", "\n");
         Assert.Contains("User-wide", global);
-        Assert.Contains("<file>\n- be concise\n</file>", global.Replace("\r\n", "\n"));
-
+        Assert.Contains("<file>\n- be concise\n\n</file>", global);
         Assert.Contains(@"Repository file for C:\repo", InstructionReview.BuildRequest(File, "x", @"C:\repo"));
     }
 
-    [LiveFact("claude", optIn: "AGENTHUB_LIVE_REVIEW")]
-    public async System.Threading.Tasks.Task Live_review_of_a_messy_file_returns_applicable_changes()
-    {
-        const string messy = "# Rules\r\n- Be concise.\r\n- Always be concise in replies.\r\n- Write good code.\r\n- Use tabs.\r\n- Use 4 spaces, never tabs.\r\n";
-        var suggestion = await InstructionReview.RunAsync(new AgentHub.Services.ProcessRunner(), "claude", File, messy, null,
-            System.Threading.CancellationToken.None);
-
-        Assert.NotEmpty(suggestion.Changes);
-        Assert.NotEqual(messy, suggestion.RevisedText);
-        Assert.EndsWith("\r\n", suggestion.RevisedText);
-        Assert.Contains(LineDiff.Compute(messy, suggestion.RevisedText), s => s.IsChange);
-        Console.WriteLine(string.Join("\n", suggestion.Changes) + "\n---\n" + suggestion.RevisedText);
-    }
-
     [Fact]
-    public void Arguments_turn_every_tool_off()
+    public void Arguments_turn_off_tools_and_the_users_own_settings()
     {
         var args = InstructionReview.Arguments().ToList();
         Assert.Equal("", args[args.IndexOf("--tools") + 1]);
-        Assert.Contains("-p", args);
+        Assert.Equal("", args[args.IndexOf("--setting-sources") + 1]);
+        Assert.Contains("--json-schema", args);
         Assert.Contains("--no-session-persistence", args);
+    }
+
+    [LiveFact("claude", optIn: "AGENTHUB_LIVE_REVIEW")]
+    public async Task Live_review_of_a_messy_file_returns_placeable_edits()
+    {
+        const string messy = "# Rules\r\n- Be concise.\r\n- Always be concise in replies.\r\n- Write good code.\r\n- Use tabs.\r\n- Use 4 spaces, never tabs.\r\n";
+        var suggestion = await InstructionReview.RunAsync(new ProcessRunner(), "claude", File, messy, null, CancellationToken.None);
+        var plan = InstructionReview.Plan(messy, suggestion.Edits);
+
+        output.WriteLine(suggestion.Summary);
+        foreach (var e in suggestion.Edits) output.WriteLine($"- {e.Why}\n  start: {e.Start}\n  end: {e.End}\n  replace: {e.Replace}");
+        Assert.NotEmpty(plan.Reasons);
+        Assert.Empty(plan.Unplaced);
     }
 }

@@ -144,16 +144,9 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Margin="14,12,14,6">
                         <TextBlock x:Name="ReviewHeading" FontSize="13" FontWeight="SemiBold" />
-                        <ItemsControl x:Name="ReviewChanges" Margin="0,6,0,10">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <DockPanel Margin="0,2,0,2">
-                                        <TextBlock DockPanel.Dock="Left" Text="•" Foreground="{StaticResource AccentBrush}" FontSize="12" Margin="2,0,8,0" />
-                                        <TextBlock Text="{Binding}" Foreground="#B6C2D6" FontSize="12" TextWrapping="Wrap" />
-                                    </DockPanel>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                        <TextBlock x:Name="ReviewSummary" Foreground="#B6C2D6" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0" />
+                        <TextBlock x:Name="ReviewUnplaced" Foreground="#FCD34D" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="Collapsed" />
+                        <Border Height="10" />
                         <ItemsControl x:Name="HunkList">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -165,6 +158,7 @@
                                                           AutomationProperties.Name="{Binding Title}" />
                                                 <TextBlock Text="{Binding Title}" Foreground="#7E8CA6" FontSize="11" Margin="12,0,0,0" VerticalAlignment="Center" />
                                             </DockPanel>
+                                            <TextBlock Text="{Binding Why}" Visibility="{Binding WhyVisibility}" Foreground="#B6C2D6" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,6" />
                                             <TextBlock Text="{Binding RemovedText}" Visibility="{Binding RemovedVisibility}" Background="#2A1218" Foreground="#FCA5A5"
                                                        FontFamily="Cascadia Mono, Consolas" FontSize="12" Padding="8,4" TextWrapping="Wrap" />
                                             <TextBlock Text="{Binding AddedText}" Visibility="{Binding AddedVisibility}" Background="#0C2A1F" Foreground="#86EFAC"

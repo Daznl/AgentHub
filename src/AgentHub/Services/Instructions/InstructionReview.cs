@@ -4,44 +4,76 @@ using System.Text.Json;
 
 namespace AgentHub.Services.Instructions;
 
-/// <summary>What the reviewer suggested: one line per change, and the whole file with every change made.</summary>
-public sealed record ReviewSuggestion(IReadOnlyList<string> Changes, string RevisedText);
+/// <summary>
+/// One suggested edit: the passage of whole lines from the line(s) <see cref="Start"/> through the line(s) <see cref="End"/>
+/// (empty: the passage is just <see cref="Start"/>) becomes <see cref="Replace"/>, and why. Naming only the ends keeps
+/// the reply short when a long passage is condensed or removed.
+/// </summary>
+public sealed record ReviewEdit(string Why, string Start, string End, string Replace);
+
+/// <summary>The reviewer's overall verdict and its edits.</summary>
+public sealed record ReviewSuggestion(string Summary, IReadOnlyList<ReviewEdit> Edits);
+
+/// <summary>
+/// The edits placed on the file: <see cref="Segments"/> holds same runs and one change per placed edit (in file order),
+/// <see cref="Reasons"/> the matching reason per change, <see cref="Unplaced"/> edits whose text was not found once in the file
+/// or that overlapped an earlier one.
+/// </summary>
+public sealed record ReviewPlan(IReadOnlyList<DiffSegment> Segments, IReadOnlyList<string> Reasons, IReadOnlyList<ReviewEdit> Unplaced);
 
 /// <summary>
 /// Asks Claude Code, in print mode on the user's own login, to review an instruction file. No API key: the request goes
 /// through the installed CLI. All tools are off, so it can only read the text it is sent and reply; it never edits files.
+/// It replies with targeted edits rather than the whole file, so a large file reviews as fast as a small one.
 /// </summary>
 public static class InstructionReview
 {
     /// <summary>Where the CLI runs: an empty folder, so no repository's own CLAUDE.md or settings are picked up.</summary>
     public const string WorkingDirectory = @"C:\data\agenthub\review";
 
-    public static readonly TimeSpan Timeout = TimeSpan.FromMinutes(5);
+    /// <summary>Generous: a large file with many edits can take a few minutes, and the window shows the time running.</summary>
+    public static readonly TimeSpan Timeout = TimeSpan.FromMinutes(10);
+
+    public const int MaxEdits = 20;
 
     public const string SystemPrompt = """
         You review instruction files that coding agent CLIs (Claude Code, Codex, Gemini) load at the start of every session,
-        such as CLAUDE.md, AGENTS.md and GEMINI.md. Suggest changes that make an agent follow the file better:
+        such as CLAUDE.md, AGENTS.md and GEMINI.md. Suggest edits that make an agent follow the file better:
         - remove contradictions and duplicated rules;
         - make vague rules specific and actionable, and clear about when they apply;
         - tighten wording that spends context without adding meaning;
         - keep personal standing preferences in the user-wide file and project facts in a repository's file;
         - fix obvious errors in the text (broken Markdown, typos that change meaning).
         Keep the author's intent, voice, structure and every rule they clearly want. Never invent facts about their
-        projects, tools, paths or people. Do not add generic advice an agent follows anyway. Prefer few, high-value changes;
-        if the file is already good, return it unchanged and say so.
+        projects, tools, paths or people. Do not add generic advice an agent follows anyway. Prefer few, high-value edits
+        (at most 20); if the file is already good, return no edits and say so in the summary.
 
-        Reply in exactly this format and nothing else:
-        <changes>
-        - one line per change: what changed and why
-        </changes>
-        <revised>
-        the complete revised file, every line, exactly as it should be saved, not wrapped in a code fence
-        </revised>
+        Each edit replaces one passage of whole lines, and passages never overlap. Name the passage by its ends only,
+        never copying the lines in between: "start" is its first line copied character for character (add the next line
+        too if needed, so that it occurs only once in the file); "end" is its last line copied the same way, or "" when
+        the passage is just "start". "replace" is the complete new text for the whole passage ("" deletes it). "why" is
+        one short line: what changes and why. If the file is empty, give one edit with an empty "start" whose "replace"
+        is a short skeleton of headings with one-line placeholders; do not guess content.
         """;
 
-    /// <summary>Print mode, JSON envelope, no tools, no saved session, no MCP servers, our system prompt.</summary>
+    /// <summary>The reply shape Claude Code is held to (<c>--json-schema</c>).</summary>
+    public const string ReplySchema = """
+        {"type":"object","additionalProperties":false,"required":["summary","edits"],"properties":{
+          "summary":{"type":"string","description":"One or two sentences: overall verdict on the file."},
+          "edits":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["why","start","end","replace"],"properties":{
+            "why":{"type":"string"},"start":{"type":"string"},"end":{"type":"string"},"replace":{"type":"string"}}}}}}
+        """;
+
+    /// <summary>
+    /// Print mode, JSON envelope with schema-checked output, no tools, no MCP servers, no saved session, and no settings
+    /// or CLAUDE.md of the user's own (they would leak into the suggestions), with our system prompt.
+    /// </summary>
     public static IReadOnlyList<string> Arguments() =>
-        ["-p", "--output-format", "json", "--tools", "", "--no-session-persistence", "--strict-mcp-config", "--system-prompt", SystemPrompt];
+    [
+        "-p", "--output-format", "json", "--json-schema", ReplySchema,
+        "--tools", "", "--strict-mcp-config", "--no-session-persistence", "--setting-sources", "",
+        "--system-prompt", SystemPrompt
+    ];
 
     /// <summary>The message sent on stdin: what the file is, where it applies, and its text.</summary>
     public static string BuildRequest(InstructionFile file, string text, string? repoFolder)
@@ -49,17 +81,13 @@ public static class InstructionReview
         var scope = repoFolder is null
             ? "User-wide file: the CLI loads it in every folder, before any repository's own file."
             : $"Repository file for {repoFolder}: loaded only for sessions in that repository.";
-        var body = string.IsNullOrWhiteSpace(text)
-            ? "The file is empty. Suggest a short skeleton of headings with one-line placeholders the author fills in; do not guess their content."
-            : "Review this file.";
         return $"""
             File: {file.Label} ({file.Path})
             For: {CliName(file.Cli)}
             {scope}
-            {body}
 
             <file>
-            {text}
+            {LineDiff.JoinLines(LineDiff.SplitLines(text)).Replace("\r\n", "\n")}
             </file>
             """;
     }
@@ -82,20 +110,15 @@ public static class InstructionReview
         }
         cancellationToken.ThrowIfCancellationRequested();
 
-        var reply = ExtractResult(run.StdOut);
-        if (reply is null)
-        {
-            var detail = string.IsNullOrWhiteSpace(run.StdErr) ? run.StdOut : run.StdErr;
-            throw new InvalidOperationException($"Claude Code did not return a review (exit code {run.ExitCode}).\n{Trim(detail)}");
-        }
-        return AlignTrailingNewline(text, Parse(reply));
+        return ParseEnvelope(run.StdOut) ?? throw new InvalidOperationException(
+            $"Claude Code did not return a review (exit code {run.ExitCode}).\n{Trim(string.IsNullOrWhiteSpace(run.StdErr) ? run.StdOut : run.StdErr)}");
     }
 
     /// <summary>
-    /// The reply text from Claude Code's JSON envelope; null when stdout is not one. Throws when the CLI reports an
-    /// error (not signed in, usage limit), with its message.
+    /// Reads Claude Code's JSON envelope: the schema-checked <c>structured_output</c>, else a JSON <c>result</c>. Null when
+    /// stdout is not an envelope. Throws when the CLI reports an error (not signed in, usage limit), with its message.
     /// </summary>
-    public static string? ExtractResult(string stdout)
+    public static ReviewSuggestion? ParseEnvelope(string stdout)
     {
         var json = stdout.Trim();
         if (!json.StartsWith('{')) return null;
@@ -106,7 +129,15 @@ public static class InstructionReview
             var result = root.TryGetProperty("result", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString() : null;
             if (root.TryGetProperty("is_error", out var e) && e.ValueKind == JsonValueKind.True)
                 throw new InvalidOperationException($"Claude Code reported an error: {Trim(result ?? json)}");
-            return result;
+
+            if (root.TryGetProperty("structured_output", out var structured) && structured.ValueKind == JsonValueKind.Object)
+                return ReadSuggestion(structured);
+            if (result is not null && result.TrimStart().StartsWith('{'))
+            {
+                using var inner = JsonDocument.Parse(result);
+                return ReadSuggestion(inner.RootElement);
+            }
+            throw new InvalidOperationException($"The review came back in an unexpected form, so nothing was changed.\n{Trim(result ?? json)}");
         }
         catch (JsonException)
         {
@@ -114,54 +145,128 @@ public static class InstructionReview
         }
     }
 
-    /// <summary>Reads the &lt;changes&gt; and &lt;revised&gt; blocks. Throws <see cref="InvalidOperationException"/> without a revised file.</summary>
-    public static ReviewSuggestion Parse(string reply)
+    private static ReviewSuggestion ReadSuggestion(JsonElement element)
     {
-        var revised = Between(reply, "<revised>", "</revised>")
-                      ?? throw new InvalidOperationException($"The review came back in an unexpected form, so nothing was changed.\n{Trim(reply)}");
-        revised = StripFence(TrimOneNewline(revised));
-
-        var changes = (Between(reply, "<changes>", "</changes>") ?? "")
-            .Split('\n')
-            .Select(l => l.Trim().TrimStart('-', '*', '•').Trim())
-            .Where(l => l.Length > 0)
-            .ToList();
-        return new ReviewSuggestion(changes, LineDiff.JoinLines(LineDiff.SplitLines(revised)));
+        var summary = element.TryGetProperty("summary", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() ?? "" : "";
+        var edits = new List<ReviewEdit>();
+        if (element.TryGetProperty("edits", out var list) && list.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in list.EnumerateArray().Take(MaxEdits))
+            {
+                string Field(string name) => item.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+                edits.Add(new ReviewEdit(Field("why").Trim(), Field("start"), Field("end"), Field("replace")));
+            }
+        }
+        return new ReviewSuggestion(summary.Trim(), edits);
     }
 
-    /// <summary>Gives the revised text the original's ending (with or without a final newline), so that alone never shows as a change.</summary>
-    public static ReviewSuggestion AlignTrailingNewline(string original, ReviewSuggestion suggestion)
+    /// <summary>
+    /// Places each edit on the file. A passage runs from the one place its start lines occur through the first
+    /// occurrence of its end lines after that. Lines are matched exactly, else ignoring indentation and trailing spaces,
+    /// else (for a one-line start or end) as the only line containing that text. Edits that cannot be placed, or that
+    /// overlap an earlier one, are returned in <see cref="ReviewPlan.Unplaced"/>.
+    /// </summary>
+    public static ReviewPlan Plan(string original, IReadOnlyList<ReviewEdit> edits)
     {
-        var body = suggestion.RevisedText.TrimEnd('\r', '\n');
-        var ending = original.EndsWith('\n') || original.EndsWith('\r') ? "\r\n" : "";
-        return suggestion with { RevisedText = body + ending };
+        var lines = LineDiff.SplitLines(original);
+        var placed = new List<(int First, int Last, string[] NewLines, string Why)>();
+        var unplaced = new List<ReviewEdit>();
+
+        foreach (var edit in edits)
+        {
+            var range = Locate(lines, edit);
+            if (range is not { } r || placed.Any(p => r.First <= p.Last && p.First <= r.Last))
+            {
+                unplaced.Add(edit);
+                continue;
+            }
+            placed.Add((r.First, r.Last, r.NewLines, edit.Why));
+        }
+
+        placed.Sort((a, b) => a.First.CompareTo(b.First));
+        var segments = new List<DiffSegment>();
+        var next = 0;
+        foreach (var (first, last, newLines, _) in placed)
+        {
+            if (first > next) segments.Add(Same(lines, next, first - 1));
+            segments.Add(new DiffSegment(true, lines[first..(last + 1)], newLines, first + 1));
+            next = last + 1;
+        }
+        if (next < lines.Length) segments.Add(Same(lines, next, lines.Length - 1));
+        return new ReviewPlan(segments, placed.Select(p => p.Why).ToList(), unplaced);
     }
 
-    // Text after the first opening tag, up to the last closing tag (or the end, when the reply was cut off).
-    private static string? Between(string text, string open, string close)
+    private static DiffSegment Same(string[] lines, int first, int last)
     {
-        var start = text.IndexOf(open, StringComparison.Ordinal);
-        if (start < 0) return null;
-        start += open.Length;
-        var end = text.LastIndexOf(close, StringComparison.Ordinal);
-        return end >= start ? text[start..end] : text[start..];
+        var run = lines[first..(last + 1)];
+        return new DiffSegment(false, run, run, first + 1);
     }
+
+    private static string[] ToLines(string text)
+    {
+        var trimmed = TrimOneNewline(text.Replace("\r\n", "\n").Replace('\r', '\n'));
+        return trimmed.Length == 0 ? [] : trimmed.Split('\n');
+    }
+
+    private static (int First, int Last, string[] NewLines)? Locate(string[] lines, ReviewEdit edit)
+    {
+        var start = ToLines(edit.Start);
+        var end = ToLines(edit.End);
+        var replace = ToLines(edit.Replace);
+
+        if (start.Length == 0)
+        {
+            // Only an empty file may be filled in whole; anywhere else an empty start has no position.
+            if (lines.Any(l => l.Trim().Length > 0) || replace.Length == 0) return null;
+            return (0, lines.Length - 1, lines.Length > 1 ? [.. replace, ""] : replace);
+        }
+
+        var starts = Find(lines, start, from: 0);
+        if (starts.Count != 1) return null;
+        var first = starts[0];
+        var last = first + start.Length - 1;
+
+        if (end.Length > 0)
+        {
+            // The first end at or after the start that does not finish inside it.
+            var ends = Find(lines, end, from: first).Where(k => k + end.Length - 1 >= last).ToList();
+            if (ends.Count == 0) return null;
+            last = ends[0] + end.Length - 1;
+        }
+        return (first, last, replace);
+    }
+
+    // Every index where `want` occurs at or after `from`, at the strictest level that finds any.
+    private static List<int> Find(string[] lines, string[] want, int from)
+    {
+        foreach (var level in new[] { MatchLevel.Exact, MatchLevel.Trimmed, MatchLevel.Contains })
+        {
+            if (level == MatchLevel.Contains && (want.Length != 1 || want[0].Trim().Length < 8)) break;
+            var hits = new List<int>();
+            for (var i = from; i + want.Length <= lines.Length; i++)
+            {
+                var match = true;
+                for (var j = 0; j < want.Length && match; j++) match = Matches(lines[i + j], want[j], level);
+                if (match) hits.Add(i);
+            }
+            if (hits.Count > 0) return hits;
+        }
+        return [];
+    }
+
+    private enum MatchLevel { Exact, Trimmed, Contains }
+
+    private static bool Matches(string line, string want, MatchLevel level) => level switch
+    {
+        MatchLevel.Exact => line == want,
+        MatchLevel.Trimmed => line.Trim() == want.Trim(),
+        _ => line.Contains(want.Trim(), StringComparison.Ordinal)
+    };
 
     private static string TrimOneNewline(string text)
     {
-        if (text.StartsWith("\r\n")) text = text[2..];
-        else if (text.StartsWith('\n')) text = text[1..];
-        if (text.EndsWith("\r\n")) text = text[..^2];
-        else if (text.EndsWith('\n')) text = text[..^1];
-        return text;
-    }
-
-    // A whole file wrapped in ``` despite the instructions.
-    private static string StripFence(string text)
-    {
-        var lines = LineDiff.SplitLines(text);
-        if (lines.Length >= 2 && lines[0].TrimStart().StartsWith("```") && lines[^1].Trim() == "```")
-            return LineDiff.JoinLines(lines[1..^1]);
+        if (text.StartsWith('\n')) text = text[1..];
+        if (text.EndsWith('\n')) text = text[..^1];
         return text;
     }
 

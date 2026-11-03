@@ -27,7 +27,7 @@
 - Quick switch: Codex → Claude → Antigravity in same worktree
 - Generate a handoff template from `git diff`, recent commits and task notes
 - [x] View and edit context files (`InstructionFiles`, `ContextWindow`): header **📄 Context** for each CLI's user-wide file, pane header **📁 Repo context** for the pane folder's `CLAUDE.md` / `AGENTS.md` / `GEMINI.md`; saves keep line endings, are atomic and never silently replace a file changed elsewhere. Remaining: Markdown preview, Claude Code `@import` and nested-folder files
-- [x] Review context files (`InstructionReview`, `LineDiff`): **✨ Review** asks Claude Code (`claude -p`, tools off, user's own login, no API key) for suggested changes, shown per change with Apply boxes; applied changes go to the editor, never straight to disk. Remaining: Codex / Gemini as reviewer, review of a running session's conversation (when to compact, what to add to `CLAUDE.md`)
+- [x] Review context files (`InstructionReview`, `LineDiff`): **✨ Review** asks Claude Code (`claude -p`, tools and user settings off, own login, no API key) for schema-checked edits named by first and last line, shown per change with Apply boxes; applied changes go to the editor, never straight to disk. Remaining: Codex / Gemini as reviewer, review of a running session's conversation (when to compact, what to add to `CLAUDE.md`)
 - Optional provider-specific context files (`AGENTS.md`, `CLAUDE.md`, etc.) without duplicating project truth
 
 ## v0.4 — Usage + budget dashboard
