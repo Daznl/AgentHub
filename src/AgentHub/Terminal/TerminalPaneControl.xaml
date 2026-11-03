@@ -8,7 +8,6 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <!-- Pane Top Control Bar -->
@@ -61,6 +60,7 @@
                                 </StackPanel>
                             </Border>
                         </Popup>
+                        <Button x:Name="RepoContextBtn" Click="RepoContext_Click" Content="📁 Repo context" Background="#16202F" Foreground="#B6C2D6" Padding="8,3" Margin="0,0,4,0" FontSize="11" FontWeight="SemiBold" />
                         <Button x:Name="SshBtn" Click="Ssh_Click" Content="SSH" ToolTip="Connect to a saved SSH connection" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#4C1D95" FontSize="11" />
                         <!-- Shown by the SSH button when more than one connection is saved -->
                         <Popup x:Name="SshPopup" PlacementTarget="{Binding ElementName=SshBtn}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
@@ -121,14 +121,6 @@
 
             <!-- Embedded Terminal -->
             <terminal:EmbeddedTerminalControl Grid.Row="2" x:Name="Terminal" />
-
-            <!-- Footer below the session: the instruction files the CLIs read in this pane's folder (user-wide ones: header 📄 Context) -->
-            <Border x:Name="ContextFooter" Grid.Row="3" Background="#0B121C" BorderBrush="#1E2C40" BorderThickness="0,1,0,0" Padding="8,4">
-                <DockPanel LastChildFill="True">
-                    <Button DockPanel.Dock="Left" x:Name="RepoContextBtn" Click="RepoContext_Click" Content="📁 Repo context" Background="#16202F" Foreground="#B6C2D6" Padding="9,2" Margin="0" FontSize="11" FontWeight="SemiBold" />
-                    <TextBlock x:Name="ContextFolderText" Foreground="#5A6B85" FontSize="10" VerticalAlignment="Center" Margin="10,0,0,0" TextTrimming="CharacterEllipsis" />
-                </DockPanel>
-            </Border>
         </Grid>
     </Border>
 </UserControl>

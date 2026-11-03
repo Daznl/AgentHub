@@ -53,7 +53,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     public event Action? SshManageRequested;
     /// <summary>Raised when the user wants this pane's session history. See <see cref="HistoryFolder"/> and <see cref="TranscriptPath"/>.</summary>
     public event Action<TerminalPaneControl>? HistoryRequested;
-    /// <summary>Raised by the footer's Repo context button. See <see cref="ContextFolder"/> and <see cref="ContextCli"/>.</summary>
+    /// <summary>Raised by the header's Repo context button. See <see cref="ContextFolder"/> and <see cref="ContextCli"/>.</summary>
     public event Action<TerminalPaneControl>? RepoContextRequested;
     private List<SshConnection> _sshConnections = [];
     private List<RepositoryDefinition> _repositories = [];
@@ -370,9 +370,6 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     private void RefreshContextFolder()
     {
         var folder = ContextFolder;
-        var name = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } n ? n : folder;
-        ContextFolderText.Text = name;
-        ContextFolderText.ToolTip = folder;
         RepoContextBtn.ToolTip = $"View and edit the instruction files in {folder}: CLAUDE.md, AGENTS.md and GEMINI.md";
     }
 
@@ -555,9 +552,9 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     }
 
     /// <summary>
-    /// Setup header (no session): location and CLI dropdowns, Launch, SSH, history, Repo context footer.
+    /// Setup header (no session): location and CLI dropdowns, Launch, Repo context, SSH, history.
     /// Working header (session running): the session's repository name, context badge, 📂 to open its folder,
-    /// Relaunch, move and close. Everything else is hidden until the session ends.
+    /// Relaunch, Repo context, move and close. Everything else is hidden until the session ends.
     /// </summary>
     private void ApplyHeaderMode(bool working)
     {
@@ -566,7 +563,6 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         ShellCombo.Visibility = setup;
         SshBtn.Visibility = setup;
         HistoryBtn.Visibility = setup;
-        ContextFooter.Visibility = setup;
         if (working)
         {
             StopBtn.Visibility = Visibility.Collapsed;
