@@ -51,6 +51,7 @@ public partial class IdeasWindow : Window
         _orchestrator.StateChanged += OnOrchestratorStateChanged;
         _orchestrator.CurrentIdeaChanged += OnOrchestratorCurrentIdeaChanged;
         _orchestrator.LogAdded += _ => ScrollLogToBottom();
+        _orchestrator.Steering.Changed += OnSteeringChanged;
 
         _uiRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _uiRefreshTimer.Tick += (_, _) => RefreshStatusMetrics();
@@ -68,6 +69,7 @@ public partial class IdeasWindow : Window
             _uiRefreshTimer.Stop();
             _orchestrator.StateChanged -= OnOrchestratorStateChanged;
             _orchestrator.CurrentIdeaChanged -= OnOrchestratorCurrentIdeaChanged;
+            _orchestrator.Steering.Changed -= OnSteeringChanged;
         };
     }
 
@@ -93,6 +95,7 @@ public partial class IdeasWindow : Window
             EditDirBox.Text = string.Empty;
             EditDescriptionBox.Text = string.Empty;
             HandoffPreviewBox.Text = string.Empty;
+            SteerNotesList.ItemsSource = null;
             return;
         }
 
@@ -112,6 +115,70 @@ public partial class IdeasWindow : Window
         }
 
         LoadHandoffPreview(_selectedIdea.TargetDirectory);
+        _ = LoadSteerNotesAsync();
+    }
+
+    // ---- Steering ----
+
+    private async Task LoadSteerNotesAsync()
+    {
+        var idea = _selectedIdea;
+        SteerNotesList.ItemsSource = idea == null ? null : await _orchestrator.Steering.GetForIdeaAsync(idea.Id);
+    }
+
+    private void OnSteeringChanged(string ideaId) =>
+        Dispatcher.InvokeAsync(async () =>
+        {
+            if (_selectedIdea?.Id != ideaId) return;
+            await LoadSteerNotesAsync();
+            LoadHandoffPreview(_selectedIdea?.TargetDirectory);
+        });
+
+    private void QueueSteer_Click(object sender, RoutedEventArgs e) => _ = SteerAsync(sendNow: false);
+
+    private void SendSteerNow_Click(object sender, RoutedEventArgs e) => _ = SteerAsync(sendNow: true);
+
+    private void SteerBox_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter &&
+            System.Windows.Input.Keyboard.Modifiers.HasFlag(System.Windows.Input.ModifierKeys.Control))
+        {
+            e.Handled = true;
+            _ = SteerAsync(sendNow: false);
+        }
+    }
+
+    private async Task SteerAsync(bool sendNow)
+    {
+        var idea = _selectedIdea;
+        var text = SteerBox.Text.Trim();
+        if (idea == null || text.Length == 0) return;
+
+        QueueSteerBtn.IsEnabled = SendSteerNowBtn.IsEnabled = false;
+        try
+        {
+            await _orchestrator.SteerAsync(idea, text, sendNow);
+            SteerBox.Clear();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Could not record the note: {ex.Message}", "Steer", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            QueueSteerBtn.IsEnabled = SendSteerNowBtn.IsEnabled = true;
+            await LoadSteerNotesAsync();
+            LoadHandoffPreview(idea.TargetDirectory);
+        }
+    }
+
+    private async void RemoveSteer_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: SteeringNote note }) return;
+        // The handoff bullet stays: it is the record of what was asked, and the agent may already have read it.
+        if (!await _orchestrator.Steering.RemovePendingAsync(note.Id))
+            MessageBox.Show(this, "That note was already delivered.", "Steer", MessageBoxButton.OK, MessageBoxImage.Information);
+        await LoadSteerNotesAsync();
     }
 
     private void LoadHandoffPreview(string? dir)

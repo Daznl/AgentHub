@@ -64,6 +64,7 @@ public sealed class OrchestratorEngine : IDisposable
     public const string AutonomyRules =
         "You are running unattended: nobody is watching to answer questions, so make reasonable decisions yourself " +
         "and note them in .agenthub/handoff.md instead of asking. Commit your work to git as you go. " +
+        "Follow the direction under \"Steering notes\" in .agenthub/handoff.md (later notes win), and keep that section when you rewrite the handoff. " +
         "Only when every requirement is implemented and its tests pass, put the line [COMPLETED] at the top of " +
         ".agenthub/handoff.md.";
 
@@ -96,12 +97,16 @@ public sealed class OrchestratorEngine : IDisposable
         set => _usageCapThreshold = Math.Clamp(value, 0.01, 0.20);
     }
 
+    public SteeringService Steering { get; }
+
     public OrchestratorEngine(
         IdeaService ideaService,
         GitService gitService,
-        ProcessRunner runner)
+        ProcessRunner runner,
+        SteeringService? steering = null)
     {
         _ideaService = ideaService;
+        Steering = steering ?? SteeringService.BesideIdeas(ideaService);
         _gitService = gitService;
         _runner = runner;
 
@@ -316,6 +321,15 @@ public sealed class OrchestratorEngine : IDisposable
 
         promptText += " " + AutonomyRules;
 
+        // Notes still queued when a session starts go in with its first prompt.
+        var pending = await Steering.GetPendingAsync(idea.Id);
+        if (pending.Count > 0)
+        {
+            promptText += " " + SteeringService.FormatDelivery(pending);
+            await Steering.MarkDeliveredAsync(pending);
+            Log($"Included {pending.Count} queued steering note(s) in the session prompt.");
+        }
+
         await _activePane.SubmitPromptAsync(promptText);
         Log($"Injected session prompt ({promptText.Length} chars).");
     }
@@ -414,8 +428,65 @@ public sealed class OrchestratorEngine : IDisposable
         }
 
         _continueNudges++;
+
+        // Queued steering goes in at the turn end, in place of the generic nudge.
+        var pending = await Steering.GetPendingAsync(idea.Id);
+        if (pending.Count > 0)
+        {
+            Log($"Agent ended its turn; delivering {pending.Count} steering note(s).");
+            await pane.SubmitPromptAsync(SteeringService.FormatDelivery(pending));
+            await Steering.MarkDeliveredAsync(pending);
+            return;
+        }
+
         Log($"Agent ended its turn; nudging it to continue ({_continueNudges}/{MaxContinueNudgesPerSession}).");
         await pane.SubmitPromptAsync(ContinuePrompt);
+    }
+
+    /// <summary>
+    /// Records a steering note for an idea: stored, and written into its .agenthub/handoff.md so later
+    /// sessions keep it. Delivered to the agent straight away when <paramref name="sendNow"/> is set or the
+    /// agent is already sitting idle; otherwise at its next turn end, or with the next session's first prompt.
+    /// </summary>
+    public async Task<SteeringNote> SteerAsync(ProjectIdea idea, string text, bool sendNow)
+    {
+        var note = await Steering.AddAsync(idea.Id, text);
+
+        if (!string.IsNullOrWhiteSpace(idea.TargetDirectory))
+        {
+            try
+            {
+                var dir = Path.Combine(idea.TargetDirectory, ".agenthub");
+                Directory.CreateDirectory(dir);
+                var path = Path.Combine(dir, "handoff.md");
+                var current = File.Exists(path) ? await File.ReadAllTextAsync(path) : $"# {idea.Title}\n";
+                await File.WriteAllTextAsync(path, SteeringService.AddToHandoff(current, note));
+            }
+            catch (Exception ex)
+            {
+                Log($"Could not record the steering note in handoff.md: {ex.Message}", "Warn");
+            }
+        }
+
+        var isLive = _currentIdea?.Id == idea.Id && _activePane is { IsRunning: true } &&
+                     _state is OrchestratorState.Building or OrchestratorState.HandoffPending;
+        var idleNow = isLive && _activePane!.TerminalControl.IsAwaitingInput &&
+                      _activePane.TerminalControl.OutputSilentFor >= TimeSpan.FromSeconds(5);
+
+        if (isLive && (sendNow || idleNow))
+        {
+            await _activePane!.SubmitPromptAsync(SteeringService.FormatDelivery([note]));
+            await Steering.MarkDeliveredAsync([note]);
+            Log(sendNow ? "Steering note sent to the agent now." : "Agent was idle; steering note delivered straight away.");
+        }
+        else
+        {
+            Log(isLive
+                ? "Steering note queued; it goes in when the agent next finishes a turn."
+                : $"Steering note queued for \"{idea.Title}\"; it goes in with the next session's first prompt.");
+        }
+
+        return note;
     }
 
     private async void OnSessionExited()

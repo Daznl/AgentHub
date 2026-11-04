@@ -142,7 +142,8 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="130" />
+                        <RowDefinition Height="110" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
@@ -190,14 +191,63 @@
                         <TextBox x:Name="EditDescriptionBox" Style="{StaticResource Editor}" />
                     </DockPanel>
 
+                    <!-- Steer the build: direction delivered at the agent's next turn end (or now) -->
+                    <Border Grid.Row="3" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,0,10">
+                        <StackPanel>
+                            <DockPanel Margin="0,0,0,4">
+                                <TextBlock Text="🧭 Steer this build" FontWeight="SemiBold" FontSize="12" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" />
+                                <TextBlock Text="Queued notes go in when the agent next finishes a turn; also saved under Steering notes in handoff.md" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="10,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                            </DockPanel>
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Right" Margin="8,0,0,0" VerticalAlignment="Top">
+                                    <Button x:Name="QueueSteerBtn" Content="🕒 Queue for next turn" Click="QueueSteer_Click" Background="#2563EB" FontWeight="SemiBold" FontSize="11" Padding="10,4" Margin="0,0,0,4" ToolTip="Deliver when the agent next finishes a turn (straight away if it is idle). Ctrl+Enter" />
+                                    <Button x:Name="SendSteerNowBtn" Content="⚡ Send now" Click="SendSteerNow_Click" FontSize="11" Padding="10,4" ToolTip="Type it into the running session now; Claude Code reads it at its next step" />
+                                </StackPanel>
+                                <TextBox x:Name="SteerBox" Style="{StaticResource Editor}" Height="54" FontFamily="Segoe UI" PreviewKeyDown="SteerBox_PreviewKeyDown"
+                                         ToolTip="e.g. Focus on a backtest report before more training runs" />
+                            </DockPanel>
+                            <ItemsControl x:Name="SteerNotesList" Margin="0,6,0,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <DockPanel Margin="0,2,0,0">
+                                            <Button DockPanel.Dock="Right" Content="✕" Click="RemoveSteer_Click" Tag="{Binding}" FontSize="10" Width="22" Height="20" Padding="0" Margin="6,0,0,0" ToolTip="Remove this queued note">
+                                                <Button.Style>
+                                                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsDelivered}" Value="True">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Button.Style>
+                                            </Button>
+                                            <TextBlock DockPanel.Dock="Left" Text="{Binding StatusText}" Width="92" FontSize="11" Foreground="#FBBF24">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsDelivered}" Value="True">
+                                                                <Setter Property="Foreground" Value="#34D399" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Text}" FontSize="11" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text}" />
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+
                     <!-- Handoff Viewer Header -->
-                    <DockPanel Grid.Row="3" Margin="0,4,0,4">
+                    <DockPanel Grid.Row="4" Margin="0,4,0,4">
                         <TextBlock Text="Latest Handoff (.agenthub/handoff.md)" FontWeight="SemiBold" FontSize="12" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" />
                         <Button DockPanel.Dock="Right" Content="Open in Context Window" Click="OpenHandoffInContext_Click" FontSize="11" Padding="8,3" HorizontalAlignment="Right" />
                     </DockPanel>
 
                     <!-- Handoff Viewer Content -->
-                    <TextBox x:Name="HandoffPreviewBox" Grid.Row="4" Style="{StaticResource Editor}" IsReadOnly="True" />
+                    <TextBox x:Name="HandoffPreviewBox" Grid.Row="5" Style="{StaticResource Editor}" IsReadOnly="True" />
                 </Grid>
             </Border>
         </Grid>
