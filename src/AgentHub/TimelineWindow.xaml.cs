@@ -169,6 +169,11 @@ public partial class TimelineWindow : Window
         var parts = new List<string> { $"{model.SessionCount} session{(model.SessionCount == 1 ? "" : "s")}" };
         if (_scope.IsGit) parts.Add($"{model.CommitCount} commit{(model.CommitCount == 1 ? "" : "s")}");
         if (since is not null) parts.Add("since " + since);
+        // Branches still open, and those that exist only here: what is waiting to be merged or pushed.
+        var open = model.Branches.Count(b => !b.IsTrunk && !b.IsImported && b.MergeHash is null);
+        var unpushed = model.Branches.Count(b => b.IsLocalOnly);
+        if (open > 0) parts.Add($"{open} branch{(open == 1 ? "" : "es")} not merged");
+        if (unpushed > 0) parts.Add($"{unpushed} not pushed");
         if (_scope.Folders.Count > 1) parts.Add($"{_scope.Folders.Count} worktrees");
         SubheadingText.Text = string.Join(" · ", parts) + " · " + _scope.Root;
 
@@ -242,7 +247,7 @@ public partial class TimelineWindow : Window
     {
         var key = ActiveKey;
         foreach (var gutter in _gutters) gutter.HighlightKey = key;
-        var frame = key is not null && _branches.TryGetValue(key, out var branch) ? TimelineGutter.LaneBrush(branch.Column) : null;
+        var frame = key is not null && _branches.TryGetValue(key, out var branch) ? TimelineGutter.LaneBrush(branch.ColourIndex) : null;
         foreach (var (card, laneKey) in _cards)
         {
             var lit = key is not null && laneKey == key;
@@ -259,7 +264,7 @@ public partial class TimelineWindow : Window
             var sessions = _cards.Count(c => c.LaneKey == key && c.Card.Tag is not null && Grid.GetColumn(c.Card) == 1);
             var commits = b.Commits.Count;
             StatusText.Text = $"{b.Name}: {sessions} session{(sessions == 1 ? "" : "s")}, {commits} commit{(commits == 1 ? "" : "s")}" +
-                              (b.IsTrunk ? "" : b.MergesBack ? ", merged" : ", not merged") +
+                              (b.IsTrunk ? "" : b.MergesBack ? ", merged" : ", not merged") + (b.IsLocalOnly ? ", not pushed" : "") +
                               (_pinnedKey is null ? " · click the line to keep it lit" : " · click empty space or press Esc to clear");
         }
     }
@@ -373,7 +378,7 @@ public partial class TimelineWindow : Window
 
         var bits = new List<string> { Duration(session.EndedAt - summary.StartedAt) };
         bits.Add(row.Commits.Count == 0 ? "no commits" : $"{row.Commits.Count} commit{(row.Commits.Count == 1 ? "" : "s")} →");
-        if (row.Branch is { } lane) bits.Add($"on {lane.Name}{(lane.MergeHash is null ? ", not merged" : "")}");
+        if (row.Branch is { } lane) bits.Add($"on {lane.Name}{(lane.MergeHash is null ? ", not merged" : "")}{(lane.IsLocalOnly ? ", not pushed" : "")}");
         else if (row.Commits.Count > 0) bits.Add($"on {_trunkName}");
         if (session.Folder is not null && _scope.Folders.Count > 1) bits.Add(Path.GetFileName(session.Folder.TrimEnd(Path.DirectorySeparatorChar)));
         card.Meta.Text = string.Join(" · ", bits);
@@ -415,6 +420,7 @@ public partial class TimelineWindow : Window
         if (branches.Count > 0) bits.Add(string.Join(", ", branches));
         if (row.Branch is { IsImported: true }) bits.Add("made elsewhere, before this history was brought in; its sessions are not in this timeline");
         else if (row.Branch is { MergeHash: null } && row.Kind != TimelineRowKind.Session) bits.Add("not merged");
+        if (row.Branch is { IsLocalOnly: true } && row.Kind != TimelineRowKind.Session) bits.Add("not pushed");
         if (commits.Count > shown) bits.Add($"{commits.Count - shown} more below");
         card.Meta.Text = string.Join(" · ", bits);
         card.Meta.Margin = new Thickness(0, 3, 0, 6);

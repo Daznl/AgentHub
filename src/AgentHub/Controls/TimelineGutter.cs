@@ -35,8 +35,9 @@ public sealed class TimelineGutter : FrameworkElement
     private static readonly Brush TrunkBoldBrush = Frozen("#5A7194");
     private static readonly Brush CommitsNodeBrush = Frozen("#7E8CA6");
     private static readonly Brush StartFill = Frozen("#0C121C");
+    // One colour per branch in order of appearance (see TimelineBranch.ColourIndex); after the last it starts again.
     private static readonly Brush[] LaneBrushes =
-        new[] { "#2FD4F5", "#C084FC", "#34D399", "#FBBF24", "#60A5FA", "#F472B6", "#FB923C", "#A3E635" }.Select(Frozen).ToArray();
+        new[] { "#2FD4F5", "#C084FC", "#34D399", "#FBBF24", "#60A5FA", "#F472B6", "#FB923C", "#A3E635", "#E879F9", "#2DD4BF", "#F87171", "#FDE047" }.Select(Frozen).ToArray();
     private static readonly Pen TrunkPen = FrozenPen(TrunkBrush, 2), TrunkBold = FrozenPen(TrunkBoldBrush, 3.5), TrunkDim = FrozenPen(Faint(TrunkBrush), 2);
     private static readonly Pen[] LanePens = LaneBrushes.Select(b => FrozenPen(b, 2)).ToArray();
     private static readonly Pen[] LaneBold = LaneBrushes.Select(b => FrozenPen(b, 3.5)).ToArray();
@@ -80,7 +81,8 @@ public sealed class TimelineGutter : FrameworkElement
         set => SetValue(HighlightKeyProperty, value);
     }
 
-    public static Brush LaneBrush(int column) => column == 0 ? TrunkBoldBrush : LaneBrushes[column % LaneBrushes.Length];
+    /// <summary>The brush of a lane by its <see cref="TimelineBranch.ColourIndex"/>; 0 is the trunk.</summary>
+    public static Brush LaneBrush(int colourIndex) => colourIndex == 0 ? TrunkBoldBrush : LaneBrushes[colourIndex % LaneBrushes.Length];
 
     protected override Size MeasureOverride(Size availableSize) => new(GutterWidth(Columns), 0);
 
@@ -122,7 +124,7 @@ public sealed class TimelineGutter : FrameworkElement
                 dc.DrawEllipse(CommitsNodeBrush, null, centre, 3.5, 3.5);
                 break;
             default:
-                var index = row.Column % LaneBrushes.Length;
+                var index = (row.Branch?.ColourIndex ?? 0) % LaneBrushes.Length;
                 // A session without commits sits on the trunk but belongs to no branch: a hollow node says so.
                 if (row.IsHollow) dc.DrawEllipse(StartFill, RingPens[index], centre, 4.5, 4.5);
                 else dc.DrawEllipse(LaneBrushes[index], null, centre, 5, 5);
@@ -135,7 +137,7 @@ public sealed class TimelineGutter : FrameworkElement
     private static Pen PenFor(TimelineLine line, string? highlight)
     {
         var trunk = line.Column == 0;
-        var index = line.Column % LanePens.Length;
+        var index = line.Colour % LanePens.Length;
         if (highlight is null) return trunk ? TrunkPen : LanePens[index];
         if (line.Key == highlight) return trunk ? TrunkBold : LaneBold[index];
         return trunk ? TrunkDim : LaneDim[index];

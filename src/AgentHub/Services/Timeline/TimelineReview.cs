@@ -357,7 +357,7 @@ public static partial class TimelineReview
                 : prByHead.TryGetValue(b.Name, out var pr) && pr.IsMerged ? $"merged through PR #{pr.Number}" + (pr.MergeCommit is null ? ""
                     : byHash.TryGetValue(pr.MergeCommit, out var pm) && pm.IsMerge ? $" (merge commit {pm.Short})" : $" (squash {Short(pr.MergeCommit)})")
                 : "not merged";
-            fixedPart.AppendLine($"{b.Name}: {commits.Count} commits, {span}, {how}");
+            fixedPart.AppendLine($"{b.Name}: {commits.Count} commits, {span}, {how}{(b.IsLocalOnly ? ", not pushed (local only)" : "")}");
         }
         if (github)
         {

@@ -49,7 +49,7 @@ public enum TimelineRowKind
 /// leaving the trunk, drawn with a fork curve when <see cref="Fork"/>). <see cref="MergeAtBottom"/>: the branch was merged,
 /// and its lane curves back into the trunk at the bottom of the row.
 /// </summary>
-public sealed record TimelineLine(int Column, bool FromTop, bool ToBottom, bool Fork, bool MergeAtBottom, string Key = TimelineBranch.TrunkKey);
+public sealed record TimelineLine(int Column, bool FromTop, bool ToBottom, bool Fork, bool MergeAtBottom, string Key = TimelineBranch.TrunkKey, int Colour = 0);
 
 /// <summary>A branch as a lane of the graph: which rows it spans and whether it rejoined the trunk.</summary>
 public sealed class TimelineBranch
@@ -66,8 +66,15 @@ public sealed class TimelineBranch
     public bool IsImported { get; init; }
     /// <summary>The merge commit on the trunk that brought this branch in, when it was merged.</summary>
     public string? MergeHash { get; init; }
+    /// <summary>A local branch with no remote counterpart: its commits have not been pushed.</summary>
+    public bool IsLocalOnly { get; set; }
     public List<TimelineCommit> Commits { get; } = [];
     public int Column { get; set; }
+    /// <summary>
+    /// Which colour the lane is drawn in: the Nth lane to appear gets the Nth colour, so branches that reuse a freed
+    /// column still look different from each other. 0 is the trunk.
+    /// </summary>
+    public int ColourIndex { get; set; }
     public int StartRow { get; set; } = -1;
     public int EndRow { get; set; } = -1;
     /// <summary>True when the lane is drawn curving back into the trunk at its last row.</summary>
@@ -258,6 +265,7 @@ public static class TimelineBuilder
         }
 
         var busyUntil = new List<int> { int.MaxValue }; // column 0 is the trunk, never free
+        var colour = 0;
         foreach (var lane in lanes.OrderBy(l => l.StartRow).ThenBy(l => l.EndRow))
         {
             var column = 1;
@@ -265,6 +273,7 @@ public static class TimelineBuilder
             if (column == busyUntil.Count) busyUntil.Add(0);
             busyUntil[column] = lane.EndRow;
             lane.Column = column;
+            lane.ColourIndex = ++colour; // by order of appearance, not by column: a reused column gets a new colour
         }
 
         for (var i = 0; i < rows.Count; i++)
@@ -274,7 +283,7 @@ public static class TimelineBuilder
             row.Lines.Add(new TimelineLine(0, FromTop: i > 0, ToBottom: i < rows.Count - 1, Fork: false, MergeAtBottom: false));
             foreach (var lane in lanes.Where(l => l.StartRow <= i && i <= l.EndRow))
                 row.Lines.Add(new TimelineLine(lane.Column, FromTop: i > lane.StartRow, ToBottom: i < lane.EndRow,
-                    Fork: i == lane.StartRow && !lane.IsImported, MergeAtBottom: lane.MergesBack && i == lane.EndRow, Key: lane.Key));
+                    Fork: i == lane.StartRow && !lane.IsImported, MergeAtBottom: lane.MergesBack && i == lane.EndRow, Key: lane.Key, Colour: lane.ColourIndex));
         }
         return busyUntil.Count;
     }
@@ -318,12 +327,27 @@ public static partial class BranchGraph
         // The project's own root is the one with the most descendants, not the end of main's first-parent chain, which
         // can be GitHub's one-commit "Initial commit" that the real work was merged into.
         var roots = RootsOf(commits, byHash);
-        var trunkRoot = trunk.Commits.Count > 0 ? trunk.Commits[^1] : null;
-        var primaryRoot = commits.Where(c => c.Parents.Count == 0)
-            .OrderByDescending(r => commits.Count(c => roots[c.Hash].Count == 1 && roots[c.Hash].Contains(r.Hash))) // commits that are its alone
-            .ThenByDescending(r => r == trunkRoot)
-            .ThenBy(r => r.Time)
-            .FirstOrDefault();
+        // The end of the first-parent chain: the trunk commit with no parent in the log. Not Commits[^1]: when a second
+        // tip (a remote main ahead of the local one) was walked, its newer commits were claimed after the root.
+        var trunkRoot = trunk.Commits.FirstOrDefault(c => c.Parents.Count == 0 || !byHash.ContainsKey(c.Parents[0]));
+        // The project's root is where the trunk's own first-parent line begins. One exception: a placeholder root with
+        // nothing of its own but itself (GitHub's one-commit "Initial commit" that the real work was then merged into)
+        // is not the project; the project is what the first merge on the trunk brought into it. Counting descendants
+        // does not work here: a repository brought in whole can have more history of its own than the project had.
+        int Exclusive(TimelineCommit r) => commits.Count(c => roots[c.Hash].Count == 1 && roots[c.Hash].Contains(r.Hash));
+        var primaryRoot = trunkRoot;
+        if (primaryRoot is not null && Exclusive(primaryRoot) <= 1)
+        {
+            var placeholder = primaryRoot;
+            var firstMerge = trunk.Commits.Where(c => c.IsMerge && roots[c.Hash].Contains(placeholder.Hash)).MinBy(c => c.Time);
+            var broughtIn = firstMerge?.Parents.Skip(1)
+                .Select(p => byHash.GetValueOrDefault(p)).Where(p => p is not null)
+                .SelectMany(p => roots[p!.Hash]).Distinct()
+                .Select(h => byHash[h]).Where(r => r != placeholder)
+                .MaxBy(Exclusive);
+            if (broughtIn is not null) primaryRoot = broughtIn;
+        }
+        primaryRoot ??= commits.Where(c => c.Parents.Count == 0).OrderByDescending(Exclusive).ThenBy(r => r.Time).FirstOrDefault();
         if (primaryRoot is not null)
         {
             var foreignRoots = commits.Where(c => c.Parents.Count == 0 && c != primaryRoot).OrderBy(c => c.Time).ToList();
@@ -362,6 +386,13 @@ public static partial class BranchGraph
 
         // Anything left (dangling history no ref reaches) goes with the trunk rather than vanishing.
         foreach (var c in commits.Where(c => c.Branch is null)) Claim(trunk, c);
+
+        // A branch with a local tip and no remote one has not been pushed (only meaningful when there is a remote at all).
+        var remoteNames = tips.Where(t => t.IsRemote).Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
+        var localNames = tips.Where(t => !t.IsRemote).Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
+        if (remoteNames.Count > 0)
+            foreach (var b in branches.Where(b => !b.IsTrunk && !b.IsImported))
+                b.IsLocalOnly = localNames.Contains(b.Name) && !remoteNames.Contains(b.Name);
         return (branches, trunkName);
     }
 
