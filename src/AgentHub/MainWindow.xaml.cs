@@ -9,6 +9,8 @@ using AgentHub.Models;
 using AgentHub.Services;
 using AgentHub.Services.History;
 using AgentHub.Services.Usage;
+using AgentHub.Services.Ideas;
+using AgentHub.Services.Orchestrator;
 using AgentHub.Terminal;
 using Color = System.Windows.Media.Color;
 using Forms = System.Windows.Forms;
@@ -42,6 +44,9 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _usageRefreshTimer = new();
     private readonly List<ShellOption> _shellOptions = new();
     private readonly List<TerminalPaneControl> _panes = new();
+    private readonly IdeaService _ideaService = new();
+    private OrchestratorEngine? _orchestrator;
+    private IdeasWindow? _ideasWindow;
     private static readonly SolidColorBrush[] PaneAccentBrushes =
     [
         new(Color.FromRgb(96, 165, 250)),  // Blue (Terminal 1)
@@ -213,6 +218,32 @@ public partial class MainWindow : Window
         pane.TimelineRequested += p => ShowTimeline(p.HistoryFolder);
         pane.UpdateShellOptions(_shellOptions);
         return pane;
+    }
+
+    private void OpenIdeas_Click(object sender, RoutedEventArgs e) => ShowIdeas();
+
+    private void ShowIdeas()
+    {
+        if (_ideasWindow is not null)
+        {
+            _ideasWindow.WindowState = WindowState.Normal;
+            _ideasWindow.Activate();
+            return;
+        }
+
+        _orchestrator ??= new OrchestratorEngine(_ideaService, _git, _runner);
+        var window = new IdeasWindow(
+            _ideaService,
+            _orchestrator,
+            _usageService,
+            paneProvider: () => _panes.FirstOrDefault(p => p.IsRunning) ?? _panes.FirstOrDefault() ?? CreateTerminalPane(),
+            openContextAction: folder => ShowContext(folder, null))
+        {
+            Owner = this
+        };
+        _ideasWindow = window;
+        window.Closed += (_, _) => _ideasWindow = null;
+        window.Show();
     }
 
     private void OpenContext_Click(object sender, RoutedEventArgs e) => ShowContext(null, null);
@@ -2009,6 +2040,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _usageRefreshTimer.Stop();
+        _orchestrator?.Dispose();
         _historyArchive?.Dispose();
         try
         {

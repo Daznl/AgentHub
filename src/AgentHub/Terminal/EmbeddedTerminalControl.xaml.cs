@@ -542,6 +542,16 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     /// Deferred to Input priority so it runs after the click that triggered the launch has finished
     /// (otherwise the Launch button keeps focus).
     /// </summary>
+    /// <summary>Sends text input directly into the running terminal process.</summary>
+    public void SendInput(string data)
+    {
+        if (string.IsNullOrEmpty(data)) return;
+        var wasWaiting = _attention.IsWaiting;
+        _attention.OnUserInput(DateTimeOffset.Now);
+        if (wasWaiting) AttentionCleared?.Invoke();
+        _session?.Write(data);
+    }
+
     public void FocusTerminal()
     {
         _ = Dispatcher.InvokeAsync(() =>

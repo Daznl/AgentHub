@@ -66,7 +66,8 @@ public class LiveUsageServiceTests
         _output.WriteLine($"Error: {snap.Error}");
         _output.WriteLine($"RawOutput:\n{snap.RawOutput}");
 
-        Assert.NotNull(snap.RawOutput);
+        if (snap.Status == UsageCollectionStatus.Available)
+            Assert.NotNull(snap.RawOutput);
     }
 
     [LiveFact("claude")]

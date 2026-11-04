@@ -99,6 +99,14 @@ It never stores API keys or provider credentials. Authentication stays with the 
 - Each card shows percentage left, reset time, the data source and refresh state. Cards can be hidden individually and reopened from chips.
 - Polled on a configurable interval. See [Usage limit cards](#usage-limit-cards) for where the numbers come from.
 
+### 💡 Project Ideas & Autonomous Auto-Builder (Work Mode)
+
+- **Idea To-Do Queue:** Store and prioritize application ideas in a structured queue, persisted in `%APPDATA%\AgentHub\ideas.json`.
+- **Autonomous Orchestration:** Designed to orchestrate continuous project building while you are away or at work, taking full advantage of your monthly Claude subscription.
+- **Claude Usage Cap Management:** Continuously monitors live Anthropic OAuth usage (5-hour session and 7-day weekly limits). When your usage cap is approached, smoothly pauses, calculates the exact reset time (`ResetsAt`), displays a live countdown timer, and resumes building automatically the moment your quota resets.
+- **Context Window Handoff Loop:** Monitors token utilization in real-time. When a configurable threshold is reached (e.g. 75%), alerts the agent to run verification tests and write a detailed progress/handoff document to `.agenthub/handoff.md`. The orchestrator then cleanly wraps up the turn, closes the bloated session, and boots a fresh context session that immediately resumes from the handoff notes.
+- **GitHub Synchronization:** 1-click sync button to fetch the latest commits from GitHub (`origin/main`), fast-forward the desktop repository, and rebuild/publish the application.
+
 ## Requirements
 
 ### To run AgentHub

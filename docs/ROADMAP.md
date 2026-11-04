@@ -61,6 +61,18 @@
 - Issue/task association
 - Branch protection awareness
 
+## v0.6 — Project Ideas & Autonomous Auto-Builder (included)
+
+- [x] **Project Ideas Queue** (`ProjectIdea`, `IdeaService`, `IdeasWindow`):
+  - Maintain ideas and build queue out of your head, persisted in `%APPDATA%\AgentHub\ideas.json`
+  - Reorder priority up/down, edit title, target workspace, agent CLI, and specifications
+  - "Build Now in Cockpit" trigger
+- [x] **Autonomous Orchestration** (`OrchestratorEngine`):
+  - Work Mode background building that uses monthly Claude usage while away
+  - Quota cap monitor: checks live Anthropic OAuth usage, pauses when cap is approached, displays countdown timer until `ResetsAt`, and resumes automatically when quota resets
+  - Context window handoff loop: monitors transcript token consumption via `ContextWindowTracker`, prompts clean handoff documentation to `.agenthub/handoff.md` when reaching threshold (e.g. 75%), terminates bloated session cleanly, and launches a fresh session continuing from handoff notes
+  - GitHub synchronization: 1-click fetch/pull/compile for AgentHub directly from GitHub
+
 ## Multi-Session Cockpit Stages (Active)
 
 - **Stage 1 (Completed in v0.1.5):** Embedded dynamic multi-terminal multiplexer via Windows ConPTY + WebView2/xterm.js. Side-by-side terminal panes for concurrent interactive sessions with 3+ default terminals, dynamic "➕ Add Terminal" pane creation, individual "✕ Close" controls, draggable splitters, and robust lifecycle idempotency preventing input duplication.

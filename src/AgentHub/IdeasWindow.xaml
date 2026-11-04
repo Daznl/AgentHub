@@ -1,0 +1,257 @@
+<Window x:Class="AgentHub.IdeasWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AgentHub - Project Ideas &amp; Autonomous Orchestrator" Height="820" Width="1240" MinHeight="600" MinWidth="960"
+        Icon="Assets/AppIcon.png" WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBackgroundBrush}" Foreground="{StaticResource TextBrush}" FontFamily="Segoe UI">
+    <Window.Resources>
+        <Style x:Key="Editor" TargetType="TextBox">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Background" Value="#0A111B" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CaretBrush" Value="{StaticResource AccentBrush}" />
+            <Setter Property="SelectionBrush" Value="{StaticResource AccentBrush}" />
+            <Setter Property="FontFamily" Value="Cascadia Mono, Consolas" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="AcceptsReturn" Value="True" />
+            <Setter Property="AcceptsTab" Value="True" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+        </Style>
+
+        <Style x:Key="FieldInput" TargetType="TextBox">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Background" Value="#0E1624" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <!-- Header bar with title, orchestrator status, and action buttons -->
+            <RowDefinition Height="Auto" />
+            <!-- Main content split: Ideas list & Idea details/handoff -->
+            <RowDefinition Height="*" />
+            <!-- Bottom section: Orchestrator live monitor & logs -->
+            <RowDefinition Height="210" />
+        </Grid.RowDefinitions>
+
+        <!-- TOP BAR -->
+        <Border Grid.Row="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="💡 Project Ideas &amp; Auto-Builder" FontSize="18" FontWeight="Bold" Foreground="{StaticResource TextBrush}" />
+                        <Border x:Name="OrchestratorStatusBadge" Background="#1E293B" CornerRadius="4" Padding="8,3" Margin="14,0,0,0" VerticalAlignment="Center">
+                            <TextBlock x:Name="OrchestratorStatusText" Text="IDLE" Foreground="#94A3B8" FontSize="11" FontWeight="Bold" />
+                        </Border>
+                    </StackPanel>
+                    <TextBlock x:Name="OrchestratorSubtext" Text="Maintain your app ideas, orchestrate background building while away, auto-wait on Claude usage resets &amp; handoff." Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,3,0,0" />
+                </StackPanel>
+
+                <!-- Actions -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="ToggleOrchestratorBtn" Click="ToggleOrchestrator_Click" Content="▶ Start Auto-Builder (Work Mode)" Background="#10B981" FontWeight="SemiBold" Padding="14,8" Margin="0,0,8,0" ToolTip="Runs through queued ideas, monitors Claude usage caps, and handles context handoffs automatically" />
+                    <Button Click="SyncGitHub_Click" Content="🔄 Sync with GitHub" Background="#2563EB" FontWeight="SemiBold" Padding="12,8" Margin="0,0,8,0" ToolTip="Pull latest AgentHub from GitHub and build" />
+                    <Button Click="AddIdea_Click" Content="➕ Add Idea" Background="#7C3AED" FontWeight="SemiBold" Padding="12,8" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- MAIN SPLIT -->
+        <Grid Grid.Row="1" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <!-- Ideas List -->
+                <ColumnDefinition Width="460" MinWidth="340" />
+                <ColumnDefinition Width="12" />
+                <!-- Idea Detail & Handoff Inspector -->
+                <ColumnDefinition Width="*" MinWidth="400" />
+            </Grid.ColumnDefinitions>
+
+            <!-- LEFT: IDEAS QUEUE -->
+            <Border Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
+                <DockPanel>
+                    <DockPanel DockPanel.Dock="Top" Margin="4,2,4,8">
+                        <TextBlock Text="Build Queue" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock x:Name="QueueCountText" Text="0 ideas" Foreground="{StaticResource MutedBrush}" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                    </DockPanel>
+
+                    <ListBox x:Name="IdeasList" SelectionChanged="IdeasList_SelectionChanged" Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,8">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <!-- Title & Status -->
+                                        <DockPanel Grid.Row="0">
+                                            <Border DockPanel.Dock="Right" Background="{Binding StatusBadgeBrush}" CornerRadius="3" Padding="6,2" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding StatusBadgeText}" Foreground="White" FontSize="10" FontWeight="Bold" />
+                                            </Border>
+                                            <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="13" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                        </DockPanel>
+
+                                        <!-- Target Folder & Handoffs -->
+                                        <StackPanel Grid.Row="1" Margin="0,5,0,6">
+                                            <TextBlock Text="{Binding TargetDirectory}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                            <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                                                <TextBlock Text="{Binding AgentCommand, StringFormat='CLI: {0}'}" Foreground="#60A5FA" FontSize="11" Margin="0,0,10,0" />
+                                                <TextBlock Text="{Binding HandoffCount, StringFormat='Handoffs: {0}'}" Foreground="#34D399" FontSize="11" Margin="0,0,10,0" />
+                                                <TextBlock Text="{Binding ContextHandoffThreshold, StringFormat='Trigger: {0:P0}'}" Foreground="#FBBF24" FontSize="11" />
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <!-- Card Action Buttons -->
+                                        <DockPanel Grid.Row="2">
+                                            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                                                <Button Content="▲" Click="MoveUp_Click" Tag="{Binding}" Width="26" Height="24" Padding="0" Margin="0,0,4,0" ToolTip="Move up in priority" />
+                                                <Button Content="▼" Click="MoveDown_Click" Tag="{Binding}" Width="26" Height="24" Padding="0" Margin="0,0,8,0" ToolTip="Move down in priority" />
+                                            </StackPanel>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                                                <Button Content="▶ Build Now" Click="BuildNow_Click" Tag="{Binding}" Background="#047857" FontSize="11" Padding="8,3" Margin="0,0,6,0" ToolTip="Start building this idea in the Cockpit right away" />
+                                                <Button Content="✕" Click="DeleteIdea_Click" Tag="{Binding}" Background="#7F1D1D" FontSize="11" Width="26" Height="24" Padding="0" ToolTip="Delete this idea" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <!-- SPLITTER -->
+            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="Transparent" />
+
+            <!-- RIGHT: IDEA EDITOR & HANDOFF PREVIEW -->
+            <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="130" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Idea Title & Target Directory -->
+                    <Grid Grid.Row="0" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="130" />
+                            <ColumnDefinition Width="110" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                            <TextBlock Text="App / Idea Title" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,3" />
+                            <TextBox x:Name="EditTitleBox" Style="{StaticResource FieldInput}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Margin="0,0,10,0">
+                            <TextBlock Text="Agent CLI" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,3" />
+                            <ComboBox x:Name="EditAgentCombo" Height="30" Background="#0E1624" Foreground="{StaticResource TextBrush}">
+                                <ComboBoxItem Content="claude" IsSelected="True" />
+                                <ComboBoxItem Content="codex" />
+                                <ComboBoxItem Content="agy" />
+                            </ComboBox>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Context Handoff" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,3" />
+                            <TextBox x:Name="EditThresholdBox" Style="{StaticResource FieldInput}" Text="75%" ToolTip="Context window fraction where handoff occurs" />
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Target Directory -->
+                    <DockPanel Grid.Row="1" Margin="0,0,0,10">
+                        <Button DockPanel.Dock="Right" Content="Browse…" Click="BrowseTargetDir_Click" Padding="12,5" Margin="8,17,0,0" Height="30" />
+                        <StackPanel>
+                            <TextBlock Text="Target Directory (where code will be built)" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,3" />
+                            <TextBox x:Name="EditDirBox" Style="{StaticResource FieldInput}" />
+                        </StackPanel>
+                    </DockPanel>
+
+                    <!-- Description / Specifications -->
+                    <DockPanel Grid.Row="2" Margin="0,0,0,10">
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                            <TextBlock Text="Requirements, Features &amp; Specifications" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" />
+                            <Button DockPanel.Dock="Right" Content="💾 Save Changes" Click="SaveIdea_Click" Background="#2563EB" FontWeight="SemiBold" FontSize="11" Padding="10,3" HorizontalAlignment="Right" />
+                        </DockPanel>
+                        <TextBox x:Name="EditDescriptionBox" Style="{StaticResource Editor}" />
+                    </DockPanel>
+
+                    <!-- Handoff Viewer Header -->
+                    <DockPanel Grid.Row="3" Margin="0,4,0,4">
+                        <TextBlock Text="Latest Handoff (.agenthub/handoff.md)" FontWeight="SemiBold" FontSize="12" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" />
+                        <Button DockPanel.Dock="Right" Content="Open in Context Window" Click="OpenHandoffInContext_Click" FontSize="11" Padding="8,3" HorizontalAlignment="Right" />
+                    </DockPanel>
+
+                    <!-- Handoff Viewer Content -->
+                    <TextBox x:Name="HandoffPreviewBox" Grid.Row="4" Style="{StaticResource Editor}" IsReadOnly="True" />
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- BOTTOM PANEL: ORCHESTRATOR LIVE MONITOR & LOGS -->
+        <Border Grid.Row="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <!-- Metrics & Quota Gauges -->
+                    <ColumnDefinition Width="340" />
+                    <ColumnDefinition Width="12" />
+                    <!-- Live Event Log -->
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Quotas & Status Gauges -->
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Live Orchestrator Status" FontWeight="SemiBold" FontSize="13" Foreground="{StaticResource TextBrush}" Margin="0,0,0,8" />
+
+                    <!-- Active Idea -->
+                    <TextBlock Text="Current Active Build:" Foreground="{StaticResource MutedBrush}" FontSize="11" />
+                    <TextBlock x:Name="ActiveIdeaLabel" Text="None (Idle)" FontWeight="SemiBold" FontSize="12" Foreground="#60A5FA" Margin="0,1,0,8" />
+
+                    <!-- Claude Usage Limits -->
+                    <TextBlock Text="Claude Quota Monitor:" Foreground="{StaticResource MutedBrush}" FontSize="11" />
+                    <TextBlock x:Name="ClaudeQuotaLabel" Text="Checking usage..." FontSize="11" Foreground="{StaticResource TextBrush}" Margin="0,1,0,8" />
+
+                    <!-- Next Reset Timer -->
+                    <TextBlock Text="Next Quota Reset:" Foreground="{StaticResource MutedBrush}" FontSize="11" />
+                    <TextBlock x:Name="ResetCountdownLabel" Text="None active" FontSize="11" FontWeight="SemiBold" Foreground="#F59E0B" />
+                </StackPanel>
+
+                <!-- SPLITTER -->
+                <Border Grid.Column="1" Width="1" Background="{StaticResource BorderBrush}" HorizontalAlignment="Center" />
+
+                <!-- LIVE LOG -->
+                <DockPanel Grid.Column="2">
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                        <TextBlock Text="Orchestrator Activity Log" FontWeight="SemiBold" FontSize="12" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                        <Button DockPanel.Dock="Right" Content="Clear Log" Click="ClearLog_Click" FontSize="10" Padding="6,2" HorizontalAlignment="Right" />
+                    </DockPanel>
+
+                    <ListBox x:Name="LogListBox" Background="#070C14" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Foreground="{StaticResource TextBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="11">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding FormattedTime, StringFormat='[{0}] '}" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBlock Text="{Binding Message}" Foreground="{StaticResource TextBrush}" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

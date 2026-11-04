@@ -155,8 +155,16 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     /// <summary>Window size assumed for Claude Code sessions, which do not record it. Applies from the next launch.</summary>
     public void ConfigureContext(long claudeContextWindowTokens) => _claudeContextWindowTokens = claudeContextWindowTokens;
 
+    public ContextReading? LatestContextReading { get; private set; }
+    public event Action<ContextReading?>? ContextReadingChanged;
+
+    /// <summary>Sends text input directly into this pane's running session.</summary>
+    public void SendInput(string data) => Terminal.SendInput(data);
+
     private void ShowContext(ContextReading? reading)
     {
+        LatestContextReading = reading;
+        ContextReadingChanged?.Invoke(reading);
         if (reading is null)
         {
             ContextBadge.Visibility = Visibility.Collapsed;

@@ -1,6 +1,6 @@
 # AgentHub Handoff Context
 
-**Updated:** 2026-11-04 18:35 (Timeline: stacked branches are one stream in one colour, see the "Stacked branches" paragraph before section 3a; Daniel 18:25 "Looks Perfect", then "push it to main and republish the taskbar build": `main` pushed as `d1d0875`, CI green, taskbar build republished at version `d1d0875`. Earlier the same day: exact screen restore in the session host; squash-merged lanes and a Close button in the Timeline)
+**Updated:** 2026-11-04 20:55 (Project Ideas & Autonomous Auto-Builder: Ideas Queue, Work Mode orchestrator, live Claude usage cap waiting and auto-resume, context window handoff loop into fresh sessions, GitHub sync, desktop build published to AgentHub-App-SSH)
 **Branch with the newest work:** `main` (Daniel asked for the merge 2026-11-04 17:20, "Looks good can you commit it to main"): the deploy branch (`feature/session-host`, section 3b, + `feature/timeline-review`, section 3a) was fast-forwarded onto `main` and pushed. **The taskbar build runs the same commit.**
 **Next task:** nothing queued by Daniel. His next start of the taskbar build picks up the one-colour stream (at 18:11 he was using Claude's test instance from `C:\data\agenthub\build-test26`, the same code, with a Claude Code session on De Beers; leave that instance alone). Candidates: Timeline phase 2 (section 3), the follow-ups (section 4), the session host limits (section 3b). Daniel's running AgentHub (started 16:40) predates the Timeline squash-merge change; his next restart picks it up.
 
@@ -86,6 +86,31 @@ Two buttons beside Refresh in the Timeline window, **✨ You & Claude** and **�
 **What to try (Daniel):** restart AgentHub (the taskbar build has it); the Claude Code pane should come back as it was, within a few seconds, with the context badge; type to confirm the CLI is live. Resize the window with a session running, close, reopen: still exact. Then close a pane with ✕ (asks), Stop all (asks), Relaunch (asks), and check `C:\data\agenthub\sessions\<id>\host.log` if anything looks off.
 
 **Known limits / follow-ups:** a second AgentHub instance attaching to a session another instance holds just times out after 3 s and shows the launcher ("Session lost: …"); a "busy" message would be better. Old `C:\data\agenthub\host\<hash>\` folders are never pruned. The screen is only saved on a graceful close (crash → ring replay + repaint). The repaint nudge (one-row resize and back) makes a TUI redraw twice; not seen to leave artefacts with PowerShell, unverified with Claude Code at the same pane size. The host's outgoing channel is unbounded (a client that stops reading could grow it). Antigravity and SSH sessions go through the host like any other command; untested. Settings-off path (`sessionsOutliveAgentHub: false`) compiles and is simple but was not run.
+
+## 3c. Project Ideas & Autonomous Auto-Builder (built 2026-11-04)
+
+**Daniel's ask (2026-11-04 20:31):** "Kind of like a to do list of application I want to build. The goal is to help me maintain and add Ideas so that they are out of my brain and on the app. I would also like it to integrate with agent hub on my github (clone the latest and replace the one on the desktop). The Idea would be that I could get it to orchestrate the building process while I am at work and use up all of my claude usage each month. It builds the things in the list and builds until my usage cap gets hit, wait for it to reset and then continues building. It also looks at the context window of an agent CLI tool and tells it to handoff when it gets to a point and then starts a new session that looks at that handoff and tells it to keep building"
+
+**What was built:**
+1. **Project Ideas Data & Service (`ProjectIdea.cs`, `IdeaService.cs`):**
+   - Stores application ideas in `%APPDATA%\AgentHub\ideas.json` (thread-safe JSON storage).
+   - Each idea stores: `Title`, `Description` (requirements/spec), `TargetDirectory`, `AgentCommand` (default `claude`), `ContextHandoffThreshold` (default 75%), `Status` (Queued, Building, WaitingForReset, Completed, Paused), `HandoffCount`, `LastActiveAt`, `LastHandoffSummary`.
+   - Full CRUD, priority reordering, and default seeding.
+2. **Autonomous Build Orchestrator Engine (`OrchestratorEngine.cs`):**
+   - Coordinates background building in Cockpit panes.
+   - **Usage Cap Monitoring & Auto-Wait:** polls `ClaudeUsageReader` (Anthropic OAuth API) for 5-hour and 7-day limits. When remaining fraction falls below threshold (<= 3%), smoothly triggers a handoff prompt, pauses the session, calculates the exact reset time (`ResetsAt`), displays a live countdown timer in the UI, and automatically resumes building when the quota window resets.
+   - **Context Window Handoff Loop:** monitors `ContextReading` from `ContextWindowTracker`. When token utilization reaches `ContextHandoffThreshold` (e.g. 75%), injects a handoff prompt into the terminal asking the agent to run tests, write status and next tasks to `.agenthub/handoff.md`, and conclude. When the turn concludes (`AttentionRequested`), saves the summary, stops the session, and boots a fresh CLI session primed with resume instructions from `.agenthub/handoff.md`.
+   - **GitHub Sync (`SyncAgentHubFromGitHubAsync`):** 1-click button to fetch `origin/main`, fast-forward pull, compile, and update the application.
+3. **UI Integration (`IdeasWindow.xaml(.cs)`, `MainWindow.xaml(.cs)`):**
+   - `💡 Ideas & Build` button added to top navigation header.
+   - Split view: left queue with priority badges and reorder controls; right editor with directory picker, CLI selector, threshold slider, spec editor, and `.agenthub/handoff.md` previewer.
+   - Bottom status panel: live orchestrator state, active idea, Claude quota monitors, reset countdown timer, and scrolling event log.
+4. **Terminal Enhancements (`EmbeddedTerminalControl`, `TerminalPaneControl`):**
+   - Added `SendInput(string data)` for direct programmatic input injection into ConPTY sessions.
+   - Exposed `LatestContextReading` and `ContextReadingChanged` events.
+5. **Release & Desktop Deployment:**
+   - Full test suite passes: 235 passed, 0 failed.
+   - Self-contained single-file release build published to `C:\Users\danie\Desktop\AgentHub-App-SSH\AgentHub.exe` and `src\AgentHub\bin\Release\net8.0-windows\win-x64\publish\`. Running executable was safely rotated to `*.old-*`.
 
 ## 4. Timeline follow-ups Daniel has heard about (none asked for yet)
 
