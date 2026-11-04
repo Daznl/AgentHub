@@ -1,8 +1,8 @@
 # AgentHub Handoff Context
 
-**Updated:** 2026-11-04 (end of the Timeline phase 1 session)
-**Branch with the newest work:** `main` = `origin/main` `d53ebf3`. Nothing unmerged, nothing unpushed.
-**Next task:** whatever Daniel asks. The queued items, in his order of interest: republish the taskbar build (section 1), Timeline phase 2 once he answers the three questions (section 3), the smaller Timeline follow-ups (section 4).
+**Updated:** 2026-11-04 (Timeline review session, afternoon)
+**Branch with the newest work:** `feature/timeline-review` (local, **not pushed**, built on `main` `4ee8905`): ✨ Review on the Timeline window (section 3a). Daniel has a test copy running from `C:\data\agenthub\build-test17` (pid 17648) opened on this repo's timeline; **he has not yet clicked Review in the app**, only seen the live run's report.
+**Next task:** Daniel's verdict on the review (report at `C:\data\agenthub\timeline\diag-report.md`, digest beside it); then push and merge `feature/timeline-review` when he asks. Queued after that: republish the taskbar build (section 1), Timeline phase 2 (section 3), the follow-ups (section 4).
 
 Read `README.md`, `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` first; `AGENTS.md` has the engineering rules.
 
@@ -13,11 +13,12 @@ Read `README.md`, `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` first; `AGENTS.md
 | What | State |
 |---|---|
 | `main` = `origin/main` `d53ebf3` | Pushed 2026-11-04 as a fast-forward of `feature/timeline` (which contained `feature/context-review`). CI (`build.yml`) green on all three branches. Holds: ✨ Review of context files, 🌳 Timeline phase 1, dark window chrome everywhere, plus the 2026-11-03 work (session picker PR #6, 📄 Context / 📁 Repo context editors, two-row pane header, three-step launcher, replaced-session event fix). |
+| `feature/timeline-review` | Local only, two commits on top of `main`: `e8cf72e` (the feature) and `fe310e7` (docs, label fix). Tests 174 pass, 4 live skipped. Not pushed, not merged: wait for Daniel. |
 | `feature/context-review`, `feature/timeline` | Pushed, merged, finished. Safe to delete on GitHub when Daniel wants. |
 | ✨ Review | Daniel tested the first version (timed out on the 91 KB De Beers `CLAUDE.md`); the fixed version passed live tests (91 KB in ~170 s) but **Daniel has not retried it in the app**. |
 | 🌳 Timeline | **Approved by Daniel 2026-11-04** ("looks good, leave it as it is") after four rounds of corrections, all in `main` (section 3). |
 | Taskbar build | `src\AgentHub\bin\Release\net8.0-windows\win-x64\publish` (inside the repo), updated with `C:\data\agenthub\publish-local.ps1 -Repo <repo>`. **Still at `1159f31`: no Review, no Timeline, white title bars.** Republish only when Daniel asks; his main instance (pid 32744 at the time of writing) runs from it with live sessions. |
-| Test builds | `C:\data\agenthub\build-test1` … `build-test15`, `build-check`: throwaway. `build-test15` = `main` minus the two handoff commits. Delete the folders once no instance runs from them. |
+| Test builds | `C:\data\agenthub\build-test1` … `build-test17`, `build-check`: throwaway. `build-test16` = `main`; `build-test17` = `feature/timeline-review` (running, pid 17648). Delete the folders once no instance runs from them. |
 
 Pushing: the repo is `Daznl/AgentHub` (Daniel's personal account). `gh auth switch -u Daznl`, push, then `gh auth switch -u DanielWallisBarker` straight after. Push or merge only when Daniel asks. Fast-forward is fine when the branch was built on `main`; check `origin/main` first (`git fetch`, `git log main..origin/main`).
 
@@ -26,7 +27,7 @@ Pushing: the repo is `Daznl/AgentHub` (Daniel's personal account). `gh auth swit
 - **Never automate Daniel's desktop** (no UI Automation clicks, no mouse). Screenshots with `C:\data\agenthub\screens\shot.ps1 -ProcId <pid> -Out <png> -TitleLike <part of window title>` (PrintWindow, read-only) are fine and were used all day. Anything needing clicks or hover: launch a test build and ask Daniel.
 - **Never kill Daniel's running AgentHub instance** (the one under `publish`); it holds live Claude Code sessions. Build to a separate folder: `dotnet build src/AgentHub/AgentHub.csproj -c Release -o C:\data\agenthub\build-testN`. A folder is locked while an instance runs from it, so bump N. Test copies Claude started may be stopped by Claude.
 - Launch a test copy with `Start-Process C:\data\agenthub\build-testN\AgentHub.exe -ArgumentList '--timeline', '"<folder>"'` and give Daniel the process id. He will pop it open on his screen, so what the screenshot shows may already have been scrolled or clicked by him.
-- Tests: `dotnet test tests/AgentHub.Tests/AgentHub.Tests.csproj -c Release`. 160 pass, 3 live tests skipped. Real-repository checks run only with `AGENTHUB_TIMELINE_REPO=<repo>` (and `AGENTHUB_TIMELINE_ARCHIVE=C:\data\agenthub\history`); the live Review test only with `AGENTHUB_LIVE_REVIEW=1` (spends Claude usage). Temporary diagnostic tests (`TimelineDiag.cs`) were the quickest way to question real data; delete them before committing.
+- Tests: `dotnet test tests/AgentHub.Tests/AgentHub.Tests.csproj -c Release`. 174 pass, 4 live tests skipped. Real-repository checks run only with `AGENTHUB_TIMELINE_REPO=<repo>` (and `AGENTHUB_TIMELINE_ARCHIVE=C:\data\agenthub\history`); the live Review test only with `AGENTHUB_LIVE_REVIEW=1` (spends Claude usage). Temporary diagnostic tests (`TimelineDiag.cs`) were the quickest way to question real data; delete them before committing.
 - Python is not installed; use PowerShell or C#. PowerShell 5.1 strips quotes from JSON passed to native programs: pass JSON arguments from Bash.
 - Editing files from Bash with `perl -pi` bit three times today: `$"` interpolates, `\|` in an `s|…|…|` pattern breaks it, `\n` and `\u` in replacements get eaten. Use the Edit tool for anything with quotes, pipes or escapes.
 - Data and scratch output go under `C:\data\agenthub\`, never AppData or Temp.
@@ -54,6 +55,22 @@ Daniel's ask: the story of a project from session 1 to now, matching the GitHub 
 1. Summaries model: Haiku or default?
 2. Backfill: all sessions or from a date?
 3. Also a global Timeline button with a repository picker?
+
+## 3a. Timeline review: what was built and why (on `feature/timeline-review`)
+
+Daniel's ask (2026-11-04): on the project story tree, a review that "looks at only the necessary information and tells the user what should be done differently based on good IGO practices", suggests additions to the main `CLAUDE.md` so Claude handles GitHub and building projects better, "advice for both Claude and the user", "maybe even score it", in two parts: the user and Claude interaction, and the GitHub cycle. Plan approved with the assumptions: default model, Part B scored in C#, additions target the user-wide `CLAUDE.md` only, `gh` for PR facts, 4 h long-session threshold, full prompts for the newest 25 sessions.
+
+**Flow** (`Services/Timeline/TimelineReview.cs`): `GatherAsync` (branch tips, `git log --name-only` over `CLAUDE.md` / `.agenthub/handoff.md` / `docs` → `ReadTouchingAsync`; `gh pr list --state all --limit 100 --json …` → `ReadPullRequestsAsync`, null on any failure; `TranscriptTexts.Read` for the newest 25 sessions, a shared cache with the cards' prompt loading; the user-wide `CLAUDE.md`; repo file facts) → `Compute` (the checks) → `Build` (the digest) → `ClaudePrint.RunAsync` (the `claude -p` lock-down shared with the file Review, in `Services/Instructions/ClaudePrint.cs`) → `Parse` → `Save` to `C:\data\agenthub\timeline\<repo>\review-<stamp>.md` + `digest-<stamp>.txt`.
+
+**Checks** (deterministic; Part A are facts for the model, Part B are scored as the mean compliance over applicable checks × 10): A1 sessions over 4 h; A2 committing sessions that never touched the context files; A3 sessions with no commits; A4 sessions overlapping in one folder. B1 branch names not `^(feat|fix|hotfix|chore|refactor|docs)/…` (IGO: `feature/` fails, which is every branch in this repo); B2 trunk non-merge commits with no `(#N)` subject and not a PR's `mergeCommit` (fast-forward merges count as direct, by the IGO rule); B3 merge commits vs squashes; B4 merged branch names still among the tips; B5–B8 from `gh` only (self-merge, zero reviews, base not trunk, title > 70). Squash-merged deleted branches are invisible to `git log --branches --remotes`, which is why B2–B4 lean on subjects and `gh`.
+
+**Digest** (`<project>`, `<facts>`, `<branches>`, `<pull-requests>`, `<outside-sessions>`, `<sessions>` with ids S1 = newest, `<rules>`, `<user-claude-md>`): 60 KB budget; every session gets at least its one-line form (reserved first), the newest get prompts (≤ 40, 160 chars each) and the last reply (400 chars) while the full form plus all older one-liners still fit. The **IGO rules are data in the request, not the system prompt** (`RulesFor(hasPipeline)`): GitHub-cycle rules always, pipeline-stage rules only when `docs/pipeline-status.md` exists. They were transcribed from the dev kit cache on 2026-11-04; refresh by hand when the kit changes.
+
+**Window** (`TimelineWindow`): ✨ Review beside Refresh (enabled once a model exists; becomes ■ Cancel review); ticker shows the stage ("Reading transcript 3 of 25…", "Asking Claude Code…"); the report is a 460 px column to the right of the tree (not an overlay), with Part A / Part B cards (score 22 px, colour by band, source line under it: "Claude's judgement" / "from N checks"), findings (what, evidence in mono with `S12` ids as links that scroll to and flash the session card, "Instead:", who badge), the additions, and **Add to CLAUDE.md…** → `SuggestionsRequested` → `MainWindow` opens the global Context window and calls the new `ContextWindow.ShowSuggestions(ReviewSuggestion)`, which reuses `ShowReview` with Apply boxes. For that, `InstructionReview.Plan` now treats an empty `start` on a non-empty file as an append before the trailing empty line (stable `OrderBy` so several appends keep their order).
+
+**Verified:** 174 tests; the live test on a synthetic project and a real run on this repo (`TimelineDiag.cs`, deleted again): gather 3 s, digest 22 KB, Claude 118 s, Part A 5/10, Part B 3/10, seven findings and five additions that read as sensible (report at `C:\data\agenthub\timeline\diag-report.md`). Not yet verified by anyone: the report panel and the Add-to-CLAUDE.md hand-off **in the app** (needs a click; Daniel's test copy is open).
+
+**Known limits:** Codex transcripts have replies too but their last reply is whatever the reader returns; the rules digest is hard-coded; no model setting; additions go only to the user-wide file; the B2 rule counts fast-forwarded feature commits as direct-to-main (true to IGO, harsh on Daniel's habit).
 
 ## 4. Timeline follow-ups Daniel has heard about (none asked for yet)
 
