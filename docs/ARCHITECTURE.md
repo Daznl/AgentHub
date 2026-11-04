@@ -27,12 +27,20 @@ MainWindow (WPF)
               |
               +-- EmbeddedTerminalControl (WebView2 + xterm.js)
                    |
-                   +-- ConPtySession (Win32 PseudoConsole HPCON)
+                   +-- ITerminalSession
                         |
-                        +-- ConPtyNative (kernel32 CreatePseudoConsole, CreateProcess)
-                        +-- Anonymous Pipes (in/out streaming)
-                             |
-                             +-- Process (powershell, cmd, codex, claude, agy)
+                        +-- HostedSession (default) -- named pipe --> AgentHub.SessionHost.exe (one per session)
+                        |                                                  |
+                        |                                                  +-- ReplayBuffer (last 2 MB of output)
+                        |                                                  +-- ConPtySession (Win32 PseudoConsole HPCON)
+                        |                                                       |
+                        |                                                       +-- Process (powershell, cmd, codex, claude, agy)
+                        |
+                        +-- LocalSession (fallback: no host) -- ConPtySession in-process, ends with AgentHub
+
+AgentHub.Hosting (class library shared by both executables)
+    +-- ConPtySession / ConPtyNative (kernel32 CreatePseudoConsole, CreateProcess, anonymous pipes)
+    +-- SessionFrame (pipe protocol), ReplayBuffer, SessionRecord / SessionStore (C:\data\agenthub\sessions\<id>\)
 
 External tools
     +-- git
@@ -85,6 +93,19 @@ AgentHub hosts interactive character-mode processes directly inside WPF using:
 3. **Microsoft WebView2 + xterm.js:** Renders the terminal frontend with hardware-accelerated canvas rendering, full ANSI color palette, and dynamic resizing via `fitAddon`.
 4. **Lifecycle & event idempotency:** WPF `Loaded` events fire repeatedly across tab switches and visual tree rearrangements. `EmbeddedTerminalControl` utilizes strict initialization state flags (`_isInitialized`, `_isInitializing`) and idempotent event subscriptions to guarantee zero duplicate input handlers or ghost processes.
 5. **Working directory is a first-class input, not derived from repos.** A session's cwd normally comes from the pane's repository dropdown, but the Cockpit toolbar's "📂 PowerShell in Folder…" and each pane's 📂 button let the user pick any folder through the Windows folder picker. The toolbar button always opens plain PowerShell in a new (or idle) pane; the pane button launches that pane's selected shell/agent and confirms before replacing a running session. The last folder is persisted as `AppSettings.LastTerminalFolder`. Details in [MULTI_SESSION_COCKPIT.md §2.3](MULTI_SESSION_COCKPIT.md).
+
+## Sessions that outlive AgentHub (the session host)
+
+A pseudo-console cannot be handed to another process, so a CLI started inside AgentHub died with it. Now the console lives in a separate process, the terminal-multiplexer shape:
+
+- **One `AgentHub.SessionHost.exe` per session.** AgentHub writes `C:\data\agenthub\sessions\<id>\session.json` (command line, folder, title, size, start time) and starts the host with the id. The host creates the pseudo-console and the process, writes its own pid and the CLI's into the record, keeps a 2 MB `ReplayBuffer` of output, and serves the pipe `\\.\pipe\agenthub-session-<id>`. It lives exactly as long as the CLI: on exit it records the exit code, saves the buffer as `replay.bin`, tells an attached client, and stops. One crash takes one session; hosts share nothing.
+- **Protocol** (`AgentHub.Hosting.SessionFrame`): length-prefixed frames, one type byte and a little-endian 32-bit length. Client → host: `Hello` (protocol version, client pid), `Input`, `Resize`, `Kill`, `Detach`. Host → client: `Welcome` (version, pid, running, exit code, size) or `Refused`, then `Replay` (the buffer, trimmed to a UTF-8 character boundary), then `Output` frames and one `Exited`. Snapshot and hand-over happen under the host's output lock, so a reattaching client misses and repeats nothing. One client at a time; a second AgentHub connecting while one is attached times out and treats the session as busy.
+- **In AgentHub**, `ITerminalSession` sits between `EmbeddedTerminalControl` and the process: `HostedSession` (the pipe client; `Detach` releases without ending, `Kill` ends) and `LocalSession` (the old in-process `ConPtySession`, used when the host executable is missing or fails to start; the pane says so). `SessionHostService` starts and attaches hosts and lists live ones (`Process.GetProcessById` + process name check on each record).
+- **Closing AgentHub detaches; only explicit actions kill.** `MainWindow.OnClosed` saves the pane layout and detaches every pane. A pane's ✕ (confirmed when a session runs), **Stop**, **Relaunch** (confirmed) and **■ Stop all** (confirmed) send `Kill`. AgentHub never ends a host it did not start in this run without asking.
+- **Reattach on start** (`MainWindow.RestorePanes`): one pane per `AppSettings.PaneLayout` entry; a live host → attach and replay (the context badge and last prompt come back on their own, since the record keeps the transcript path and the tracker is started with the recorded start time); a dead host → the record's exit code and `replay.bin` are shown and the launcher opens on the same folder and CLI pointing at the transcript; no session → the launcher on the saved folder and CLI. Live hosts the layout does not mention get panes too, so a lost layout never hides a running session.
+- **Live publish safety.** The host executable ships beside `AgentHub.exe` (a project reference) but runs from `C:\data\agenthub\host\<hash of its own dll>\`, copied on first use. A publish over the live folder never touches a running host, and an old host keeps its old code while a newer AgentHub attaches; the `Hello`/`Welcome` version field lets a mismatch refuse politely.
+
+Tests: the framing, the ring buffer and the record store are pure (`SessionFrameTests`, `ReplayBufferTests`, `SessionStoreTests`); `SessionHostLiveTests` runs the real host with PowerShell in a folder whose path has spaces, attaches, types, detaches, reattaches and reads the replay, exits, and checks the record and replay on disk.
 
 ## Planned v0.2 session model
 

@@ -315,6 +315,8 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         try
         {
             if (Host is not { IsAvailable: true } host) throw new InvalidOperationException(Host?.UnavailableReason ?? "The session host is not available.");
+            // A dead host has no pipe to wait on; say so at once instead of timing out.
+            if (!SessionStore.IsHostAlive(record)) throw new InvalidOperationException("its session host is no longer running");
             RaiseSubtitle("Reattaching…");
             hosted = await host.AttachAsync(record);
         }

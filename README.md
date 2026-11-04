@@ -61,7 +61,8 @@ It never stores API keys or provider credentials. Authentication stays with the 
 
 - Run up to six interactive sessions side by side inside AgentHub, powered by Windows ConPTY and xterm.js in WebView2.
 - Each pane can host Codex, Claude Code, Antigravity, PowerShell or Cmd, in any registered repository or any folder you pick. An idle pane shows a three-step launcher in place of the terminal: **① Repository** (🏠 Home, your user profile folder; a browsed folder; or a registered repository; a filter box appears past 8 entries, and **📂 Browse for another folder…** picks any folder), then **② Function type** (an agent CLI or shell; with Home chosen, also each saved SSH connection and **⚙ Manage SSH connections…**), then **③ Session**. Each finished step folds to one line with **Change**. Function types without recorded sessions (PowerShell, Cmd, Antigravity, SSH) start as soon as they are picked. The terminal stays hidden at full size underneath, so a CLI started from the launcher never sees a resize.
-- Draggable splitters, **➕ Add Terminal**, per-pane close buttons and clean session teardown.
+- Draggable splitters, **➕ Add Terminal**, per-pane close buttons (closing a pane with a running session asks first, because it ends that session) and **■ Stop all** (asks, then ends every running session).
+- **Sessions survive restarts.** Each session runs in its own small `AgentHub.SessionHost.exe` process that owns the console and the CLI, so closing AgentHub, updating it and opening it again leaves Claude Code (or any shell) running, a turn in flight included. On start, AgentHub brings the panes back in their saved order and reattaches each one to its session, replaying what the terminal showed (the last 2 MB of output). A session that ended while AgentHub was away shows its last screen and how it ended, with the launcher open on the same folder and CLI pointing at its transcript for a resume. Only the pane's ✕, **Stop**, **Relaunch** and **■ Stop all** end sessions; closing AgentHub never does. Hosts run from `C:\data\agenthub\host\<build>\`, a copy of the host keyed by its own bytes, so publishing a new AgentHub over the old one never touches a running session; records, replays and logs sit under `C:\data\agenthub\sessions\<id>\` (`session.json`, `replay.bin`, `host.log`). If the host cannot start, the session runs inside AgentHub as before and the pane says so. Off switch: `sessionsOutliveAgentHub` in settings.
 - **Pane header.** The title row names the repository or folder. With no session the row below holds **📁 Repo context**, **🌳** (timeline), **🕘**, move and close; after a session ends, **New session** reopens the launcher over its output (**← Back to the last session's output** closes it again). While a session runs it slims down to the context badge, **📂** (opens the session's folder in Explorer), **Relaunch** (asks, then starts a fresh session of the same CLI in the same folder), **📁 Repo context**, **🌳**, move and close. Both layouts are the same height, so starting a session never resizes the terminal under the CLI's first screen.
 - **Working and waiting indicators.** A pane running a coding CLI breathes blue while the CLI is producing output. When the CLI goes quiet, or rings the terminal bell, the pane pulses amber with a **⏳ WAITING FOR YOU** badge until you type. If AgentHub is in the background, the taskbar button flashes. Plain shells are never tracked.
 - **SSH.** Save connections with the **🔐 SSH** header button: an optional name plus `user@host` or `user@host:port`. In a pane's launcher, choose **🏠 Home** and the saved connections appear under **② Function type**; picking one connects straight away. The session runs your own OpenSSH client inside PowerShell, so `exit` drops you back to a local prompt. AgentHub stores only the address; passwords and keys stay with `ssh`.
@@ -216,6 +217,11 @@ Defaults:
 | `attentionIdleSeconds` | Seconds of silence after a burst of agent output before a pane counts as waiting. |
 | `claudeContextWindowTokens` | Context window size assumed for Claude Code in the pane context badge, which Claude Code does not record. Raised automatically if a session grows past it. Applies to sessions launched after the change. |
 | `lastTerminalFolder`, `lastScanFolder` | Remembered folder-picker locations. Written automatically. |
+| `sessionsOutliveAgentHub` | Run each Cockpit session in its own `AgentHub.SessionHost.exe` so it survives closing or updating AgentHub, and reattach on start. `false` runs sessions inside AgentHub, where they end with it. |
+| `sessionsDirectory` | Where session records, replays and host logs live (`C:\data\agenthub\sessions`). Ended sessions are pruned to the newest 20 at start. |
+| `paneLayout` | The Cockpit panes as last saved (order, folder, CLI, running session id). Written automatically; what the next start restores. |
+
+Set `AGENTHUB_SETTINGS_DIR` to run a second copy of AgentHub (a test build, say) with its own settings file and pane layout instead of sharing this one.
 
 A pane is considered waiting when its coding CLI produced at least 1.5 seconds of continuous output after your last keystroke and has then been silent for `attentionIdleSeconds`, or when it rings the bell. Output within 0.75 seconds of a keystroke is treated as echo of your own typing.
 
@@ -298,8 +304,10 @@ src/AgentHub/                     WPF application
   Services/History/               session transcripts: listing, reading, permanent archive
   Services/Instructions/          context files and the Claude Code review of them
   Services/Timeline/              project timeline: commit attribution, lane layout, git and transcript readers
-  Terminal/                       ConPTY host, xterm.js assets and the terminal controls
+  Terminal/                       terminal controls, xterm.js assets, the session interface (local or hosted) and the host client
   Sessions/                       interfaces for the planned session layer
+src/AgentHub.Hosting/             shared by both executables: ConPTY wrapper, pipe frame protocol, replay buffer, session records
+src/AgentHub.SessionHost/         the per-session host process that keeps a CLI running while AgentHub is closed
 tests/AgentHub.Tests/             xUnit tests
 docs/                             architecture, GitHub integration, cockpit design, roadmap
 .github/workflows/build.yml       CI: restore and Release build on windows-latest
