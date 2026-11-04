@@ -16,6 +16,7 @@ public partial class SshConnectionsWindow : Window
     {
         InitializeComponent();
         Controls.DarkTitleBar.Apply(this);
+        Controls.WindowPlacement.KeepOnScreen(this);
         _connections = connections;
         RefreshList();
         Loaded += (_, _) => TargetBox.Focus();

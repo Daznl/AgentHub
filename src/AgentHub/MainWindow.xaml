@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:terminal="clr-namespace:AgentHub.Terminal"
         xmlns:controls="clr-namespace:AgentHub.Controls"
-        Title="AgentHub - Repository &amp; Agent Cockpit" Height="860" Width="1340" MinHeight="680" MinWidth="1020"
+        Title="AgentHub - Repository &amp; Agent Cockpit" Height="860" Width="1340" MinHeight="640" MinWidth="1020"
         Icon="Assets/AppIcon.png">
     <Grid>
     <!-- Animated deep-space backdrop. Sits behind all content and ignores input. -->

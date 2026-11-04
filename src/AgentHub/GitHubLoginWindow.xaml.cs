@@ -29,6 +29,7 @@ public partial class GitHubLoginWindow : Window
     {
         InitializeComponent();
         Controls.DarkTitleBar.Apply(this);
+        Controls.WindowPlacement.KeepOnScreen(this);
         _github = github;
         Loaded += (_, _) => { HostBox.Focus(); HostBox.SelectAll(); };
         Closing += (_, _) => { if (_running) _cts.Cancel(); };

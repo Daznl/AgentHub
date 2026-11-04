@@ -80,6 +80,7 @@ public partial class MainWindow : Window
         _usageRefreshTimer.Tick += async (_, _) => await RefreshUsageAsync();
         Loaded += MainWindow_Loaded;
         Controls.DarkTitleBar.Apply(this);
+        Controls.WindowPlacement.KeepOnScreen(this);
         AgentCombo.SelectionChanged += (_, _) => UpdateAgentPreview();
     }
 

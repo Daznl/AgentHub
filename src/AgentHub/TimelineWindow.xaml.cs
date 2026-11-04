@@ -75,6 +75,7 @@ public partial class TimelineWindow : Window
     {
         InitializeComponent();
         Controls.DarkTitleBar.Apply(this);
+        Controls.WindowPlacement.KeepOnScreen(this);
         _runner = runner;
         _scope = scope;
         _archiveRoot = archiveRoot;

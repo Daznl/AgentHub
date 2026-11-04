@@ -99,7 +99,7 @@ Two buttons beside Refresh in the Timeline window, **✨ You & Claude** and **�
 - The Start Menu shortcut points at an old copy under `%LOCALAPPDATA%\AgentHub`; the taskbar pin uses the repo's `publish` folder.
 - `*.old-*` files in the `publish` folder are left by live swaps; delete them once the main instance has been restarted.
 - CI warns that `actions/checkout@v4` and `actions/setup-dotnet@v4` target Node 20; harmless for now.
-- The test instance's window opened at a small default size with cramped panes; Daniel's instance may be maximised by habit. Not looked into.
+- Windows and the laptop screen (fixed 2026-11-04 17:40, `Controls/WindowPlacement.cs`): Daniel's screen is 1920 × 1080 at 150% = 1280 × 672 logical pixels of work area, and every AgentHub window's XAML size is bigger than that (Timeline 1240 × 840, History 1380 × 860, Context 820 × 680, main 1340 × 860). Centred on a maximised owner, the Timeline opened 126 physical pixels above the screen top: title bar and header row, both close buttons included, off-screen. That was Daniel's "there is no close button for the project tree" (twice). `WindowPlacement.KeepOnScreen(window)` runs at `SourceInitialized` in all six windows: shrinks to the screen's work area and moves the window inside it (`Fit` is pure and tested). Main window `MinHeight` 680 → 640 so it fits the 672 logical work area. Checked with a test instance: Timeline at T=0, B=1008 (was T=-126). Screenshots are taken with `C:\data\agenthub\screens\shot.ps1`, now DPI-aware so the capture is the whole window.
 
 ## 6. Architecture and coding constraints (still true)
 

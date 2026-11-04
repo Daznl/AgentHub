@@ -46,6 +46,7 @@ public partial class HistoryWindow : Window
     {
         InitializeComponent();
         Controls.DarkTitleBar.Apply(this);
+        Controls.WindowPlacement.KeepOnScreen(this);
         _archiveRoot = archiveRoot;
         LocationList.ItemsSource = _locations;
         UpdateRepositories(repositories);

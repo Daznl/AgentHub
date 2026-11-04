@@ -33,6 +33,7 @@ public partial class ContextWindow : Window
     {
         InitializeComponent();
         Controls.DarkTitleBar.Apply(this);
+        Controls.WindowPlacement.KeepOnScreen(this);
         Activated += (_, _) => CheckDisk();
     }
 
