@@ -276,7 +276,8 @@ public static partial class TimelineReview
             var how = b.IsTrunk ? "trunk"
                 : b.IsImported ? "imported history" + (b.MergeHash is not null ? $", joined at {Short(b.MergeHash)}" : "")
                 : b.MergeHash is not null ? (byHash.TryGetValue(b.MergeHash, out var m) && m.IsMerge ? $"merged by merge commit {m.Short}" : $"merged at {Short(b.MergeHash)}")
-                : prByHead.TryGetValue(b.Name, out var pr) && pr.IsMerged ? $"merged through PR #{pr.Number}" + (pr.MergeCommit is not null ? $" (squash {Short(pr.MergeCommit)})" : "")
+                : prByHead.TryGetValue(b.Name, out var pr) && pr.IsMerged ? $"merged through PR #{pr.Number}" + (pr.MergeCommit is null ? ""
+                    : byHash.TryGetValue(pr.MergeCommit, out var pm) && pm.IsMerge ? $" (merge commit {pm.Short})" : $" (squash {Short(pr.MergeCommit)})")
                 : "not merged";
             fixedPart.AppendLine($"{b.Name}: {commits.Count} commits, {span}, {how}");
         }

@@ -19,6 +19,9 @@ MainWindow (WPF)
     +-- UsageService --------- clean per-provider usage readers + normalized snapshots
     +-- AgentLauncher --------- wt.exe / powershell.exe external launcher
     +-- RepoContextService ---- .agenthub/handoff.md + Explorer/browser
+    +-- ContextWindow --------- InstructionFiles (CLAUDE.md / AGENTS.md / GEMINI.md) + InstructionReview (claude -p via ClaudePrint)
+    +-- TimelineWindow -------- TimelineSource (git log, for-each-ref, gh pr list, transcripts) -> TimelineBuilder (branch graph, attribution)
+    |     +-- TimelineReview     checks + digest -> ClaudePrint -> scored report; rules go to ContextWindow as review hunks
     |
     +-- Multi-Session Cockpit (WPF Grid + Splitters)
          |
