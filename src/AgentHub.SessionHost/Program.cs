@@ -148,22 +148,23 @@ public static class Program
                     Log("client sent no hello; dropped");
                     return;
                 }
-                var (version, clientPid) = SessionFrame.ReadHello(hello);
+                var (version, clientPid, fromOffset) = SessionFrame.ReadHello(hello);
                 if (version != SessionFrame.ProtocolVersion)
                 {
                     Log($"client {clientPid} speaks protocol {version}, host speaks {SessionFrame.ProtocolVersion}; refused");
                     await SessionFrame.Refused($"This session host speaks protocol {SessionFrame.ProtocolVersion}; the client speaks {version}.").WriteAsync(pipe);
                     return;
                 }
-                Log($"client {clientPid} attached");
 
                 // Snapshot and hand-over happen under the same lock as output appends, so nothing is lost or sent twice.
+                ReplaySlice replay;
                 lock (_lock)
                 {
                     var running = !_exited.Task.IsCompleted;
                     var exitCode = running ? 0 : _exited.Task.Result;
-                    channel.Writer.TryWrite(SessionFrame.Welcome(_record.ProcessId, running, exitCode, _cols, _rows));
-                    channel.Writer.TryWrite(SessionFrame.Replay(_buffer.Snapshot()));
+                    replay = _buffer.SnapshotFrom(fromOffset);
+                    channel.Writer.TryWrite(SessionFrame.Welcome(_record.ProcessId, running, exitCode, _cols, _rows, _buffer.TotalAppended, replay.Offset));
+                    channel.Writer.TryWrite(SessionFrame.Replay(replay.Bytes));
                     if (!running)
                     {
                         channel.Writer.TryWrite(SessionFrame.Exited(exitCode));
@@ -171,6 +172,9 @@ public static class Program
                     }
                     _client = channel;
                 }
+                Log(fromOffset >= 0 && replay.Offset == fromOffset
+                    ? $"client {clientPid} attached; replaying from its offset {fromOffset} ({replay.Bytes.Length} bytes)"
+                    : $"client {clientPid} attached; replaying the ring from {replay.Offset} ({replay.Bytes.Length} bytes)");
 
                 var writer = PumpAsync(channel.Reader, pipe);
                 var reader = ReadClientAsync(pipe);
@@ -249,9 +253,10 @@ public static class Program
 
         private void Finish(int exitCode)
         {
+            var replay = _buffer.SnapshotFrom(-1);
             try
             {
-                File.WriteAllBytes(_store.ReplayPath(_record.Id), _buffer.Snapshot());
+                File.WriteAllBytes(_store.ReplayPath(_record.Id), replay.Bytes);
             }
             catch (Exception ex)
             {
@@ -260,6 +265,7 @@ public static class Program
 
             // AgentHub may have added the transcript path meanwhile; keep it.
             if (_store.Load(_record.Id) is { TranscriptPath: { } transcript }) _record.TranscriptPath = transcript;
+            _record.ReplayStart = replay.Offset;
             _record.ExitCode = exitCode;
             _record.ExitedAt = DateTimeOffset.Now;
             _record.Cols = _cols;

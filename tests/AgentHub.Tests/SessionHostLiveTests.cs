@@ -59,16 +59,21 @@ public sealed class SessionHostLiveTests : IDisposable
         var first = await service.StartAsync(record);
         var output = new StringBuilder();
         var exited = new TaskCompletionSource<int>();
-        first.OutputDataReceived += text => { lock (output) output.Append(text); };
+        first.OutputDataReceived += (text, _) => { lock (output) output.Append(text); };
         first.ProcessExited += code => exited.TrySetResult(code);
         first.Start();
         Assert.True(first.IsRunning);
         Assert.True(record.HostPid > 0);
         Assert.True(SessionStore.IsHostAlive(record));
+        Assert.Equal((100, 30), (first.Welcome.Cols, first.Welcome.Rows));
+        Assert.True(first.Offset >= 0);
 
         first.Write("echo marker-one-$(1+1)\r");
         string Seen() { lock (output) return output.ToString(); }
         await WaitForAsync(Seen, "marker-one-2", TimeSpan.FromSeconds(30));
+        await Task.Delay(300);
+        var seenUpTo = first.Offset;
+        Assert.True(seenUpTo > 0);
 
         // Detach: the host and the shell keep running.
         first.Detach();
@@ -76,19 +81,38 @@ public sealed class SessionHostLiveTests : IDisposable
         Assert.True(SessionStore.IsHostAlive(record));
         Assert.False(exited.Task.IsCompleted);
 
-        // Reattach: the replay holds what was typed before, then live output continues.
-        var second = await service.AttachAsync(record);
-        Assert.Contains("marker-one-2", second.ReplayText, StringComparison.Ordinal);
+        // Reattach from where the first client stood: the replay is only what came after, then live output continues.
+        var second = await service.AttachAsync(record, seenUpTo);
+        Assert.Equal(seenUpTo, second.ReplayStart);
+        Assert.DoesNotContain("marker-one-2", second.ReplayText, StringComparison.Ordinal);
+        Assert.Equal((100, 30), (second.Welcome.Cols, second.Welcome.Rows));
         Assert.True(second.IsRunning);
         var output2 = new StringBuilder();
         var exited2 = new TaskCompletionSource<int>();
-        second.OutputDataReceived += text => { lock (output2) output2.Append(text); };
+        second.OutputDataReceived += (text, _) => { lock (output2) output2.Append(text); };
         second.ProcessExited += code => exited2.TrySetResult(code);
         second.Start();
         second.Resize(120, 40);
-        second.Write("echo marker-two-$(2+2)\r");
+        second.Write("echo marker-two-$(2+2)-$($Host.UI.RawUI.WindowSize.Width)\r");
         string Seen2() { lock (output2) return output2.ToString(); }
-        await WaitForAsync(Seen2, "marker-two-4", TimeSpan.FromSeconds(30));
+        await WaitForAsync(Seen2, "marker-two-4-120", TimeSpan.FromSeconds(30));
+
+        // A third client that asks for nothing in particular gets the whole ring, from the start.
+        second.Detach();
+        await Task.Delay(300);
+        var third = await service.AttachAsync(record);
+        Assert.Equal(0, third.ReplayStart);
+        Assert.Contains("marker-one-2", third.ReplayText, StringComparison.Ordinal);
+        Assert.Contains("marker-two-4-120", third.ReplayText, StringComparison.Ordinal);
+        Assert.Equal((120, 40), (third.Welcome.Cols, third.Welcome.Rows));
+        third.Detach();
+        await Task.Delay(300);
+        second = await service.AttachAsync(record, seenUpTo);
+        Assert.Equal(seenUpTo, second.ReplayStart);
+        output2.Clear();
+        second.OutputDataReceived += (text, _) => { lock (output2) output2.Append(text); };
+        second.ProcessExited += code => exited2.TrySetResult(code);
+        second.Start();
 
         // Exit: the client hears it, the host records it and saves the replay, then stops.
         second.Write("exit\r");
@@ -105,6 +129,7 @@ public sealed class SessionHostLiveTests : IDisposable
         Assert.Equal(0, saved!.ExitCode);
         Assert.NotNull(saved.ExitedAt);
         Assert.Equal((120, 40), (saved.Cols, saved.Rows));
+        Assert.Equal(0, saved.ReplayStart);
         var replay = Encoding.UTF8.GetString(File.ReadAllBytes(service.Store.ReplayPath(record.Id)));
         Assert.Contains("marker-one-2", replay, StringComparison.Ordinal);
         Assert.Contains("marker-two-4", replay, StringComparison.Ordinal);

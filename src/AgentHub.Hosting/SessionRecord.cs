@@ -35,8 +35,29 @@ public sealed class SessionRecord
     /// <summary>Transcript the pane's context badge bound to, so a reattached pane finds it again at once.</summary>
     public string? TranscriptPath { get; set; }
 
+    /// <summary>
+    /// Stream offset of the first byte of <c>replay.bin</c>, written by the host when the CLI exits (the ring dropped what
+    /// came before). Lets AgentHub lay a saved screen and the rest of the replay end to end. -1 until the host has exited.
+    /// </summary>
+    public long ReplayStart { get; set; } = -1;
+
     [JsonIgnore]
     public bool HasExited => ExitCode is not null || Error is not null;
+}
+
+/// <summary>
+/// The terminal exactly as a pane showed it when AgentHub let go of the session: the terminal's own state (scrollback,
+/// colours, cursor) serialised as escape sequences, the size it had, and the stream offset it had consumed. Written by
+/// AgentHub to <c>screen.json</c> on close; on the next attach the pane restores it and plays only the output after
+/// <see cref="Offset"/>, so what was on screen comes back as it was. Nothing the host reads.
+/// </summary>
+public sealed class ScreenSnapshot
+{
+    public long Offset { get; set; } = -1;
+    public int Cols { get; set; }
+    public int Rows { get; set; }
+    public string Screen { get; set; } = "";
+    public DateTimeOffset SavedAt { get; set; }
 }
 
 /// <summary>Where session records live and how both processes find each other through them.</summary>
@@ -60,6 +81,35 @@ public sealed class SessionStore
     /// <summary>The replay buffer as it was when the CLI exited, so an ended session can still show its last screen.</summary>
     public string ReplayPath(string id) => Path.Combine(Directory(id), "replay.bin");
     public string LogPath(string id) => Path.Combine(Directory(id), "host.log");
+    /// <summary>The pane's terminal state when AgentHub last let go of the session (<see cref="ScreenSnapshot"/>).</summary>
+    public string ScreenPath(string id) => Path.Combine(Directory(id), "screen.json");
+
+    public void SaveScreen(string id, ScreenSnapshot screen)
+    {
+        System.IO.Directory.CreateDirectory(Directory(id));
+        var path = ScreenPath(id);
+        var temp = path + ".tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(screen, JsonOptions));
+        File.Move(temp, path, overwrite: true);
+    }
+
+    public ScreenSnapshot? LoadScreen(string id)
+    {
+        var path = ScreenPath(id);
+        if (!File.Exists(path)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<ScreenSnapshot>(File.ReadAllText(path), JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+    }
 
     public void Save(SessionRecord record)
     {

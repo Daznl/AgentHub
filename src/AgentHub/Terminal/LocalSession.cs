@@ -10,7 +10,7 @@ public sealed class LocalSession : ITerminalSession
     private LocalSession(ConPtySession inner)
     {
         _inner = inner;
-        _inner.OutputDataReceived += text => OutputDataReceived?.Invoke(text);
+        _inner.OutputDataReceived += text => OutputDataReceived?.Invoke(text, -1);
         _inner.ProcessExited += code => ProcessExited?.Invoke(code);
     }
 
@@ -21,7 +21,7 @@ public sealed class LocalSession : ITerminalSession
     public int ProcessId => _inner.ProcessId;
     public string? HostedId => null;
 
-    public event Action<string>? OutputDataReceived;
+    public event Action<string, long>? OutputDataReceived;
     public event Action<int>? ProcessExited;
 
     public void Write(string data) => _inner.Write(data);

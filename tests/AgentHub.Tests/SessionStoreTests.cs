@@ -59,6 +59,30 @@ public sealed class SessionStoreTests : IDisposable
     }
 
     [Fact]
+    public void Screen_snapshot_round_trips_and_a_record_without_replay_start_reads_unknown()
+    {
+        var store = new SessionStore(_root);
+        var screen = new ScreenSnapshot
+        {
+            Offset = 1_234_567,
+            Cols = 145,
+            Rows = 47,
+            Screen = "\u001b[1;1H\u001b[38;2;255;107;90m╭─ box ─╮\r\n│ ✓ ok │\u001b[0m\u001b[47;3H",
+            SavedAt = new DateTimeOffset(2026, 11, 4, 16, 30, 0, TimeSpan.FromHours(8))
+        };
+        store.SaveScreen("with screen", screen);
+        var back = store.LoadScreen("with screen");
+        Assert.NotNull(back);
+        Assert.Equal((screen.Offset, screen.Cols, screen.Rows, screen.Screen, screen.SavedAt), (back!.Offset, back.Cols, back.Rows, back.Screen, back.SavedAt));
+        Assert.False(File.Exists(store.ScreenPath("with screen") + ".tmp"));
+        Assert.Null(store.LoadScreen("never saved"));
+
+        Directory.CreateDirectory(store.Directory("old"));
+        File.WriteAllText(store.RecordPath("old"), "{ \"Id\": \"old\", \"ExitCode\": 0 }");
+        Assert.Equal(-1, store.Load("old")!.ReplayStart);
+    }
+
+    [Fact]
     public void Missing_root_lists_nothing_and_unknown_id_loads_null()
     {
         var store = new SessionStore(Path.Combine(_root, "never made"));

@@ -1957,6 +1957,37 @@ public partial class MainWindow : Window
         public IntPtr Handle => new System.Windows.Interop.WindowInteropHelper(_window).Handle;
     }
 
+    // Before letting go of hosted sessions, each pane saves its terminal exactly as shown (scrollback, colours, cursor and
+    // the output offset it stands at), so the next start puts it back as it was instead of rebuilding it from raw output.
+    // The close is held while the pages answer, two seconds at most; a second close during that is ignored.
+    private bool _screensSaved;
+    private bool _savingScreens;
+
+    protected override async void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        base.OnClosing(e);
+        if (e.Cancel || _screensSaved) return;
+        var hosted = _panes.Where(p => p.IsHosted).ToList();
+        if (hosted.Count == 0)
+        {
+            _screensSaved = true;
+            return;
+        }
+        e.Cancel = true;
+        if (_savingScreens) return;
+        _savingScreens = true;
+        try
+        {
+            await Task.WhenAll(hosted.Select(p => p.SaveScreenAsync(TimeSpan.FromSeconds(2))));
+        }
+        catch
+        {
+            // The next attach falls back to the host's replay for any pane whose screen was not saved.
+        }
+        _screensSaved = true;
+        Close();
+    }
+
     // Closing AgentHub never ends a session: hosted ones are detached and reattached by the next start from the saved
     // layout. Sessions running inside AgentHub (no host available) have nowhere to go and end here.
     protected override void OnClosed(EventArgs e)

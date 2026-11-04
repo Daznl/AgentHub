@@ -28,7 +28,11 @@ public enum FrameType : byte
 
 public sealed record SessionFrame(FrameType Type, byte[] Payload)
 {
-    /// <summary>Bumped when a frame's shape changes; a host and a client that disagree part politely.</summary>
+    /// <summary>
+    /// Bumped when a frame changes in a way an older side cannot read; a host and a client that disagree part politely.
+    /// Fields added at the end of <see cref="Hello"/> and <see cref="Welcome"/> are not that: readers treat a short payload
+    /// as "not sent", so a host started by an older AgentHub still serves a newer one, and the other way round.
+    /// </summary>
     public const ushort ProtocolVersion = 1;
 
     /// <summary>Largest payload either side accepts; anything bigger is a corrupt stream, not a message.</summary>
@@ -81,17 +85,24 @@ public sealed record SessionFrame(FrameType Type, byte[] Payload)
 
     // ---- Typed builders and readers ----
 
-    /// <summary>Client: protocol version and the client's process id (so the host log says who attached).</summary>
-    public static SessionFrame Hello(int clientPid)
+    /// <summary>
+    /// Client: protocol version, the client's process id (so the host log says who attached), and the stream offset up to
+    /// which it already shows the session's output (-1 for none), so the host can replay only what came after.
+    /// </summary>
+    public static SessionFrame Hello(int clientPid, long fromOffset = -1)
     {
-        var payload = new byte[6];
+        var payload = new byte[14];
         BinaryPrimitives.WriteUInt16LittleEndian(payload, ProtocolVersion);
         BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(2), clientPid);
+        BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(6), fromOffset);
         return new SessionFrame(FrameType.Hello, payload);
     }
 
-    public static (ushort Version, int ClientPid) ReadHello(SessionFrame frame) =>
-        (BinaryPrimitives.ReadUInt16LittleEndian(frame.Payload), BinaryPrimitives.ReadInt32LittleEndian(frame.Payload.AsSpan(2)));
+    /// <summary>A hello from the first build of the client has no offset; that reads as -1.</summary>
+    public static (ushort Version, int ClientPid, long FromOffset) ReadHello(SessionFrame frame) => (
+        BinaryPrimitives.ReadUInt16LittleEndian(frame.Payload),
+        BinaryPrimitives.ReadInt32LittleEndian(frame.Payload.AsSpan(2)),
+        frame.Payload.Length >= 14 ? BinaryPrimitives.ReadInt64LittleEndian(frame.Payload.AsSpan(6)) : -1);
 
     public static SessionFrame Input(string text) => new(FrameType.Input, Encoding.UTF8.GetBytes(text));
 
@@ -109,26 +120,35 @@ public sealed record SessionFrame(FrameType Type, byte[] Payload)
     public static SessionFrame Kill() => new(FrameType.Kill, NoPayload);
     public static SessionFrame Detach() => new(FrameType.Detach, NoPayload);
 
-    /// <summary>Host: protocol version, the CLI's process id, whether it still runs, its exit code if not, and the console size.</summary>
-    public static SessionFrame Welcome(int processId, bool running, int exitCode, int cols, int rows)
+    /// <summary>
+    /// Host: protocol version, the CLI's process id, whether it still runs, its exit code if not, the console size, then the
+    /// stream offsets the replay that follows ends at and starts at (so the client knows whether it got the delta it asked
+    /// for or the whole ring).
+    /// </summary>
+    public static SessionFrame Welcome(int processId, bool running, int exitCode, int cols, int rows, long totalAppended = -1, long replayStart = -1)
     {
-        var payload = new byte[15];
+        var payload = new byte[31];
         BinaryPrimitives.WriteUInt16LittleEndian(payload, ProtocolVersion);
         BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(2), processId);
         payload[6] = running ? (byte)1 : (byte)0;
         BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(7), exitCode);
         BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(11), (ushort)cols);
         BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(13), (ushort)rows);
+        BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(15), totalAppended);
+        BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(23), replayStart);
         return new SessionFrame(FrameType.Welcome, payload);
     }
 
+    /// <summary>A welcome from the first build of the host has no offsets; both read as -1 (unknown).</summary>
     public static WelcomeInfo ReadWelcome(SessionFrame frame) => new(
         BinaryPrimitives.ReadUInt16LittleEndian(frame.Payload),
         BinaryPrimitives.ReadInt32LittleEndian(frame.Payload.AsSpan(2)),
         frame.Payload[6] == 1,
         BinaryPrimitives.ReadInt32LittleEndian(frame.Payload.AsSpan(7)),
         BinaryPrimitives.ReadUInt16LittleEndian(frame.Payload.AsSpan(11)),
-        BinaryPrimitives.ReadUInt16LittleEndian(frame.Payload.AsSpan(13)));
+        BinaryPrimitives.ReadUInt16LittleEndian(frame.Payload.AsSpan(13)),
+        frame.Payload.Length >= 31 ? BinaryPrimitives.ReadInt64LittleEndian(frame.Payload.AsSpan(15)) : -1,
+        frame.Payload.Length >= 31 ? BinaryPrimitives.ReadInt64LittleEndian(frame.Payload.AsSpan(23)) : -1);
 
     public static SessionFrame Refused(string reason) => new(FrameType.Refused, Encoding.UTF8.GetBytes(reason));
     public static string ReadText(SessionFrame frame) => Encoding.UTF8.GetString(frame.Payload);
@@ -146,4 +166,9 @@ public sealed record SessionFrame(FrameType Type, byte[] Payload)
     public static int ReadExited(SessionFrame frame) => BinaryPrimitives.ReadInt32LittleEndian(frame.Payload);
 }
 
-public sealed record WelcomeInfo(ushort Version, int ProcessId, bool Running, int ExitCode, int Cols, int Rows);
+/// <summary>
+/// What the host says on attach. <paramref name="TotalAppended"/> is the stream offset the replay ends at (everything the
+/// session has written so far); <paramref name="ReplayStart"/> is where the replay begins. Both -1 from a host built before
+/// they existed.
+/// </summary>
+public sealed record WelcomeInfo(ushort Version, int ProcessId, bool Running, int ExitCode, int Cols, int Rows, long TotalAppended, long ReplayStart);

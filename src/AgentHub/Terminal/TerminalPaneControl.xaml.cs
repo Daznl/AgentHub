@@ -873,6 +873,12 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         TranscriptPath = TranscriptPath
     };
 
+    /// <summary>True while this pane shows a session in a host, the kind a close lets go of rather than ends.</summary>
+    public bool IsHosted => Terminal.IsHosted;
+
+    /// <summary>Saves the terminal as shown for the next attach to put back; see <see cref="EmbeddedTerminalControl.SaveScreenAsync"/>.</summary>
+    public Task SaveScreenAsync(TimeSpan timeout) => Terminal.SaveScreenAsync(timeout);
+
     /// <summary>Lets go of a hosted session without ending it (AgentHub is closing); a session inside AgentHub ends.</summary>
     public void Detach()
     {
