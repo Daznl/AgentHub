@@ -70,10 +70,10 @@ public static partial class TimelineSource
     public static List<TimelineSessionInput> ReadSessions(TimelineScope scope, string? archiveRoot)
     {
         return scope.Folders
-            .SelectMany(folder => SessionHistoryReader.ListSessions(folder, archiveRoot: archiveRoot))
-            .GroupBy(s => Path.GetFileName(s.FilePath), StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.MaxBy(s => s.SizeBytes)!)
-            .Select(s => new TimelineSessionInput(s, LastEntryTime(s.FilePath) ?? s.LastActivity, TranscriptHashes.Read(s.FilePath)))
+            .SelectMany(folder => SessionHistoryReader.ListSessions(folder, archiveRoot: archiveRoot).Select(s => (Folder: folder, Summary: s)))
+            .GroupBy(s => Path.GetFileName(s.Summary.FilePath), StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.MaxBy(s => s.Summary.SizeBytes))
+            .Select(s => new TimelineSessionInput(s.Summary, LastEntryTime(s.Summary.FilePath) ?? s.Summary.LastActivity, TranscriptHashes.Read(s.Summary.FilePath), s.Folder))
             .ToList();
     }
 

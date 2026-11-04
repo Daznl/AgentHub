@@ -12,9 +12,9 @@ public sealed record TimelineCommit(string Hash, IReadOnlyList<string> Parents, 
 
 /// <summary>
 /// A session as the timeline sees it: its summary, when it really ended (last transcript entry, which an archived copy's
-/// file time does not show), and the commit hash prefixes its transcript mentions.
+/// file time does not show), the commit hash prefixes its transcript mentions, and the folder it ran in.
 /// </summary>
-public sealed record TimelineSessionInput(SessionSummary Summary, DateTimeOffset EndedAt, IReadOnlySet<string> MentionedHashes);
+public sealed record TimelineSessionInput(SessionSummary Summary, DateTimeOffset EndedAt, IReadOnlySet<string> MentionedHashes, string? Folder = null);
 
 public enum TimelineRowKind
 {
@@ -71,6 +71,11 @@ public static class TimelineBuilder
     {
         var (bySession, outside) = Attribute(sessions, commits);
 
+        // The project starts at its first commit or its first session, whichever came first. A first commit made outside
+        // any session is the Start row itself rather than a commits row of its own.
+        var firstCommit = commits.Count > 0 ? commits.MinBy(c => c.Time) : null;
+        var startOwnsCommit = firstCommit is not null && outside.Remove(firstCommit);
+
         // Events in time order: each session at its start, each commit made outside sessions at its time.
         var events = sessions.Select(s => (Time: s.Summary.StartedAt, Session: (TimelineSessionInput?)s, Commit: (TimelineCommit?)null))
             .Concat(outside.Select(c => (Time: c.Time, Session: (TimelineSessionInput?)null, Commit: (TimelineCommit?)c)))
@@ -79,10 +84,12 @@ public static class TimelineBuilder
             .ToList();
 
         var rows = new List<TimelineRow>();
-        if (events.Count == 0) return new TimelineModel(rows, 1, 0, 0);
+        var startTime = events.Count > 0 ? events[0].Time : (DateTimeOffset?)null;
+        if (firstCommit is not null && (startTime is null || firstCommit.Time < startTime)) startTime = firstCommit.Time;
+        if (startTime is null) return new TimelineModel(rows, 1, 0, 0);
 
-        var start = new TimelineRow { Kind = TimelineRowKind.Start, Time = events[0].Time };
-        if (commits.Count > 0) start.Commits.Add(commits.MinBy(c => c.Time)!);
+        var start = new TimelineRow { Kind = TimelineRowKind.Start, Time = startTime.Value };
+        if (startOwnsCommit) start.Commits.Add(firstCommit!);
         rows.Add(start);
 
         foreach (var e in events)

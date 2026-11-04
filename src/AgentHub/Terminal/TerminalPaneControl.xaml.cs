@@ -56,6 +56,8 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     public event Action<TerminalPaneControl>? HistoryRequested;
     /// <summary>Raised by the header's Repo context button. See <see cref="ContextFolder"/> and <see cref="ContextCli"/>.</summary>
     public event Action<TerminalPaneControl>? RepoContextRequested;
+    /// <summary>Raised by the header's 🌳 Timeline button. See <see cref="HistoryFolder"/>.</summary>
+    public event Action<TerminalPaneControl>? TimelineRequested;
     private List<SshConnection> _sshConnections = [];
     private List<RepositoryDefinition> _repositories = [];
     private LaunchLocation? _customLocation;
@@ -755,6 +757,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     }
 
     private void History_Click(object sender, RoutedEventArgs e) => HistoryRequested?.Invoke(this);
+    private void Timeline_Click(object sender, RoutedEventArgs e) => TimelineRequested?.Invoke(this);
 
     /// <summary>Folder whose sessions the history button shows: where the current or last session ran, else the chosen location.</summary>
     public string HistoryFolder => string.IsNullOrEmpty(Terminal.WorkingDirectory) ? SelectedFolder : Terminal.WorkingDirectory;

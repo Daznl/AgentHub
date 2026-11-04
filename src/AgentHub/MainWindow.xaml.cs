@@ -126,6 +126,11 @@ public partial class MainWindow : Window
         _ = RefreshUsageAsync();
 
         _ = RefreshAllRepoSnapshotsAsync(fetchRemotes: false);
+
+        // "AgentHub.exe --timeline <folder>" opens that folder's timeline straight away (handy from a shortcut or script).
+        var args = Environment.GetCommandLineArgs();
+        var timelineArg = Array.FindIndex(args, a => string.Equals(a, "--timeline", StringComparison.OrdinalIgnoreCase));
+        if (timelineArg >= 0 && timelineArg + 1 < args.Length && Directory.Exists(args[timelineArg + 1])) ShowTimeline(args[timelineArg + 1]);
         _ = LoadGitHubReposAsync();
     }
 
@@ -218,6 +223,7 @@ public partial class MainWindow : Window
         pane.SshManageRequested += () => ManageSsh_Click(pane, new RoutedEventArgs());
         pane.HistoryRequested += p => ShowHistory(p.HistoryFolder, p.TranscriptPath);
         pane.RepoContextRequested += p => ShowContext(p.ContextFolder, p.ContextCli);
+        pane.TimelineRequested += p => ShowTimeline(p.HistoryFolder);
         pane.UpdateShellOptions(_shellOptions);
         return pane;
     }
@@ -257,6 +263,31 @@ public partial class MainWindow : Window
                 _repoContextWindow = window;
                 window.Closed += (_, _) => _repoContextWindow = null;
             }
+            window.Show();
+        }
+        if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
+        window.Activate();
+    }
+
+    private readonly Dictionary<string, TimelineWindow> _timelineWindows = new(StringComparer.OrdinalIgnoreCase);
+
+    // One timeline per repository (its main worktree names it), reused; not modal, so it sits beside the Cockpit.
+    private async void ShowTimeline(string folder)
+    {
+        Services.Timeline.TimelineScope scope;
+        try { scope = await Services.Timeline.TimelineSource.ResolveAsync(_runner, folder); }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        {
+            StatusText.Text = "Timeline: could not read " + folder + ": " + ex.Message;
+            return;
+        }
+
+        if (!_timelineWindows.TryGetValue(scope.Root, out var window))
+        {
+            window = new TimelineWindow(_runner, scope, HistoryArchiveRoot) { Owner = this };
+            window.HistoryRequested += (sessionFolder, transcript) => ShowHistory(sessionFolder, transcript);
+            window.Closed += (_, _) => _timelineWindows.Remove(scope.Root);
+            _timelineWindows[scope.Root] = window;
             window.Show();
         }
         if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;

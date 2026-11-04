@@ -1,8 +1,8 @@
 # AgentHub Handoff Context
 
-**Updated:** 2026-11-03
+**Updated:** 2026-11-04
 **Branch with the newest work:** `feature/timeline` (local only; built on `feature/context-review`, which is built on `main`)
-**Next task:** finish the project Timeline, phase 1 (section 3)
+**Next task:** Daniel tests Timeline phase 1 in the app (section 3); then his answers decide phase 2
 
 Read `README.md`, `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` first; `AGENTS.md` has the engineering rules.
 
@@ -14,7 +14,7 @@ Read `README.md`, `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` first; `AGENTS.md
 |---|---|
 | `main` = `origin/main` `1159f31` | Pushed 2026-11-03. Session picker (PR #6, now merged), 📄 Context / 📁 Repo context editors, two-row pane header (setup vs working mode, Relaunch), three-step pane launcher (① Repository → ② Function type → ③ Session; SSH listed under Function type only when 🏠 Home is chosen), fix for events from replaced sessions (Relaunch/Restart/Stop status). Daniel tested all of it. |
 | `feature/context-review` `462a03f` | Local, **not pushed**. ✨ Review in the context window (`InstructionReview`, `LineDiff`). Daniel tested the first version (it timed out on the 91 KB De Beers `CLAUDE.md`); the fixed version passed live tests (91 KB in ~170 s, all edits placed) but **Daniel has not retried it in the app yet**. |
-| `feature/timeline` | Local, **not pushed**. Timeline data layer only, not wired into the UI (section 3). |
+| `feature/timeline` | Local, **not pushed**. 🌳 Timeline phase 1 complete and wired in (section 3): builder, source, gutter, window, pane button, 28 tests, README and roadmap. Screenshot-checked by Claude on this repo, De Beers Explorer (52 sessions, lanes) and a scratch repo; **Daniel has not tried it yet**. Test build: `C:\data\agenthub\build-test9` (`AgentHub.exe --timeline <folder>` opens the window at once). |
 | Taskbar build | `src\AgentHub\bin\Release\net8.0-windows\win-x64\publish` (inside the repo), updated with `C:\data\agenthub\publish-local.ps1 -Repo <repo>`. At `1159f31`: **no Review, no Timeline**. Republish only when Daniel asks. |
 | Test builds | `C:\data\agenthub\build-test*`, `build-check`: throwaway, safe to delete once no test instance runs from them. |
 
@@ -29,49 +29,35 @@ Pushing: the repo is `Daznl/AgentHub` (Daniel's personal account). `gh auth swit
 - Python is not installed; use PowerShell or C#. PowerShell 5.1 strips quotes from JSON passed to native programs: pass JSON arguments from Bash.
 - Data and scratch output go under `C:\data\agenthub\`, never AppData or Temp.
 
-## 3. Timeline: design agreed, phase 1 in progress
+## 3. Timeline: phase 1 built, awaiting Daniel's test
 
-Daniel's ask: a story of the project from session 1 to now, matching the GitHub commits, shown as a tree from a starting point, every session collapsible, parallel sessions visible side by side. A **🌳 Timeline** button in the pane header opens it for that pane's repository. Eventually an agent summarises each new reply as sessions run.
+Daniel's ask: a story of the project from session 1 to now, matching the GitHub commits, shown as a tree from a starting point, every session collapsible, parallel sessions visible side by side. Eventually an agent summarises each new reply as sessions run.
 
-**Phase 1 (agreed, in progress): the tree from data only, no model calls.**
-- Scope = one Git repository including all worktrees (`git worktree list`); outside Git, the one folder. `igo-debeers-explorer` and `debeers-prospector` are separate timelines.
-- Rows top to bottom in time: Start (first commit / first session), each session, each same-day run of commits made outside sessions.
-- Column 0 is the trunk. A session running alone sits on the trunk; one that overlaps another gets a lane that forks off when it starts and merges back when it ends; a live session's lane stays open.
-- Commit attribution: a commit belongs to the session running at its commit time (2 min before start to 5 min after the last entry); with several running, to the one whose transcript mentions its 7-character hash; otherwise it stays on the trunk.
+**Phase 1 (done on `feature/timeline`, no model calls):**
+- Scope = one Git repository including all worktrees (`git worktree list`); outside Git, the one folder.
+- Rows top to bottom in time: Start (first commit, or first session), each session, each same-day run of commits made outside sessions. A first commit made outside any session *is* the Start row (not a commits row as well); one made inside a session stays with that session.
+- Column 0 is the trunk. A session running alone sits on the trunk; one that overlaps another gets a lane that forks off when it starts and merges back when it ends; a live session's lane (written to in the last 3 min) stays open.
+- Commit attribution: a commit belongs to the session running at its commit time (2 min before start to 5 min after the last entry); with several running, to the one whose transcript mentions its 7-character hash (latest started wins a tie); otherwise it stays on the trunk.
 
-**Done (compiles, no tests yet):**
-- `src/AgentHub/Services/Timeline/TimelineBuilder.cs`: `Attribute`, `Build`, and lane layout into `TimelineRow`s with `TimelineLine`s (column, from top, to bottom, fork, merge).
-- `src/AgentHub/Services/Timeline/TimelineSource.cs`:
-  - `ResolveAsync` (repository root and worktrees).
-  - `ReadCommitsAsync` (`git log --all --source`).
-  - `ReadSessions`: sessions across all worktrees, live and archived, de-duplicated.
-  - `LastEntryTime`.
-  - `TranscriptHashes`: an incremental scan for hex words.
+**Files:**
+- `Services/Timeline/TimelineBuilder.cs`: `Attribute`, `Build`, lane layout into `TimelineRow`s with `TimelineLine`s. `TimelineSessionInput` now carries `Folder` (needed for Open in History).
+- `Services/Timeline/TimelineSource.cs`: `ResolveAsync` (root and worktrees), `ReadCommitsAsync` (`git log --all --source`), `ReadSessions`, `LastEntryTime`, `TranscriptHashes` (incremental hex-word scan).
+- `Controls/TimelineGutter.cs`: `FrameworkElement` drawing one row's trunk, lanes, fork and merge S-curves and node in `OnRender`; stretches with the row. Trunk `#2A3A52`, lane and node colours by column (`#2FD4F5 #C084FC #34D399 #FBBF24 #60A5FA #F472B6 #FB923C #A3E635`), live node gets a ring.
+- `TimelineWindow.xaml(.cs)`: header (name, "N sessions · M commits · since … · worktrees · root", Refresh), cards built in code (Start / session / outside commits), click to expand (prompts read lazily with `SessionHistoryReader.ReadEntries` and cached by file length; commits; 🕘 Open in History → `MainWindow.ShowHistory`). Scrolls to the bottom on open; re-reads every 20 s but only rebuilds when a signature of the model changed (no flicker), keeping expanded keys and scroll position.
+- `TerminalPaneControl`: 🌳 button (both header modes) raises `TimelineRequested`; `MainWindow.ShowTimeline(folder)` resolves the scope and keeps one window per root in `_timelineWindows`. `AgentHub.exe --timeline <folder>` opens one at start-up.
+- Tests: `TimelineBuilderTests` (attribution, rows, lanes, keys) and `TimelineSourceTests` (`ParseLog`, `LastEntryTime`, `TranscriptHashes`), 28 in all; whole suite 133 pass, 3 live skipped.
 
-**Next, in order:**
-1. Tests for `TimelineBuilder` (attribution with and without hash mentions; overlap gives a lane; lane merges back; live lane stays open; same-day outside commits group; Start row) and for `TranscriptHashes` / `ParseLog`.
-2. `TimelineGutter : FrameworkElement` that draws one row's lanes in `OnRender` from `TimelineRow` (stretches with the row as cards expand). Lane colours: column 0 trunk neutral `#2A3A52`, nodes by column (`#2FD4F5 #C084FC #34D399 #FBBF24 #60A5FA #F472B6 #FB923C #A3E635`).
-3. `TimelineWindow` (non-modal, one per repository, like `ContextWindow`):
-   - **Header:** repository name; "N sessions · M commits · since <date>"; Refresh.
-   - **Rows:** gutter beside a card.
-   - **Session card:** title, times and duration, agent, live badge, branch chips from its commits, commit count.
-   - **Expanded session:** prompts, loaded lazily with `SessionHistoryReader.ReadEntries`; the commits; and "Open in History", which calls `MainWindow.ShowHistory(folder, transcript)`.
-   - **Outside-commits card:** "N commits outside sessions", expanding to the list.
-   - **Behaviour:** scroll to the bottom (now) on open; rebuild every ~20 s while open, keeping expanded rows by `TimelineRow.Key`; build off the UI thread.
-4. Pane header button **🌳 Timeline** (both header modes) and MainWindow wiring.
-5. README and roadmap; build; launch a test copy for Daniel.
+**Seen in the screenshots (worth knowing):**
+- This repo shows only 3 sessions because most of its sessions ran from other folders; De Beers Explorer shows 52 sessions, 393 commits, 18 worktrees (stale `wt-*` entries included: that is what git reports).
+- `git log --source` names whichever ref reached the commit first, so an old `main` commit can be labelled with a feature branch. Acceptable for phase 1; a "prefer main/master" rule would be a small later change.
+- Consecutive sessions in the same lane draw as merge-then-fork bumps between rows. Truthful, slightly busy.
 
-**Facts found while designing (they shaped the rules above):**
-- Daniel's sessions run in the main repository folder and work in sibling worktrees (`wt-*`, `C:\data\wt\...`); no Claude Code session has a worktree as its folder. So the `gitBranch` Claude Code records shows the main folder's branch, not what the session built. Commits are the evidence.
-- Commits are made with `git commit -q`, so transcripts have no `[branch hash]` lines; hashes appear through `git log` output and PR text. A mention alone does not prove authorship (sessions quote old hashes), hence time window first.
-- An archived transcript's file time is when it was copied; use `TimelineSource.LastEntryTime` for when a session really ended.
-- Scale: De Beers Explorer has 52 sessions (277 MB of transcripts) and 393 commits; the archive holds 585 transcripts.
+**Things Daniel should try:** open 🌳 from a pane on this repo and on De Beers Explorer; expand a live session (prompts load, LIVE badge, ring); Open in History lands on the right session; leave it open while a session commits and see the commit move onto the session card within ~20 s; a pane whose folder is a worktree opens the same window as the main folder.
 
-**Phase 2 (not started, needs Daniel's answers):** after each finished reply, summarise the new turn with `claude -p` (the same locked-down setup as Review: `--tools ""`, `--setting-sources ""`, `--strict-mcp-config`, `--no-session-persistence`) and add "what was built" lines to the session node. Cache under `C:\data\agenthub\timeline\`. One-off backfill for past sessions from condensed transcripts (prompts, final replies, commits). Open questions to ask him:
+**Phase 2 (not started, needs Daniel's answers):** after each finished reply, summarise the new turn with `claude -p` (the same locked-down setup as Review: `--tools ""`, `--setting-sources ""`, `--strict-mcp-config`, `--no-session-persistence`) and add "what was built" lines to the session card. Cache under `C:\data\agenthub\timeline\`. One-off backfill for past sessions from condensed transcripts (prompts, final replies, commits). Open questions:
 1. Summaries model: Haiku or default?
 2. Backfill: all sessions or from a date?
 3. Also a global Timeline button with a repository picker?
-
 ## 4. Known loose ends
 
 - A second AgentHub instance sometimes exits silently within ~10 s of starting (no `crash.log`). Not investigated.
