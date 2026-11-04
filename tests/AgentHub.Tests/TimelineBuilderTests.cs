@@ -260,6 +260,54 @@ public class TimelineBuilderTests
     }
 
     [Fact]
+    public void Graph_HistoryWithNoCommonAncestorIsAnImportedLineage_JoinedWhereTheTwoMeet()
+    {
+        // Two repositories: ours (root c1) and one brought in whole (root x1), joined by a merge on a feature branch
+        // that then reached main through a pull request.
+        var c1 = Commit("1111111", 0, "initial");
+        var x1 = Commit("x111111", -200, "Initial commit (other repo)");
+        var x2 = Commit("x222222", -100, "other repo work", "x111111");
+        var f1 = Commit("f111111", 1, "feature", "1111111");
+        var join = Commit("f222222", 2, "chore: bring the other repo in with its history", "f111111", "x222222");
+        var merge = Commit("3333333", 3, "Merge pull request #9 from IGOLimited/chore/bring-in", "1111111", "f222222");
+
+        var (branches, _) = BranchGraph.Assign([merge, join, f1, x2, x1, c1], [Tip("main", "3333333")]);
+
+        var imported = Assert.Single(branches, b => b.IsImported);
+        Assert.Equal("imported history", imported.Name);
+        Assert.Equal([x2, x1], imported.Commits);
+        Assert.Equal(join.Hash, imported.MergeHash);
+        var feature = Assert.Single(branches, b => !b.IsTrunk && !b.IsImported);
+        Assert.Equal("chore/bring-in", feature.Name);
+        Assert.Equal([join, f1], feature.Commits);
+
+        var model = Build([], [merge, join, f1, x2, x1, c1], Tip("main", "3333333"));
+        var rowX = model.Rows.Single(r => r.Commits.Contains(x2)); // x1, the earliest commit, is the Start row, on the imported lane
+        Assert.True(rowX.Branch!.IsImported);
+        Assert.True(model.Rows[0].Branch!.IsImported);
+        var lane = Assert.Single(rowX.Lines, l => l.Key == imported.Key);
+        Assert.False(lane.Fork); // no common ancestor: nothing to fork from
+        Assert.True(model.Branches.Single(b => b.IsImported).MergesBack);
+    }
+
+    [Fact]
+    public void Graph_TheProjectsRootIsTheOneWithTheMostDescendants_NotGitHubsInitialCommit()
+    {
+        // GitHub made "Initial commit"; the real work (root w1) was merged into it, so main's first-parent chain ends at
+        // the one-commit root. The work is still the project, not imported history.
+        var gh = Commit("9999999", 0, "Initial commit");
+        var w1 = Commit("a111111", -10, "feat: the real start");
+        var w2 = Commit("a222222", -5, "more", "a111111");
+        var join = Commit("3333333", 1, "Merge branch 'main' of github", "9999999", "a222222");
+        var later = Commit("4444444", 2, "later", "3333333");
+
+        var (branches, _) = BranchGraph.Assign([later, join, w2, w1, gh], [Tip("main", "4444444")]);
+
+        Assert.DoesNotContain(branches, b => b.IsImported);
+        Assert.Equal(branches[0].Key, w1.Branch); // reached from the trunk's merge, filed under the trunk's merged branch or trunk
+    }
+
+    [Fact]
     public void Graph_WithoutTipsEverythingIsTrunk()
     {
         var c1 = Commit("1111111", 0);

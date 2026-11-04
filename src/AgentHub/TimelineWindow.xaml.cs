@@ -340,7 +340,8 @@ public partial class TimelineWindow : Window
         var card = NewCard(expandable: false, leftMargin: 6);
         card.Title.Text = "Start";
         card.Right.Text = When(row.Time);
-        card.Meta.Text = row.Commits.Count > 0 ? "The repository's first commit" : "The first session recorded here";
+        card.Meta.Text = row.Branch is { IsImported: true } ? "The first commit of history brought in from another repository"
+            : row.Commits.Count > 0 ? "The repository's first commit" : "The first session recorded here";
         return card.Border;
     }
 
@@ -390,6 +391,7 @@ public partial class TimelineWindow : Window
         {
             TimelineRowKind.Start => "First commit",
             TimelineRowKind.Session => $"{commits.Count} commit{(commits.Count == 1 ? "" : "s")} in this session",
+            _ when row.Branch is { IsImported: true } => $"{commits.Count} commit{(commits.Count == 1 ? "" : "s")} imported from another repository",
             _ => $"{commits.Count} commit{(commits.Count == 1 ? "" : "s")} outside sessions"
         };
         card.Right.Text = commits.Count > 1 ? Span(commits[0].Time, commits[^1].Time) : When(commits[0].Time);
@@ -397,7 +399,8 @@ public partial class TimelineWindow : Window
         var branches = commits.Select(BranchName).Where(b => b is not null).Distinct().ToList();
         var bits = new List<string> { authors.Count == 1 ? authors[0] : $"{authors.Count} authors" };
         if (branches.Count > 0) bits.Add(string.Join(", ", branches));
-        if (row.Branch is { MergeHash: null } open && row.Kind != TimelineRowKind.Session) bits.Add("not merged");
+        if (row.Branch is { IsImported: true }) bits.Add("made elsewhere, before this history was brought in; its sessions are not in this timeline");
+        else if (row.Branch is { MergeHash: null } && row.Kind != TimelineRowKind.Session) bits.Add("not merged");
         if (commits.Count > shown) bits.Add($"{commits.Count - shown} more below");
         card.Meta.Text = string.Join(" · ", bits);
         card.Meta.Margin = new Thickness(0, 3, 0, 6);

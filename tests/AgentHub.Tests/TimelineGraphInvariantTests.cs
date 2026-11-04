@@ -15,7 +15,7 @@ namespace AgentHub.Tests;
 /// </summary>
 public class TimelineGraphInvariantTests
 {
-    public static void AssertConnected(TimelineModel model)
+    internal static void AssertConnected(TimelineModel model)
     {
         var rows = model.Rows;
         for (var i = 0; i < rows.Count; i++)
@@ -33,7 +33,8 @@ public class TimelineGraphInvariantTests
                 if (line.FromTop)
                     Assert.True(above is { ToBottom: true, MergeAtBottom: false }, $"row {i} col {line.Column}: enters from the top but the row above does not reach down");
                 else
-                    Assert.True(line.Fork, $"row {i} col {line.Column}: a lane that does not come from above must fork off the trunk");
+                    Assert.True(line.Fork || model.Branches.Any(b => b.Key == line.Key && b.IsImported),
+                        $"row {i} col {line.Column}: a lane that does not come from above must fork off the trunk, unless it is imported history");
 
                 if (line.ToBottom && !line.MergeAtBottom)
                     Assert.True(below is { FromTop: true }, $"row {i} col {line.Column}: reaches down but the row below does not pick it up");

@@ -59,6 +59,11 @@ public sealed class TimelineBranch
     public required string Key { get; init; }
     public const string TrunkKey = "trunk";
     public bool IsTrunk { get; init; }
+    /// <summary>
+    /// History that shares no ancestor with the trunk: another repository's commits brought in whole (a subtree import,
+    /// a merge with unrelated histories). Its lane starts on its own rather than forking off the trunk.
+    /// </summary>
+    public bool IsImported { get; init; }
     /// <summary>The merge commit on the trunk that brought this branch in, when it was merged.</summary>
     public string? MergeHash { get; init; }
     public List<TimelineCommit> Commits { get; } = [];
@@ -139,7 +144,8 @@ public static class TimelineBuilder
         if (firstCommit is not null && (startTime is null || firstCommit.Time < startTime)) startTime = firstCommit.Time;
         if (startTime is null) return new TimelineModel(rows, 1, 0, 0, branches, trunkName);
 
-        var start = new TimelineRow { Kind = TimelineRowKind.Start, Time = startTime.Value };
+        // The Start row sits on its commit's lane: imported history that predates the project starts on its own lane.
+        var start = new TimelineRow { Kind = TimelineRowKind.Start, Time = startTime.Value, Branch = startOwnsCommit ? LaneOf(firstCommit!) : null };
         if (startOwnsCommit) start.Commits.Add(firstCommit!);
         rows.Add(start);
 
@@ -268,7 +274,7 @@ public static class TimelineBuilder
             row.Lines.Add(new TimelineLine(0, FromTop: i > 0, ToBottom: i < rows.Count - 1, Fork: false, MergeAtBottom: false));
             foreach (var lane in lanes.Where(l => l.StartRow <= i && i <= l.EndRow))
                 row.Lines.Add(new TimelineLine(lane.Column, FromTop: i > lane.StartRow, ToBottom: i < lane.EndRow,
-                    Fork: i == lane.StartRow, MergeAtBottom: lane.MergesBack && i == lane.EndRow, Key: lane.Key));
+                    Fork: i == lane.StartRow && !lane.IsImported, MergeAtBottom: lane.MergesBack && i == lane.EndRow, Key: lane.Key));
         }
         return busyUntil.Count;
     }
@@ -287,7 +293,11 @@ public static partial class BranchGraph
     public static (List<TimelineBranch> Branches, string TrunkName) Assign(IReadOnlyList<TimelineCommit> commits, IReadOnlyList<TimelineBranchTip> tips)
     {
         var byHash = new Dictionary<string, TimelineCommit>(StringComparer.Ordinal);
-        foreach (var c in commits) byHash[c.Hash] = c;
+        foreach (var c in commits)
+        {
+            c.Branch = null; // a rebuild starts clean
+            byHash[c.Hash] = c;
+        }
         var branches = new List<TimelineBranch>();
         var known = tips.Where(t => byHash.ContainsKey(t.Hash)).ToList();
 
@@ -302,6 +312,33 @@ public static partial class BranchGraph
             for (var c = byHash.GetValueOrDefault(tip); c is not null && c.Branch is null; c = c.Parents.Count > 0 ? byHash.GetValueOrDefault(c.Parents[0]) : null)
                 Claim(trunk, c);
 
+        // History with no ancestor in common with the trunk's root was brought in from elsewhere. Each such root's
+        // descendants that never touch the trunk's root form an imported lineage, joined at the first commit descending
+        // from both. Claimed before the merges, or the merge that brought it in would file it under that branch.
+        // The project's own root is the one with the most descendants, not the end of main's first-parent chain, which
+        // can be GitHub's one-commit "Initial commit" that the real work was merged into.
+        var roots = RootsOf(commits, byHash);
+        var trunkRoot = trunk.Commits.Count > 0 ? trunk.Commits[^1] : null;
+        var primaryRoot = commits.Where(c => c.Parents.Count == 0)
+            .OrderByDescending(r => commits.Count(c => roots[c.Hash].Count == 1 && roots[c.Hash].Contains(r.Hash))) // commits that are its alone
+            .ThenByDescending(r => r == trunkRoot)
+            .ThenBy(r => r.Time)
+            .FirstOrDefault();
+        if (primaryRoot is not null)
+        {
+            var foreignRoots = commits.Where(c => c.Parents.Count == 0 && c != primaryRoot).OrderBy(c => c.Time).ToList();
+            foreach (var root in foreignRoots)
+            {
+                var lineage = commits.Where(c => c.Branch is null && roots[c.Hash].Contains(root.Hash) && !roots[c.Hash].Contains(primaryRoot.Hash)).OrderByDescending(c => c.Time).ToList();
+                if (lineage.Count == 0) continue;
+                var join = commits.Where(c => roots[c.Hash].Contains(root.Hash) && roots[c.Hash].Contains(primaryRoot.Hash)).MinBy(c => c.Time);
+                var name = foreignRoots.Count == 1 ? "imported history" : $"imported history · {root.Short}";
+                var branch = new TimelineBranch { Name = name, Key = "imported@" + root.Hash, IsImported = true, MergeHash = join?.Hash };
+                foreach (var c in lineage) Claim(branch, c);
+                branches.Add(branch);
+            }
+        }
+
         // Branches brought in by merge commits on the trunk, oldest merge first so the earliest branch claims shared history.
         foreach (var merge in trunk.Commits.Where(c => c.IsMerge).OrderBy(c => c.Time).ToList())
         {
@@ -310,6 +347,9 @@ public static partial class BranchGraph
             var name = known.Where(t => set.Any(c => c.Hash == t.Hash)).Select(t => t.Name).FirstOrDefault()
                 ?? MergedBranchName(merge.Subject)
                 ?? "merged " + merge.Short;
+            // "Merge branch 'main' of github": the other line of main itself (the work GitHub's initial commit was joined
+            // with, or a pull from the remote); that is trunk, not a branch beside it.
+            if (name == trunkName) { foreach (var c in set) Claim(trunk, c); continue; }
             AddBranch(branches, name, merge.Hash, set);
         }
 
@@ -323,6 +363,37 @@ public static partial class BranchGraph
         // Anything left (dangling history no ref reaches) goes with the trunk rather than vanishing.
         foreach (var c in commits.Where(c => c.Branch is null)) Claim(trunk, c);
         return (branches, trunkName);
+    }
+
+    // The root commits (by hash) each commit descends from, found parents-first so every commit's parents are done before
+    // it. Keyed by hash: TimelineCommit is a record whose Branch changes as branches claim it, so it is no dictionary key.
+    private static Dictionary<string, HashSet<string>> RootsOf(IReadOnlyList<TimelineCommit> commits, Dictionary<string, TimelineCommit> byHash)
+    {
+        var roots = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var stack = new Stack<TimelineCommit>();
+        foreach (var start in commits)
+        {
+            if (roots.ContainsKey(start.Hash)) continue;
+            stack.Push(start);
+            while (stack.Count > 0)
+            {
+                var c = stack.Peek();
+                if (roots.ContainsKey(c.Hash)) { stack.Pop(); continue; }
+                var parents = c.Parents.Select(p => byHash.GetValueOrDefault(p)).Where(p => p is not null).Select(p => p!).ToList();
+                var pending = parents.Where(p => !roots.ContainsKey(p.Hash)).ToList();
+                if (pending.Count > 0)
+                {
+                    foreach (var p in pending) stack.Push(p);
+                    continue;
+                }
+                stack.Pop();
+                var set = new HashSet<string>(StringComparer.Ordinal);
+                if (parents.Count == 0) set.Add(c.Hash);
+                foreach (var p in parents) set.UnionWith(roots[p.Hash]);
+                roots[c.Hash] = set;
+            }
+        }
+        return roots;
     }
 
     private static void AddBranch(List<TimelineBranch> branches, string name, string? mergeHash, List<TimelineCommit> set)
