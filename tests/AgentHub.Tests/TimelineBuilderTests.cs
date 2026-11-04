@@ -381,6 +381,51 @@ public class TimelineBuilderTests
     }
 
     [Fact]
+    public void Layout_AMergeMadeByALongSessionStartedEarlierStillClosesTheLane()
+    {
+        // The long session's row (at its start) is above the branch's rows, yet it holds the merge commit.
+        var c0 = Commit("0000000", -24, "initial");
+        var longSession = Session("long", 0, 30, "3333333");
+        var worker = Session("worker", 1, 2, "f111111");
+        var f1 = Commit("f111111", 1.5, "feature", "0000000");
+        var merge = Commit("3333333", 5, "Merge pull request #1 from IGOLimited/feat/x", "0000000", "f111111");
+
+        var model = Build([longSession, worker], [c0, f1, merge], Tip("main", "3333333"));
+
+        Assert.Contains(merge, RowOf(model, longSession).Commits);
+        var rowWorker = RowOf(model, worker);
+        Assert.Equal("feat/x", rowWorker.Branch!.Name);
+        var lane = Assert.Single(rowWorker.Lines, l => l.Column == 1);
+        Assert.True(lane.Fork && lane.MergeAtBottom);
+        Assert.True(rowWorker.Branch.MergesBack);
+    }
+
+    [Fact]
+    public void Layout_ABranchRowBelowTheMergeRowStillEndsWithTheMerge()
+    {
+        // Session a started first and merged at the end; session b started later but committed to the branch before
+        // the merge. b's row comes after a's, and the lane must run down to it and curve in there.
+        var c0 = Commit("0000000", -24, "initial");
+        var a = Session("a", 0, 6, "f111111", "3333333");
+        var b = Session("b", 1, 2, "f222222");
+        var f1 = Commit("f111111", 0.5, "feature by a", "0000000");
+        var f2 = Commit("f222222", 1.5, "feature by b", "f111111");
+        var merge = Commit("3333333", 5, "Merge pull request #1 from IGOLimited/feat/x", "0000000", "f222222");
+        var later = Commit("4444444", 8, "after", "3333333");
+
+        var model = Build([a, b], [c0, f1, f2, merge, later], Tip("main", "4444444"));
+
+        var rowA = RowOf(model, a);
+        var rowB = RowOf(model, b);
+        Assert.Equal("feat/x", rowA.Branch!.Name);
+        Assert.Same(rowA.Branch, rowB.Branch);
+        Assert.True(Assert.Single(rowA.Lines, l => l.Column == 1).Fork);
+        var laneB = Assert.Single(rowB.Lines, l => l.Column == 1);
+        Assert.True(laneB.FromTop && laneB.MergeAtBottom);
+        Assert.Single(model.Rows.Single(r => r.Commits.Contains(later)).Lines);
+    }
+
+    [Fact]
     public void Layout_AnOpenBranchRunsThroughTheRowsBetweenItsCommitsAndStopsAtItsLast()
     {
         var c0 = Commit("0000000", -24, "initial");

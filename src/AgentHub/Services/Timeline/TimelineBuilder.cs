@@ -194,15 +194,18 @@ public static class TimelineBuilder
             if (own.Count == 0) continue; // every commit of this branch sits in a card on another lane; nothing to draw
             branch.StartRow = own[0];
             branch.EndRow = own[^1];
-            if (branch.MergeHash is { } merge && rowOfCommit.TryGetValue(merge, out var mergeRow) && mergeRow >= branch.StartRow)
+            if (branch.MergeHash is { } merge)
             {
-                // Merged: the lane runs to the row above the merge commit and curves in there. A branch that went on
-                // after its merge row is drawn as if it had not merged.
-                if (branch.EndRow <= mergeRow)
+                // Merged: the lane curves back into the trunk at its last row, which is the row above the merge commit
+                // when that is lower. Rows are ordered by session start, not commit time, so the merge commit can sit in a
+                // session card above the branch's rows (a long-running session merging later work) or a row of the branch
+                // can come below the merge row (a session that started later but committed before the merge); the lane
+                // still ends with its merge.
+                branch.MergesBack = true;
+                if (rowOfCommit.TryGetValue(merge, out var mergeRow))
                 {
-                    branch.MergesBack = true;
-                    branch.EndRow = Math.Max(branch.EndRow, mergeRow - 1);
-                    if (rows[mergeRow].Branch == branch) branch.EndRow = mergeRow;
+                    var mergeEnd = rows[mergeRow].Branch == branch ? mergeRow : mergeRow - 1;
+                    if (mergeEnd > branch.EndRow) branch.EndRow = mergeEnd;
                 }
             }
             lanes.Add(branch);
