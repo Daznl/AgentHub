@@ -43,6 +43,11 @@ public partial class TimelineWindow : Window
     private readonly string? _archiveRoot;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(20) };
     private readonly HashSet<string> _expanded = new(StringComparer.OrdinalIgnoreCase);
+    // Lane highlighting: pointing at a lane lights its branch everywhere; a click keeps it lit until the next click elsewhere.
+    private readonly List<TimelineGutter> _gutters = [];
+    private readonly List<(Border Card, string? LaneKey)> _cards = [];
+    private readonly Dictionary<string, TimelineBranch> _branches = new(StringComparer.Ordinal);
+    private string? _hoverKey, _pinnedKey, _statusBase;
     // Prompts already read from a transcript, reused while its length is unchanged (a transcript can be tens of MB).
     private readonly Dictionary<string, (long Length, List<HistoryEntry> Prompts)> _prompts = new(StringComparer.OrdinalIgnoreCase);
     private int _generation;
@@ -55,6 +60,7 @@ public partial class TimelineWindow : Window
     public TimelineWindow(ProcessRunner runner, TimelineScope scope, string? archiveRoot)
     {
         InitializeComponent();
+        Controls.DarkTitleBar.Apply(this);
         _runner = runner;
         _scope = scope;
         _archiveRoot = archiveRoot;
@@ -70,6 +76,9 @@ public partial class TimelineWindow : Window
         _timer.Tick += async (_, _) => await RefreshAsync(first: false);
         _timer.Start();
         Closed += (_, _) => _timer.Stop();
+        // A click that reaches the scroller hit no lane and no card header: it clears a pinned highlight, as does Escape.
+        Scroller.MouseLeftButtonUp += (_, e) => { if (!IsInsideCard(e.OriginalSource as DependencyObject)) Pin(null); };
+        PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape && _pinnedKey is not null) { Pin(null); e.Handled = true; } };
     }
 
     /// <summary>The repository's main folder (or the plain folder); one window per root.</summary>
@@ -101,10 +110,11 @@ public partial class TimelineWindow : Window
                 _signature = signature;
                 Render(model, scrollToEnd: first);
             }
-            StatusText.Text = model.Rows.Count == 0
+            _statusBase = model.Rows.Count == 0
                 ? ""
                 : $"Read at {DateTime.Now:HH:mm:ss} from {(_scope.IsGit ? "git log and " : "")}the transcripts of {model.SessionCount} session{(model.SessionCount == 1 ? "" : "s")}. " +
                   "A commit belongs to the session running when it was made; with several, to the one whose transcript names its hash.";
+            if (ActiveKey is null) StatusText.Text = _statusBase;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -155,6 +165,10 @@ public partial class TimelineWindow : Window
         _branchNames = model.Branches.ToDictionary(b => b.Key, b => b.Name, StringComparer.Ordinal);
         _trunkName = model.TrunkName;
         HeaderGutter.Width = TimelineGutter.GutterWidth(model.Columns);
+        _branches.Clear();
+        foreach (var b in model.Branches) _branches[b.Key] = b;
+        _gutters.Clear();
+        _cards.Clear();
         RowsPanel.Children.Clear();
         foreach (var row in model.Rows)
         {
@@ -162,22 +176,30 @@ public partial class TimelineWindow : Window
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SessionsShare, GridUnitType.Star) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(CommitsShare, GridUnitType.Star) });
-            grid.Children.Add(new TimelineGutter { Row = row, Columns = model.Columns });
+            var gutter = new TimelineGutter { Row = row, Columns = model.Columns, HighlightKey = ActiveKey };
+            gutter.LaneHovered += (_, key) => { _hoverKey = key; ApplyHighlight(); };
+            gutter.LaneClicked += (_, key) => Pin(key);
+            grid.Children.Add(gutter);
+            _gutters.Add(gutter);
 
             var left = row.Kind == TimelineRowKind.Session ? SessionCard(row) : row.Kind == TimelineRowKind.Start ? StartCard(row) : null;
             if (left is not null)
             {
                 Grid.SetColumn(left, 1);
                 grid.Children.Add(left);
+                _cards.Add((left, row.LaneKey));
             }
             if (row.Commits.Count > 0)
             {
                 var right = CommitsCard(row);
                 Grid.SetColumn(right, 2);
                 grid.Children.Add(right);
+                _cards.Add((right, row.Branch?.Key ?? TimelineBranch.TrunkKey));
             }
             RowsPanel.Children.Add(grid);
         }
+        if (_pinnedKey is not null && !_branches.ContainsKey(_pinnedKey)) _pinnedKey = null;
+        ApplyHighlight();
 
         EmptyText.Visibility = model.Rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         EmptyText.Text = _scope.IsGit
@@ -190,6 +212,49 @@ public partial class TimelineWindow : Window
         HeaderRow.Margin = new Thickness(0, 0, 8 + bar, 8);
         if (scrollToEnd || wasAtBottom) Scroller.ScrollToEnd();
         else Scroller.ScrollToVerticalOffset(offset);
+    }
+
+    // ---- lane highlighting ----
+
+    private string? ActiveKey => _pinnedKey ?? _hoverKey;
+
+    private void Pin(string? key)
+    {
+        _pinnedKey = key == _pinnedKey ? null : key;
+        ApplyHighlight();
+    }
+
+    // Lights the active branch: its lane bold in every gutter, its cards framed in the lane colour, everything else faint.
+    private void ApplyHighlight()
+    {
+        var key = ActiveKey;
+        foreach (var gutter in _gutters) gutter.HighlightKey = key;
+        var frame = key is not null && _branches.TryGetValue(key, out var branch) ? TimelineGutter.LaneBrush(branch.Column) : null;
+        foreach (var (card, laneKey) in _cards)
+        {
+            var lit = key is not null && laneKey == key;
+            card.Tag = lit ? frame : null;
+            card.BorderBrush = lit ? frame! : CardBorder;
+            card.BorderThickness = new Thickness(lit ? 1.5 : 1);
+            card.Opacity = key is null || lit ? 1 : 0.4;
+        }
+
+        if (key is null) StatusText.Text = _statusBase ?? "";
+        else if (_branches.TryGetValue(key, out var b))
+        {
+            var sessions = _cards.Count(c => c.LaneKey == key && c.Card.Tag is not null && Grid.GetColumn(c.Card) == 1);
+            var commits = b.Commits.Count;
+            StatusText.Text = $"{b.Name}: {sessions} session{(sessions == 1 ? "" : "s")}, {commits} commit{(commits == 1 ? "" : "s")}" +
+                              (b.IsTrunk ? "" : b.MergesBack ? ", merged" : ", not merged") +
+                              (_pinnedKey is null ? " · click the line to keep it lit" : " · click empty space or press Esc to clear");
+        }
+    }
+
+    private static bool IsInsideCard(DependencyObject? source)
+    {
+        for (var d = source; d is not null; d = d is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d))
+            if (d is Border { Parent: Grid } border && Grid.GetColumn(border) > 0) return true;
+        return false;
     }
 
     // ---- cards ----
@@ -266,11 +331,11 @@ public partial class TimelineWindow : Window
         }
         card.Header.MouseLeftButtonUp += (_, e) => { SetExpanded(card.Body.Visibility != Visibility.Visible); e.Handled = true; };
         card.Header.MouseEnter += (_, _) => card.Border.BorderBrush = CardHover;
-        card.Header.MouseLeave += (_, _) => card.Border.BorderBrush = CardBorder;
+        card.Header.MouseLeave += (_, _) => card.Border.BorderBrush = card.Border.Tag as Brush ?? CardBorder;
         if (_expanded.Contains(key)) SetExpanded(true);
     }
 
-    private static FrameworkElement StartCard(TimelineRow row)
+    private static Border StartCard(TimelineRow row)
     {
         var card = NewCard(expandable: false, leftMargin: 6);
         card.Title.Text = "Start";
@@ -279,7 +344,7 @@ public partial class TimelineWindow : Window
         return card.Border;
     }
 
-    private FrameworkElement SessionCard(TimelineRow row)
+    private Border SessionCard(TimelineRow row)
     {
         var session = row.Session!;
         var summary = session.Summary;
@@ -316,7 +381,7 @@ public partial class TimelineWindow : Window
     }
 
     /// <summary>Commits in the right column, level with the session that made them: the first few always shown, the rest behind the chevron.</summary>
-    private FrameworkElement CommitsCard(TimelineRow row)
+    private Border CommitsCard(TimelineRow row)
     {
         const int shown = 3;
         var commits = row.Commits;

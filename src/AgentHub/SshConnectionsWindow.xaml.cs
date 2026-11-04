@@ -15,6 +15,7 @@ public partial class SshConnectionsWindow : Window
     public SshConnectionsWindow(List<SshConnection> connections)
     {
         InitializeComponent();
+        Controls.DarkTitleBar.Apply(this);
         _connections = connections;
         RefreshList();
         Loaded += (_, _) => TargetBox.Focus();

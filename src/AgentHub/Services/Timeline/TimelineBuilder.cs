@@ -36,7 +36,7 @@ public enum TimelineRowKind
 /// leaving the trunk, drawn with a fork curve when <see cref="Fork"/>). <see cref="MergeAtBottom"/>: the branch was merged,
 /// and its lane curves back into the trunk at the bottom of the row.
 /// </summary>
-public sealed record TimelineLine(int Column, bool FromTop, bool ToBottom, bool Fork, bool MergeAtBottom);
+public sealed record TimelineLine(int Column, bool FromTop, bool ToBottom, bool Fork, bool MergeAtBottom, string Key = TimelineBranch.TrunkKey);
 
 /// <summary>A branch as a lane of the graph: which rows it spans and whether it rejoined the trunk.</summary>
 public sealed class TimelineBranch
@@ -44,6 +44,7 @@ public sealed class TimelineBranch
     public required string Name { get; init; }
     /// <summary>Unique even when a branch name was merged and reused; rows refer to lanes by this.</summary>
     public required string Key { get; init; }
+    public const string TrunkKey = "trunk";
     public bool IsTrunk { get; init; }
     /// <summary>The merge commit on the trunk that brought this branch in, when it was merged.</summary>
     public string? MergeHash { get; init; }
@@ -69,6 +70,8 @@ public sealed class TimelineRow
     public bool IsLive { get; set; }
     /// <summary>A session that made no commits: nothing ties it to a branch, so it sits on the trunk with a hollow node.</summary>
     public bool IsHollow => Kind == TimelineRowKind.Session && Commits.Count == 0;
+    /// <summary>The lane this row belongs to for highlighting: its branch, the trunk for trunk work, nothing for a hollow session.</summary>
+    public string? LaneKey => Branch?.Key ?? (IsHollow ? null : TimelineBranch.TrunkKey);
 
     /// <summary>Stable across rebuilds, so a refreshed timeline keeps what the user had expanded.</summary>
     public string Key => Kind switch
@@ -228,7 +231,7 @@ public static class TimelineBuilder
             row.Lines.Add(new TimelineLine(0, FromTop: i > 0, ToBottom: i < rows.Count - 1, Fork: false, MergeAtBottom: false));
             foreach (var lane in lanes.Where(l => l.StartRow <= i && i <= l.EndRow))
                 row.Lines.Add(new TimelineLine(lane.Column, FromTop: i > lane.StartRow, ToBottom: i < lane.EndRow,
-                    Fork: i == lane.StartRow, MergeAtBottom: lane.MergesBack && i == lane.EndRow));
+                    Fork: i == lane.StartRow, MergeAtBottom: lane.MergesBack && i == lane.EndRow, Key: lane.Key));
         }
         return busyUntil.Count;
     }
@@ -254,7 +257,7 @@ public static partial class BranchGraph
         var trunkName = TrunkNames.FirstOrDefault(n => known.Any(t => t.Name == n))
             ?? known.OrderByDescending(t => byHash[t.Hash].Time).Select(t => t.Name).FirstOrDefault()
             ?? "main";
-        var trunk = new TimelineBranch { Name = trunkName, Key = "trunk", IsTrunk = true };
+        var trunk = new TimelineBranch { Name = trunkName, Key = TimelineBranch.TrunkKey, IsTrunk = true };
         branches.Add(trunk);
         var trunkTips = known.Where(t => t.Name == trunkName).Select(t => t.Hash).ToList();
         if (trunkTips.Count == 0 && commits.Count > 0) trunkTips.Add(commits.MaxBy(c => c.Time)!.Hash);

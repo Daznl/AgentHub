@@ -32,6 +32,7 @@ public partial class ContextWindow : Window
     public ContextWindow()
     {
         InitializeComponent();
+        Controls.DarkTitleBar.Apply(this);
         Activated += (_, _) => CheckDisk();
     }
 

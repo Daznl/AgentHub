@@ -45,6 +45,7 @@ public partial class HistoryWindow : Window
     public HistoryWindow(IEnumerable<RepositoryDefinition> repositories, string? archiveRoot)
     {
         InitializeComponent();
+        Controls.DarkTitleBar.Apply(this);
         _archiveRoot = archiveRoot;
         LocationList.ItemsSource = _locations;
         UpdateRepositories(repositories);

@@ -78,26 +78,8 @@ public partial class MainWindow : Window
         _usageService = new UsageService(_runner);
         _usageRefreshTimer.Tick += async (_, _) => await RefreshUsageAsync();
         Loaded += MainWindow_Loaded;
-        SourceInitialized += (_, _) => ApplyDarkTitleBar();
+        Controls.DarkTitleBar.Apply(this);
         AgentCombo.SelectionChanged += (_, _) => UpdateAgentPreview();
-    }
-
-    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
-
-    // Paint the native Windows title bar dark to match the app theme, instead of
-    // the default light chrome. DWMWA_USE_IMMERSIVE_DARK_MODE = 20 (19 on Win10 1809).
-    private void ApplyDarkTitleBar()
-    {
-        try
-        {
-            var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
-            if (hwnd == IntPtr.Zero) return;
-            int useDark = 1;
-            if (DwmSetWindowAttribute(hwnd, 20, ref useDark, sizeof(int)) != 0)
-                DwmSetWindowAttribute(hwnd, 19, ref useDark, sizeof(int));
-        }
-        catch { /* non-fatal: title bar stays default if DWM call is unavailable */ }
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
