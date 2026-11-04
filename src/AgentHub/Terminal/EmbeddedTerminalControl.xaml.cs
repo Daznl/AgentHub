@@ -537,6 +537,9 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         });
     }
 
+    /// <summary>True while the session has been declared waiting for input and nobody has typed since.</summary>
+    public bool IsAwaitingInput => _attention.IsWaiting;
+
     /// <summary>Sends text input directly into the running terminal process.</summary>
     public void SendInput(string data)
     {

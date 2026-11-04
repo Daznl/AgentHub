@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows.Threading;
 using AgentHub.Models;
@@ -48,6 +48,26 @@ public sealed class OrchestratorEngine : IDisposable
     private double _usageCapThreshold = 0.03;
     private bool _handoffRequested;
     private int _handoffWaitTicks;
+    private int _continueNudges;
+
+    /// <summary>Pause after a turn ends before nudging, so a slow tool or a brief redraw gap is not mistaken for a finished turn.</summary>
+    private static readonly TimeSpan ContinueNudgeDelay = TimeSpan.FromSeconds(15);
+
+    /// <summary>Upper bound on "keep going" nudges in one session, so an agent that keeps stopping cannot loop forever.</summary>
+    private const int MaxContinueNudgesPerSession = 40;
+
+    /// <summary>Appended to every session prompt: there is no human to answer, and how to say the idea is finished.</summary>
+    public const string AutonomyRules =
+        "You are running unattended: nobody is watching to answer questions, so make reasonable decisions yourself " +
+        "and note them in .agenthub/handoff.md instead of asking. Commit your work to git as you go. " +
+        "Only when every requirement is implemented and its tests pass, put the line [COMPLETED] at the top of " +
+        ".agenthub/handoff.md.";
+
+    /// <summary>Sent when the agent ends a turn while the idea is not finished.</summary>
+    public const string ContinuePrompt =
+        "[ORCHESTRATOR]: Keep building. Pick the next unfinished task from .agenthub/handoff.md (add tasks if the list is empty), " +
+        "implement and test it, update the handoff, and commit. If you were waiting on a question, choose the sensible option " +
+        "yourself and carry on. When everything is done and tested, put [COMPLETED] at the top of .agenthub/handoff.md.";
 
     public event Action<OrchestratorState>? StateChanged;
     public event Action<ProjectIdea?>? CurrentIdeaChanged;
@@ -203,6 +223,7 @@ public sealed class OrchestratorEngine : IDisposable
 
         _handoffRequested = false;
         _handoffWaitTicks = 0;
+        _continueNudges = 0;
 
         // Ensure workspace directory exists
         try
@@ -263,7 +284,7 @@ public sealed class OrchestratorEngine : IDisposable
         }
 
         var cliCommand = string.IsNullOrWhiteSpace(idea.AgentCommand) ? "claude" : idea.AgentCommand;
-        var title = $"Terminal {_activePane.PaneIndex} · {idea.Title} (Session #{idea.HandoffCount + 1})";
+        var title = $"Terminal {_activePane.PaneIndex} Â· {idea.Title} (Session #{idea.HandoffCount + 1})";
 
         Log($"Launching {cliCommand} in {idea.TargetDirectory} (Session #{idea.HandoffCount + 1})...");
         _activePane.StartSession(cliCommand, idea.TargetDirectory, title, idea.Title, isAgentSession: true);
@@ -287,6 +308,8 @@ public sealed class OrchestratorEngine : IDisposable
                 $"Please read .agenthub/handoff.md for recent progress and next tasks, inspect the codebase and tests, " +
                 $"and continue building the planned features.";
         }
+
+        promptText += " " + AutonomyRules;
 
         await _activePane.SubmitPromptAsync(promptText);
         Log($"Injected session prompt ({promptText.Length} chars).");
@@ -338,8 +361,7 @@ public sealed class OrchestratorEngine : IDisposable
             if (File.Exists(handoffPath))
             {
                 var content = await File.ReadAllTextAsync(handoffPath);
-                if (content.Contains("[COMPLETED]", StringComparison.OrdinalIgnoreCase) ||
-                    content.Contains("ALL TASKS COMPLETED", StringComparison.OrdinalIgnoreCase))
+                if (IsMarkedCompleted(content))
                 {
                     Log($"Idea \"{_currentIdea.Title}\" marked as completed in handoff.md!");
                     _currentIdea.Status = IdeaStatus.Completed;
@@ -347,9 +369,42 @@ public sealed class OrchestratorEngine : IDisposable
                     await _ideaService.UpdateIdeaAsync(_currentIdea);
                     _activePane.TerminalControl.StopSession();
                     await AdvanceQueueAsync();
+                    return;
                 }
             }
+
+            await NudgeToContinueAsync();
         }
+    }
+
+    /// <summary>
+    /// The agent ended a turn but the idea is not finished: after a short pause, if it is still idle and
+    /// nothing else has taken over, tell it to carry on with the next task.
+    /// </summary>
+    private async Task NudgeToContinueAsync()
+    {
+        var pane = _activePane;
+        var idea = _currentIdea;
+        if (pane == null || idea == null) return;
+
+        await Task.Delay(ContinueNudgeDelay);
+
+        // Something may have changed while waiting: the user typed, a handoff or quota pause began,
+        // the session ended, or another idea took the pane.
+        if (_state != OrchestratorState.Building || _handoffRequested || _activePane != pane ||
+            _currentIdea != idea || !pane.IsRunning || !pane.TerminalControl.IsAwaitingInput)
+            return;
+
+        if (_continueNudges >= MaxContinueNudgesPerSession)
+        {
+            Log($"Agent stopped {_continueNudges} times this session; starting a fresh session from the handoff instead of nudging again.", "Warn");
+            await PerformHandoffCycleAsync();
+            return;
+        }
+
+        _continueNudges++;
+        Log($"Agent ended its turn; nudging it to continue ({_continueNudges}/{MaxContinueNudgesPerSession}).");
+        await pane.SubmitPromptAsync(ContinuePrompt);
     }
 
     private async void OnSessionExited()
@@ -542,6 +597,17 @@ public sealed class OrchestratorEngine : IDisposable
         if (Logs.Count > 200) Logs.RemoveAt(0);
         LogAdded?.Invoke(entry);
     }
+
+    /// <summary>
+    /// True when the handoff opens with a [COMPLETED] line. Only the top counts: agents often quote the
+    /// instruction ("put [COMPLETED] at the top when done") further down in their notes.
+    /// </summary>
+    public static bool IsMarkedCompleted(string handoff) =>
+        handoff.Split('\n')
+            .Select(l => l.Trim().TrimStart('#', '*', '>', ' '))
+            .Where(l => l.Length > 0)
+            .Take(3)
+            .Any(l => l.StartsWith("[COMPLETED]", StringComparison.OrdinalIgnoreCase));
 
     private static string SanitizeFolderName(string name)
     {
