@@ -1,8 +1,8 @@
 # AgentHub Handoff Context
 
-**Updated:** 2026-11-04
-**Branch with the newest work:** `main` (`feature/timeline` and `feature/context-review` merged in and pushed 2026-11-04)
-**Next task:** phase 1 approved by Daniel on 2026-11-04 ("looks good, leave it as it is"). Next: push / merge when he asks; phase 2 needs his answers (section 3)
+**Updated:** 2026-11-04 (end of the Timeline phase 1 session)
+**Branch with the newest work:** `main` = `origin/main` `d53ebf3`. Nothing unmerged, nothing unpushed.
+**Next task:** whatever Daniel asks. The queued items, in his order of interest: republish the taskbar build (section 1), Timeline phase 2 once he answers the three questions (section 3), the smaller Timeline follow-ups (section 4).
 
 Read `README.md`, `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` first; `AGENTS.md` has the engineering rules.
 
@@ -12,64 +12,69 @@ Read `README.md`, `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` first; `AGENTS.md
 
 | What | State |
 |---|---|
-| `main` = `origin/main` `3d356e7` | Pushed 2026-11-04 (fast-forward of `feature/timeline`, which contains `feature/context-review`). Holds everything below: Review, Timeline phase 1, dark chrome. Before that, `1159f31` (2026-11-03): session picker (PR #6), 📄 Context / 📁 Repo context editors, two-row pane header, three-step launcher, replaced-session event fix; all tested by Daniel. |
-| `feature/context-review` `462a03f` | Pushed and merged to `main` 2026-11-04. ✨ Review in the context window (`InstructionReview`, `LineDiff`). Daniel tested the first version (it timed out on the 91 KB De Beers `CLAUDE.md`); the fixed version passed live tests (91 KB in ~170 s, all edits placed) but **Daniel has not retried it in the app yet**. |
-| `feature/timeline` `3d356e7` | Pushed and merged to `main` 2026-11-04 (fast-forward). 🌳 Timeline phase 1 complete and wired in (section 3): builder, source, gutter, window, pane button, 28 tests, README and roadmap. Daniel saw the first version ("looks good") and asked for three verticals (tree, sessions, commits at their time), then for the tree to be the Git branch graph (an unmerged branch was on the trunk); both done and screenshot-checked on De Beers Explorer. Test build: `C:\data\agenthub\build-test15` (`AgentHub.exe --timeline <folder>` opens the window at once). |
-| Taskbar build | `src\AgentHub\bin\Release\net8.0-windows\win-x64\publish` (inside the repo), updated with `C:\data\agenthub\publish-local.ps1 -Repo <repo>`. At `1159f31`: **no Review, no Timeline**. Republish only when Daniel asks. |
-| Test builds | `C:\data\agenthub\build-test*`, `build-check`: throwaway, safe to delete once no test instance runs from them. |
+| `main` = `origin/main` `d53ebf3` | Pushed 2026-11-04 as a fast-forward of `feature/timeline` (which contained `feature/context-review`). CI (`build.yml`) green on all three branches. Holds: ✨ Review of context files, 🌳 Timeline phase 1, dark window chrome everywhere, plus the 2026-11-03 work (session picker PR #6, 📄 Context / 📁 Repo context editors, two-row pane header, three-step launcher, replaced-session event fix). |
+| `feature/context-review`, `feature/timeline` | Pushed, merged, finished. Safe to delete on GitHub when Daniel wants. |
+| ✨ Review | Daniel tested the first version (timed out on the 91 KB De Beers `CLAUDE.md`); the fixed version passed live tests (91 KB in ~170 s) but **Daniel has not retried it in the app**. |
+| 🌳 Timeline | **Approved by Daniel 2026-11-04** ("looks good, leave it as it is") after four rounds of corrections, all in `main` (section 3). |
+| Taskbar build | `src\AgentHub\bin\Release\net8.0-windows\win-x64\publish` (inside the repo), updated with `C:\data\agenthub\publish-local.ps1 -Repo <repo>`. **Still at `1159f31`: no Review, no Timeline, white title bars.** Republish only when Daniel asks; his main instance (pid 32744 at the time of writing) runs from it with live sessions. |
+| Test builds | `C:\data\agenthub\build-test1` … `build-test15`, `build-check`: throwaway. `build-test15` = `main` minus the two handoff commits. Delete the folders once no instance runs from them. |
 
-Pushing: the repo is `Daznl/AgentHub` (Daniel's personal account). `gh auth switch -u Daznl`, push, then `gh auth switch -u DanielWallisBarker` straight after. Push or merge only when Daniel asks; he decides when a branch goes to `main`.
+Pushing: the repo is `Daznl/AgentHub` (Daniel's personal account). `gh auth switch -u Daznl`, push, then `gh auth switch -u DanielWallisBarker` straight after. Push or merge only when Daniel asks. Fast-forward is fine when the branch was built on `main`; check `origin/main` first (`git fetch`, `git log main..origin/main`).
 
-## 2. Working rules learned this session
+## 2. Working rules (learned the hard way; still apply)
 
-- **Never automate Daniel's desktop** (no UI Automation clicks, no mouse). It once clicked into his real terminal and a modal dialog blocked his test window. Screenshots with `C:\data\agenthub\screens\shot.ps1 -ProcId <pid> -Out <png>` (PrintWindow, read-only) are fine. For anything needing clicks, launch a test build and ask Daniel to try it.
-- **Never kill running AgentHub instances** to free the build output; his main instance holds live Claude Code sessions. Build to a separate folder instead: `dotnet build src/AgentHub/AgentHub.csproj -c Release -o C:\data\agenthub\build-testN`, and run tests in Release.
-- Launch a test copy with `Start-Process C:\data\agenthub\build-testN\AgentHub.exe` and give Daniel the process id.
-- Live review test: set `AGENTHUB_LIVE_REVIEW=1` to run it (it spends Claude usage); without it the test is skipped.
+- **Never automate Daniel's desktop** (no UI Automation clicks, no mouse). Screenshots with `C:\data\agenthub\screens\shot.ps1 -ProcId <pid> -Out <png> -TitleLike <part of window title>` (PrintWindow, read-only) are fine and were used all day. Anything needing clicks or hover: launch a test build and ask Daniel.
+- **Never kill Daniel's running AgentHub instance** (the one under `publish`); it holds live Claude Code sessions. Build to a separate folder: `dotnet build src/AgentHub/AgentHub.csproj -c Release -o C:\data\agenthub\build-testN`. A folder is locked while an instance runs from it, so bump N. Test copies Claude started may be stopped by Claude.
+- Launch a test copy with `Start-Process C:\data\agenthub\build-testN\AgentHub.exe -ArgumentList '--timeline', '"<folder>"'` and give Daniel the process id. He will pop it open on his screen, so what the screenshot shows may already have been scrolled or clicked by him.
+- Tests: `dotnet test tests/AgentHub.Tests/AgentHub.Tests.csproj -c Release`. 160 pass, 3 live tests skipped. Real-repository checks run only with `AGENTHUB_TIMELINE_REPO=<repo>` (and `AGENTHUB_TIMELINE_ARCHIVE=C:\data\agenthub\history`); the live Review test only with `AGENTHUB_LIVE_REVIEW=1` (spends Claude usage). Temporary diagnostic tests (`TimelineDiag.cs`) were the quickest way to question real data; delete them before committing.
 - Python is not installed; use PowerShell or C#. PowerShell 5.1 strips quotes from JSON passed to native programs: pass JSON arguments from Bash.
+- Editing files from Bash with `perl -pi` bit three times today: `$"` interpolates, `\|` in an `s|…|…|` pattern breaks it, `\n` and `\u` in replacements get eaten. Use the Edit tool for anything with quotes, pipes or escapes.
 - Data and scratch output go under `C:\data\agenthub\`, never AppData or Temp.
 
-## 3. Timeline: phase 1 built, awaiting Daniel's test
+## 3. Timeline: what was built and why (phase 1, in `main`)
 
-Daniel's ask: a story of the project from session 1 to now, matching the GitHub commits, shown as a tree from a starting point, every session collapsible, parallel sessions visible side by side. Eventually an agent summarises each new reply as sessions run.
+Daniel's ask: the story of a project from session 1 to now, matching the GitHub commits, as a tree from a starting point, sessions collapsible, parallel work side by side; later an agent summarises each reply as sessions run.
 
-**Phase 1 (done on `feature/timeline`, no model calls):**
-- Scope = one Git repository including all worktrees (`git worktree list`); outside Git, the one folder.
-- Rows top to bottom in time: Start (first commit, or first session), each session, each same-day run of commits made outside sessions on one branch. A first commit made outside any session *is* the Start row; one made inside a session stays with that session.
-- **The tree is Git's branch graph** (Daniel's second correction, 2026-11-04: he read the trunk as `main`, and an unmerged branch was sitting on it). `BranchGraph.Assign`: trunk = first-parent chain of `main` / `master` from local *and* remote tips (local `main` in De Beers is 86 commits behind `origin/main`); each merge commit on the trunk recovers the branch it merged (commits reachable from its other parents that nothing claimed yet; named after a tip in that set, else from the subject "Merge pull request #N from owner/branch" / "Merge branch 'x'"); remaining tips claim what they reach (open branches). Dangling commits go to the trunk. Stashes and tags are not read (`git log --branches --remotes`).
-- Lanes: a branch spans from its first row to its last; merged → `MergesBack` always, and the lane ends at the lower of its last own row and the row above the merge commit (the merge row itself when that row is on the lane). Rows sit at session *start* time, so a long session that merges days later holds the merge in a card far above the branch; the lane still curves in at its end (Daniel reported lanes "ending in the air": that was this). Columns by interval scheduling, lowest free column. A session sits on the lane most of its commits are on, feature over trunk (Daniel's choice); no commits → trunk, hollow node (`TimelineRow.IsHollow`). Lane spacing shrinks past 6 columns (`TimelineGutter.LaneWidth(columns)`).
-- **Imported history** (Daniel's fourth question, 2026-11-04: the Search API branch "started on 6 Oct without a session"): the De Beers repo has three roots (Explorer 22 Sep, GitHub's Initial commit 23 Sep, Search API 6 Oct, brought in with its history by 65a9d61 and merged via chore/search-api-into-explorer). `BranchGraph` computes each commit's root set (`RootsOf`, keyed by hash because `TimelineCommit.Branch` is mutable and records hash by value); the project's root is the one with most exclusive descendants (trunk-chain root breaks ties); every other root's descendants that never meet the project's root are an `IsImported` lane ("imported history"), joined at the first commit descending from both. Drawn without a fork; cards say "imported from another repository … its sessions are not in this timeline". A merge-recovered branch named like the trunk ("Merge branch 'main' of github") is claimed by the trunk.
-- Commit attribution (Daniel's third question, 2026-11-04: a branch "started outside sessions"): candidates are sessions whose window covers the commit (2 min before start to 5 min after the last entry) **and** whose transcript wrote an entry within 4 min of it (`TranscriptScan` collects entry minutes; a session Daniel keeps open for 12 days was claiming every commit as a tie). Ties: hash mention, then the commit subject found in the transcript entries 15 min before to 2 min after the commit (`TranscriptScan.MentionsBetween`, reads only that byte range via per-minute offsets). No active session → outside (by hand or GitHub web). De Beers: outside 205 → 128 of 391; of those 61 are GitHub web merges and the rest have no transcript activity within hours.
+**Window** (`TimelineWindow.xaml(.cs)`): pane header **🌳** → `MainWindow.ShowTimeline(folder)`, one window per repository root (all worktrees), non-modal; `AgentHub.exe --timeline <folder>` opens one at start-up. Header: name, "N sessions · M commits · since … · worktrees · root", Refresh. **Three verticals per row**, top to bottom in time: the tree (`TimelineGutter`), the session card (or Start), and a commits card on the right level with the session that made the commits; outside commits are a right-hand card alone. Commits card: first 3 commits shown, chevron for the rest, "not merged" on open branches, "imported from another repository" on imported lanes. Session card expands to its prompts (lazy, cached by file length) and 🕘 Open in History. Re-reads git and transcripts every 20 s but only redraws when the model's signature changed. **Lane highlighting:** hover a line → that branch's lane bold everywhere, its cards framed in the lane colour, the rest faint, status line with counts and merged state; click pins, click on empty space / another lane / Esc clears.
 
-**Files:**
-- `Services/Timeline/TimelineBuilder.cs`: `TimelineCommit` (Branch set by the graph), `TimelineBranchTip`, `TimelineBranch` (lane), `TimelineBuilder.Attribute` / `Build` / `Layout`, `BranchGraph.Assign` / `MergedBranchName`. `TimelineSessionInput` carries `Folder` (for Open in History).
-- `Services/Timeline/TimelineSource.cs`: `ResolveAsync`, `ReadCommitsAsync` + `ParseLog` (5 fields), `ReadBranchTipsAsync` + `ParseTips` (local and remote heads, `origin/HEAD` dropped), `ReadSessions`, `LastEntryTime`, `TranscriptHashes`.
-- `Controls/TimelineGutter.cs`: draws one row's trunk, lanes, fork and merge S-curves and node (hollow for sessions without commits, ring when live). Trunk `#2A3A52`, lanes by column. Lane highlighting: `LaneHovered` / `LaneClicked` events carry the branch key (`TimelineLine.Key`); `HighlightKey` draws that lane bold and the rest faint. `TimelineWindow.ApplyHighlight` frames the branch's cards (`_cards` by `TimelineRow.LaneKey`) and fades the rest; hover lights, click pins (`_pinnedKey`), a click on empty space or Esc clears.
-- `Controls/DarkTitleBar.cs`: dark title bar, caption and frame colour (#0C121C) for every window via DWM; replaced MainWindow's private copy. Daniel asked for the popup's white chrome to go.
-- `TimelineWindow.xaml(.cs)`: three verticals per row (gutter, session card or Start, commits card level with its session; outside commits on the right alone). `CommitsCard` shows the first 3 commits, chevron for the rest; "not merged" on open branches; branch after the subject only when a card spans several. Session expands to prompts (lazy, cached by file length) and 🕘 Open in History. Rebuild every 20 s only when the model's signature changed.
-- `TerminalPaneControl` 🌳 button → `MainWindow.ShowTimeline(folder)`, one window per root; `AgentHub.exe --timeline <folder>`.
-- Tests: `TimelineBuilderTests` (attribution, graph, rows, lanes, keys) and `TimelineSourceTests` (log, tips, last entry time, hash scan); suite 144 pass, 3 live skipped.
+**The tree is Git's branch graph** (`BranchGraph.Assign` in `TimelineBuilder.cs`). Daniel's first version used session-overlap lanes and he read the trunk as `main`; it now is:
+- Trunk = `main`/`master` first-parent chain from local *and* remote tips (local `main` in De Beers is 86 commits behind `origin/main`).
+- Each merge commit on the trunk recovers the branch it merged (commits reachable from its other parents that nothing claimed yet), named after a surviving tip in that set, else from the subject ("Merge pull request #N from owner/branch", "Merge branch 'x'"). A recovered branch named like the trunk is trunk. Remaining tips claim what they reach: open branches. Dangling commits → trunk. `git log --branches --remotes` (no stashes, no tags) + `git for-each-ref` (`origin/HEAD` dropped).
+- **Imported history:** each commit's root set (`RootsOf`, keyed by hash: `TimelineCommit.Branch` is mutable and records hash by value, so a commit is no dictionary key). The project's root = the root with most exclusive descendants (trunk-chain root breaks ties; GitHub's one-commit "Initial commit" must not win). Descendants of another root that never meet the project's root are an `IsImported` lane: no fork, joined at the first commit descending from both. De Beers has three roots (Explorer 22 Sep, GitHub Initial commit 23 Sep, Search API 6 Oct brought in whole by `65a9d61`).
+- **Lanes** (`Layout`): a branch spans its first to last row; merged → `MergesBack` always, ending at the lower of its last own row and the row above the merge commit (the merge row itself when on the lane). Columns by interval scheduling; spacing shrinks past 6 columns (`TimelineGutter.LaneWidth`). A session sits on the lane most of its commits are on, feature over trunk (Daniel's choice); no commits → trunk with a hollow node. `TimelineLine.Key` carries the branch key for highlighting.
+- `TimelineGraphInvariantTests.AssertConnected` runs in every builder test: lines continuous row to row, every lane forks (unless imported), merges only at the lane's end. It found nothing on De Beers; the "lines ending in the air" Daniel saw were the merged-lane rule, fixed.
 
-**Seen on real data:**
-- De Beers Explorer: 52 sessions, 391 commits, 18 worktrees (stale `wt-*` entries included). Many `docs/handoff-*` branches were squash-merged on GitHub, so they show as short open lanes marked "not merged"; that is what git has.
-- The De Beers window has about 9 columns at its widest point; the adaptive spacing keeps the gutter under ~150 px.
+**Commit attribution** (`TimelineBuilder.Attribute`): candidates = sessions whose window covers the commit (2 min before first entry to 5 min after last) **and** whose transcript wrote an entry within 4 min of it (`TranscriptScan` collects entry minutes; Daniel keeps a session open for 12 days and it was tying every commit). Ties: hash mention, then the commit subject found in the transcript entries 15 min before to 2 min after (`TranscriptScan.MentionsBetween`, reads only that byte range via per-minute offsets). No active session → outside (by hand or GitHub web). De Beers: outside 205 → 128 of 391; 61 of those are GitHub web merges, the rest have no transcript activity within hours; only 3 commits are genuinely tied between two active sessions.
 
-**Things Daniel should try:** open 🌳 from a pane on this repo and on De Beers Explorer; expand a live session (prompts load, LIVE badge, ring); Open in History lands on the right session; leave it open while a session commits and see the commit move onto the session card within ~20 s; a pane whose folder is a worktree opens the same window as the main folder.
+**Facts about Daniel's data that shaped this:** sessions run in the main repo folder and work in sibling worktrees (`wt-*`, `C:\data\wt\…`), so `gitBranch` in transcripts is useless; commits are made with `git commit -q`, so transcripts hold no hash; GitHub squash-merges leave `docs/handoff-*` branches as short open lanes; De Beers Explorer = 52 sessions, 391 commits, 18 worktrees, 9 lanes at its widest; a full rebuild takes ~1 s once transcripts are cached.
 
-**Phase 2 (not started, needs Daniel's answers):** after each finished reply, summarise the new turn with `claude -p` (the same locked-down setup as Review: `--tools ""`, `--setting-sources ""`, `--strict-mcp-config`, `--no-session-persistence`) and add "what was built" lines to the session card. Cache under `C:\data\agenthub\timeline\`. One-off backfill for past sessions from condensed transcripts (prompts, final replies, commits). Open questions:
+**Files:** `Services/Timeline/TimelineBuilder.cs` (model records, `TimelineBuilder`, `BranchGraph`), `Services/Timeline/TimelineSource.cs` (`ResolveAsync`, `ReadCommitsAsync`/`ParseLog`, `ReadBranchTipsAsync`/`ParseTips`, `ReadSessions`, `LastEntryTime`, `TranscriptScan`, `TranscriptHashes` facade), `Controls/TimelineGutter.cs`, `Controls/DarkTitleBar.cs` (DWM dark title bar, caption and frame for every window; replaced MainWindow's private copy), `TimelineWindow.xaml(.cs)`, `TerminalPaneControl` 🌳 button, `MainWindow.ShowTimeline`. Tests: `TimelineBuilderTests`, `TimelineSourceTests`, `TimelineGraphInvariantTests`.
+
+**Phase 2 (not started; needs Daniel's answers):** after each finished reply, summarise the new turn with `claude -p` (the same lock-down as Review: `--tools ""`, `--setting-sources ""`, `--strict-mcp-config`, `--no-session-persistence`) and add "what was built" lines to the session card. Cache under `C:\data\agenthub\timeline\`. One-off backfill for past sessions from condensed transcripts (prompts, final replies, commits). Questions for Daniel:
 1. Summaries model: Haiku or default?
 2. Backfill: all sessions or from a date?
 3. Also a global Timeline button with a repository picker?
-## 4. Known loose ends
+
+## 4. Timeline follow-ups Daniel has heard about (none asked for yet)
+
+- A session open for days has one card at its start time holding everything it ever committed; splitting such a session into one row per day of activity would put late merges where they happened.
+- Colour lanes by branch rather than by column, and write the branch name at each fork; a trunk node where a merge lands.
+- Pull in the sessions of an imported repository by matching a folder whose Git root commit is the imported root (the Search API's sessions are missing from De Beers).
+- A dashed tail on open (unmerged) lane ends so they read as unmerged at a glance.
+- Hover on a card could light its lane (the reverse of the current lane → cards).
+
+## 5. Known loose ends
 
 - A second AgentHub instance sometimes exits silently within ~10 s of starting (no `crash.log`). Not investigated.
 - The Start Menu shortcut points at an old copy under `%LOCALAPPDATA%\AgentHub`; the taskbar pin uses the repo's `publish` folder.
 - `*.old-*` files in the `publish` folder are left by live swaps; delete them once the main instance has been restarted.
+- CI warns that `actions/checkout@v4` and `actions/setup-dotnet@v4` target Node 20; harmless for now.
 
-## 5. Architecture and coding constraints (still true)
+## 6. Architecture and coding constraints (still true)
 
-1. **WPF and WinForms namespaces:** `AgentHub.csproj` enables both (for `FolderBrowserDialog`). Files using UI types alias them: `using Button = System.Windows.Controls.Button;`, `using Color = System.Windows.Media.Color;`, `using MessageBox = System.Windows.MessageBox;`, `using UserControl = System.Windows.Controls.UserControl;` and so on.
+1. **WPF and WinForms namespaces:** `AgentHub.csproj` enables both (for `FolderBrowserDialog`). Files using UI types alias them: `using Button = System.Windows.Controls.Button;`, `using Color = System.Windows.Media.Color;`, `using MouseEventArgs = System.Windows.Input.MouseEventArgs;`, `using Brushes = System.Windows.Media.Brushes;` and so on; collection expressions need a typed target (`new[] { … }` for `string[]`).
 2. **Terminal size:** a ConPTY resize after a CLI starts can wipe its first screen. Pane header modes keep the same height. The launcher hides the terminal (never collapses it). Same-size refits are ignored.
 3. **Session events:** `EmbeddedTerminalControl` drops output and exit events from a replaced session (`ReferenceEquals(_session, session)`).
 4. **Model calls go through installed CLIs on the user's login**, never an API key (`AGENTS.md`: no stored credentials). Lock them down as Review does.
 5. **Git and CLI safety:** pull is fast-forward only. Destructive Git operations only on explicit user action. Usage figures name their source.
+6. **Records as keys:** `TimelineCommit` and any record with a mutable property must not be a dictionary or set key; key by `Hash`.
