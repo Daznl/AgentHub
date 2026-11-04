@@ -88,6 +88,74 @@ public static partial class TimelineSource
         return tips;
     }
 
+    /// <summary>
+    /// The hashes of every commit (on any branch) that touched one of <paramref name="paths"/>, relative to the root. Used to
+    /// tell which sessions kept the handoff and docs up to date.
+    /// </summary>
+    public static async Task<HashSet<string>> ReadTouchingAsync(ProcessRunner runner, TimelineScope scope, IReadOnlyList<string> paths, CancellationToken cancellationToken = default)
+    {
+        if (!scope.IsGit || paths.Count == 0) return [];
+        var output = await RunGitAsync(runner, scope.Root, ["log", "--branches", "--remotes", "--format=%H", "--name-only", "--", .. paths], cancellationToken) ?? "";
+        var hashes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var line in output.Split('\n'))
+        {
+            var t = line.Trim();
+            if (t.Length == 40 && t.All(Uri.IsHexDigit)) hashes.Add(t);
+        }
+        return hashes;
+    }
+
+    /// <summary>
+    /// The repository's pull requests from GitHub through <c>gh</c>, newest first; null when gh is missing, not signed in,
+    /// the repository has no GitHub remote, or the call fails for any other reason (the review then says GitHub facts are unavailable).
+    /// </summary>
+    public static async Task<List<PullRequestFact>?> ReadPullRequestsAsync(ProcessRunner runner, TimelineScope scope, CancellationToken cancellationToken = default)
+    {
+        if (!scope.IsGit || !Directory.Exists(scope.Root)) return null;
+        try
+        {
+            var (exit, stdout, _) = await runner.RunAsync("gh",
+                ["pr", "list", "--state", "all", "--limit", "100", "--json", "number,title,headRefName,baseRefName,author,mergedBy,mergedAt,mergeCommit,reviews,isDraft,state"],
+                scope.Root, cancellationToken, TimeSpan.FromSeconds(30));
+            return exit == 0 ? ParsePullRequests(stdout) : null;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return null; // gh not installed
+        }
+    }
+
+    /// <summary>Parses <c>gh pr list --json …</c> output; null when it is not a JSON array.</summary>
+    public static List<PullRequestFact>? ParsePullRequests(string json)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array) return null;
+            var list = new List<PullRequestFact>();
+            foreach (var pr in doc.RootElement.EnumerateArray())
+            {
+                static string Str(System.Text.Json.JsonElement e, string name) =>
+                    e.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? "" : "";
+                static string? Login(System.Text.Json.JsonElement e, string name) =>
+                    e.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Object ? Str(v, "login") : null;
+                var number = pr.TryGetProperty("number", out var n) && n.ValueKind == System.Text.Json.JsonValueKind.Number ? n.GetInt32() : 0;
+                if (number == 0) continue;
+                var mergedAt = DateTimeOffset.TryParse(Str(pr, "mergedAt"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var m) ? m : (DateTimeOffset?)null;
+                var mergeCommit = pr.TryGetProperty("mergeCommit", out var mc) && mc.ValueKind == System.Text.Json.JsonValueKind.Object ? Str(mc, "oid") : null;
+                var reviews = pr.TryGetProperty("reviews", out var r) && r.ValueKind == System.Text.Json.JsonValueKind.Array ? r.GetArrayLength() : 0;
+                var draft = pr.TryGetProperty("isDraft", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.True;
+                list.Add(new PullRequestFact(number, Str(pr, "title"), Str(pr, "headRefName"), Str(pr, "baseRefName"), Login(pr, "author"), Login(pr, "mergedBy"),
+                    mergedAt, string.IsNullOrEmpty(mergeCommit) ? null : mergeCommit, reviews, draft, Str(pr, "state")));
+            }
+            return list;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Claude Code and Codex sessions recorded in any of the scope's folders, live or archived, each once.</summary>
     public static List<TimelineSessionInput> ReadSessions(TimelineScope scope, string? archiveRoot)
     {
@@ -153,6 +221,13 @@ public static partial class TimelineSource
 
     private static string FolderName(string folder) =>
         Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) is { Length: > 0 } n ? n : folder;
+}
+
+/// <summary>One pull request as GitHub reports it through <c>gh pr list</c>. <see cref="State"/> is OPEN, MERGED or CLOSED.</summary>
+public sealed record PullRequestFact(int Number, string Title, string Head, string Base, string? Author, string? MergedBy, DateTimeOffset? MergedAt,
+    string? MergeCommit, int Reviews, bool IsDraft, string State)
+{
+    public bool IsMerged => MergedAt is not null || string.Equals(State, "MERGED", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>What one transcript scan found: hash prefixes mentioned, and the minutes (UTC, since the epoch) in which the session wrote an entry.</summary>

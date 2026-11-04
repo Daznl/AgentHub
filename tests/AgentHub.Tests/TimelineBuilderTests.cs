@@ -593,3 +593,85 @@ public class TimelineBuilderTests
         Assert.Equal("start", first.Rows[0].Key);
     }
 }
+
+public class TimelineBranchFactsTests
+{
+    private static readonly DateTimeOffset Day = new(2026, 11, 3, 9, 0, 0, TimeSpan.FromHours(8));
+    private static DateTimeOffset At(double hours) => Day.AddHours(hours);
+    private static string Full(string hash) => hash.PadRight(40, '0');
+    private static TimelineCommit Commit(string hash, double hours, string subject = "work", params string[] parents) =>
+        new(Full(hash), parents.Select(Full).ToList(), At(hours), "Daniel", subject);
+    private static TimelineBranchTip Tip(string name, string hash, bool remote = false) => new(Full(hash), name, remote);
+
+    [Fact]
+    public void Graph_AnImportWithMoreHistoryThanTheProjectHadBeforeGitHub_IsStillTheImportedOne()
+    {
+        // The project: two commits, then GitHub's "Initial commit" merged in, then more work. Later a whole other
+        // repository (five commits, more than the project had before its GitHub join) is merged in. The project's
+        // root must stay the project's, and the other repository must be the imported lane that joins main.
+        var p1 = Commit("a100000", -10, "feat: start");
+        var p2 = Commit("a200000", -9, "feat: more", "a100000");
+        var gh = Commit("9900000", -8, "Initial commit");
+        var join1 = Commit("a300000", -7, "Merge branch 'main' of github", "9900000", "a200000");
+        var p3 = Commit("a400000", -6, "feat: after the join", "a300000");
+        var x1 = Commit("f100000", -50, "other: one");
+        var x2 = Commit("f200000", -49, "other: two", "f100000");
+        var x3 = Commit("f300000", -48, "other: three", "f200000");
+        var x4 = Commit("f400000", -47, "other: four", "f300000");
+        var x5 = Commit("f500000", -46, "other: five", "f400000");
+        var joinX = Commit("a500000", 0, "chore: bring the other repository in", "a400000", "f500000");
+        var later = Commit("a600000", 1, "feat: later", "a500000");
+
+        var (branches, _) = BranchGraph.Assign([later, joinX, p3, join1, gh, p2, p1, x5, x4, x3, x2, x1], [Tip("main", "a600000")]);
+
+        var imported = Assert.Single(branches, b => b.IsImported);
+        Assert.Equal(5, imported.Commits.Count);
+        Assert.Contains(x1, imported.Commits);
+        Assert.Equal(joinX.Hash, imported.MergeHash);
+        var trunk = branches.Single(b => b.IsTrunk);
+        Assert.Contains(p1, trunk.Commits);
+        Assert.Contains(gh, trunk.Commits);
+    }
+
+    [Fact]
+    public void Graph_ALocalBranchWithoutARemoteCounterpartIsNotPushed()
+    {
+        var root = Commit("a100000", 0, "init");
+        var a1 = Commit("b100000", 1, "a", "a100000");
+        var b1 = Commit("c100000", 2, "b", "a100000");
+        var tips = new[] { Tip("main", "a100000"), Tip("main", "a100000", remote: true), Tip("feat/a", "b100000"), Tip("feat/b", "c100000"), Tip("feat/b", "c100000", remote: true) };
+
+        var (branches, _) = BranchGraph.Assign([b1, a1, root], tips);
+
+        Assert.True(branches.Single(b => b.Name == "feat/a").IsLocalOnly);
+        Assert.False(branches.Single(b => b.Name == "feat/b").IsLocalOnly);
+
+        // With no remote at all nothing is called unpushed.
+        var (local, _) = BranchGraph.Assign([Commit("c100000", 2, "b", "a100000"), Commit("b100000", 1, "a", "a100000"), Commit("a100000", 0, "init")],
+            [Tip("main", "a100000"), Tip("feat/a", "b100000")]);
+        Assert.False(local.Single(b => b.Name == "feat/a").IsLocalOnly);
+    }
+
+    [Fact]
+    public void Layout_BranchesThatReuseAColumnGetTheirOwnColours()
+    {
+        // Three branches one after another, each merged before the next starts: all in column 1, three colours.
+        var root = Commit("a000000", 0, "init");
+        var f1 = Commit("f100000", 1, "one", "a000000");
+        var m1 = Commit("a100000", 2, "Merge pull request #1 from me/feat/one", "a000000", "f100000");
+        var f2 = Commit("f200000", 3, "two", "a100000");
+        var m2 = Commit("a200000", 4, "Merge pull request #2 from me/feat/two", "a100000", "f200000");
+        var f3 = Commit("f300000", 5, "three", "a200000");
+        var m3 = Commit("a300000", 6, "Merge pull request #3 from me/feat/three", "a200000", "f300000");
+
+        var model = TimelineBuilder.Build([], [m3, f3, m2, f2, m1, f1, root], [Tip("main", "a300000")], Day.AddDays(1));
+
+        var lanes = model.Branches.Where(b => !b.IsTrunk).OrderBy(b => b.StartRow).ToList();
+        Assert.Equal(3, lanes.Count);
+        Assert.All(lanes, l => Assert.Equal(1, l.Column));
+        Assert.Equal([1, 2, 3], lanes.Select(l => l.ColourIndex));
+        Assert.Equal(0, model.Branches.Single(b => b.IsTrunk).ColourIndex);
+        var line = model.Rows.SelectMany(r => r.Lines).First(l => l.Key == lanes[2].Key);
+        Assert.Equal(3, line.Colour);
+    }
+}

@@ -223,10 +223,8 @@ public partial class MainWindow : Window
     private void ShowContext(string? folder, Services.Instructions.InstructionCli? cli)
     {
         var existing = folder is null ? _globalContextWindow : _repoContextWindow;
-        // Review runs the configured Claude Code command (a full path, say) without its interactive arguments.
-        var claude = _settings.Agents.FirstOrDefault(a => a.Enabled && Services.Instructions.InstructionFiles.DetectCli(a.Command) == Services.Instructions.InstructionCli.ClaudeCode);
         var window = existing ?? new ContextWindow { Owner = this };
-        window.ReviewCommand = string.IsNullOrWhiteSpace(claude?.Command) ? "claude" : claude.Command;
+        window.ReviewCommand = ClaudeCommand;
         if (folder is null)
         {
             // Reopening the global window keeps whichever file is being edited.
@@ -255,6 +253,16 @@ public partial class MainWindow : Window
         window.Activate();
     }
 
+    /// <summary>The configured Claude Code command (a full path, say), used for reviews without its interactive arguments; <c>claude</c> when none.</summary>
+    private string ClaudeCommand
+    {
+        get
+        {
+            var claude = _settings.Agents.FirstOrDefault(a => a.Enabled && Services.Instructions.InstructionFiles.DetectCli(a.Command) == Services.Instructions.InstructionCli.ClaudeCode);
+            return string.IsNullOrWhiteSpace(claude?.Command) ? "claude" : claude.Command;
+        }
+    }
+
     private readonly Dictionary<string, TimelineWindow> _timelineWindows = new(StringComparer.OrdinalIgnoreCase);
 
     // One timeline per repository (its main worktree names it), reused; not modal, so it sits beside the Cockpit.
@@ -272,10 +280,17 @@ public partial class MainWindow : Window
         {
             window = new TimelineWindow(_runner, scope, HistoryArchiveRoot) { Owner = this };
             window.HistoryRequested += (sessionFolder, transcript) => ShowHistory(sessionFolder, transcript);
+            // The review's rules for the user-wide CLAUDE.md go to the global Context editor as tickable changes.
+            window.SuggestionsRequested += suggestion =>
+            {
+                ShowContext(null, Services.Instructions.InstructionCli.ClaudeCode);
+                _globalContextWindow?.ShowSuggestions(suggestion);
+            };
             window.Closed += (_, _) => _timelineWindows.Remove(scope.Root);
             _timelineWindows[scope.Root] = window;
             window.Show();
         }
+        window.ReviewCommand = ClaudeCommand;
         if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
         window.Activate();
     }

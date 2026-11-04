@@ -94,7 +94,28 @@ public class InstructionReviewTests(ITestOutputHelper output)
     {
         Assert.Equal("# Title\r\n- todo\r\n", ApplyAll("\r\n", Edit("", "# Title\n- todo")));
         Assert.Equal("# Title", ApplyAll("", Edit("", "# Title")));
-        Assert.Empty(InstructionReview.Plan(Rules, [Edit("", "x")]).Reasons);
+    }
+
+    [Fact]
+    public void An_empty_start_on_a_file_with_text_appends_before_its_final_newline()
+    {
+        Assert.Equal(Rules + "\r\n## More\r\n- x\r\n", ApplyAll(Rules, Edit("", "\n\n## More\n- x")));
+        Assert.Equal("- a", ApplyAll("- a", Edit("", "", why: "nothing")).TrimEnd()); // nothing to add: left out
+        Assert.Empty(InstructionReview.Plan(Rules, [Edit("", "")]).Reasons);
+    }
+
+    [Fact]
+    public void Several_appends_keep_their_order_and_are_separate_changes()
+    {
+        var plan = InstructionReview.Plan(Rules, [Edit("", "## One", "one"), Edit("", "## Two", "two"), Edit("- use tabs", "- use spaces", "mid")]);
+
+        Assert.Equal(["mid", "one", "two"], plan.Reasons);
+        Assert.Empty(plan.Unplaced);
+        var changes = plan.Segments.Where(s => s.IsChange).ToList();
+        Assert.Equal(3, changes.Count);
+        Assert.Equal(5, changes[1].OldStart); // appended after line 4, before the trailing empty line
+        Assert.Empty(changes[1].OldLines);
+        Assert.Equal("# Rules\r\n- be concise\r\n- use tabs\r\n- write tests\r\n## Two\r\n", LineDiff.Merge(plan.Segments, i => i == 2));
     }
 
     [Fact]

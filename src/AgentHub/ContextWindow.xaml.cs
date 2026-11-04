@@ -333,6 +333,29 @@ public partial class ContextWindow : Window
         StatusText.Text = "Untick any change you do not want, then apply. Nothing is saved until you press Save.";
     }
 
+    /// <summary>
+    /// Shows edits that came from elsewhere (the timeline review's rules for the user-wide file) with Apply boxes, on the
+    /// Claude Code file of this window, exactly as a finished Review would. False when the user keeps unsaved edits to another file.
+    /// </summary>
+    public bool ShowSuggestions(ReviewSuggestion suggestion)
+    {
+        var file = _files.FirstOrDefault(f => f.Cli == InstructionCli.ClaudeCode) ?? _files.FirstOrDefault();
+        if (file is null) return false;
+        if (_current != file)
+        {
+            if (!ConfirmLeave()) return false;
+            Open(file); // ends any running or shown review of the other file
+        }
+        else
+        {
+            _reviewCts?.Cancel();
+            if (ShowingReview) CloseReview();
+        }
+        if (_current != file) return false; // the file could not be read
+        ShowReview(file, Editor.Text, suggestion);
+        return true;
+    }
+
     private void HunkToggle_Click(object sender, RoutedEventArgs e) => UpdateApplyButton();
 
     private void UpdateApplyButton()
