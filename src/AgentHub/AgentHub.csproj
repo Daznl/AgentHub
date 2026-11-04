@@ -31,4 +31,10 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AgentHub.Hosting\AgentHub.Hosting.csproj" />
+    <!-- The session host ships beside AgentHub.exe: its exe, dll, runtimeconfig and deps come along with the reference. -->
+    <ProjectReference Include="..\AgentHub.SessionHost\AgentHub.SessionHost.csproj" />
+  </ItemGroup>
 </Project>

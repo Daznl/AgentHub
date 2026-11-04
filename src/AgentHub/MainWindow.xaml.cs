@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
+using AgentHub.Hosting;
 using AgentHub.Models;
 using AgentHub.Services;
 using AgentHub.Services.History;
@@ -95,7 +96,8 @@ public partial class MainWindow : Window
         }
 
         PopulateShellOptions();
-        InitDefaultTerminalPanes(1);
+        _sessionHosts = _settings.SessionsOutliveAgentHub ? new SessionHostService(_settings.SessionsDirectory) : null;
+        RestorePanes();
         RefreshRepoList();
         RefreshAgentList();
         ViewCockpitBtn_Click(this, new RoutedEventArgs());
@@ -196,10 +198,12 @@ public partial class MainWindow : Window
         pane.MoveRequested += OnPaneMoveRequested;
         pane.FolderPickRequested += OnPaneFolderPickRequested;
         pane.SessionStateChanged += UpdateUsagePollingInterval;
+        pane.SessionStateChanged += SaveLayout;
         pane.AttentionRequested += OnPaneAttentionRequested;
         pane.ConfigureAttention(_settings.AttentionFlashEnabled, _settings.AttentionIdleSeconds);
         pane.ConfigureContext(_settings.ClaudeContextWindowTokens);
         pane.ConfigureHistory(HistoryArchiveRoot);
+        pane.ConfigureHost(_sessionHosts);
         pane.UpdateRepositories(_settings.Repositories);
         pane.UpdateSshConnections(_settings.SshConnections);
         pane.SshManageRequested += () => ManageSsh_Click(pane, new RoutedEventArgs());
@@ -320,17 +324,89 @@ public partial class MainWindow : Window
         if (folder is not null) _historyWindow.Navigate(folder, transcriptPath);
     }
 
-    private void InitDefaultTerminalPanes(int count = 3)
+    private SessionHostService? _sessionHosts;
+    private const int MaxPanes = 6;
+
+    /// <summary>
+    /// Brings the Cockpit back as it was: one pane per saved layout entry, reattached to its session when that session's
+    /// host still runs, else its launcher on the same folder and CLI. Live sessions the layout does not mention (the
+    /// layout was lost, or another copy of AgentHub started them) get a pane too, so none is left running unseen.
+    /// With nothing saved, one empty pane.
+    /// </summary>
+    private void RestorePanes()
     {
         foreach (var p in _panes) p.Dispose();
         _panes.Clear();
 
-        for (int i = 0; i < count; i++)
+        var live = new Dictionary<string, SessionRecord>(StringComparer.OrdinalIgnoreCase);
+        if (_sessionHosts is not null)
         {
-            _panes.Add(CreateTerminalPane());
+            try
+            {
+                foreach (var record in _sessionHosts.ListLive()) live[record.Id] = record;
+                _sessionHosts.PruneEnded();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                StatusText.Text = "Could not read the session host folder: " + ex.Message;
+            }
         }
 
+        var reattached = 0;
+        var ended = 0;
+        foreach (var entry in _settings.PaneLayout.Take(MaxPanes))
+        {
+            var pane = CreateTerminalPane();
+            _panes.Add(pane);
+            if (entry.SessionId is { } id && _sessionHosts is not null)
+            {
+                if (live.Remove(id, out var record))
+                {
+                    pane.AttachSession(record);
+                    reattached++;
+                    continue;
+                }
+                // The session ended while AgentHub was away: the pane shows how, with its last screen, and offers a resume.
+                var gone = _sessionHosts.Store.Load(id);
+                if (gone is not null)
+                {
+                    pane.AttachSession(gone);
+                    ended++;
+                    continue;
+                }
+            }
+            pane.RestoreLayout(entry);
+        }
+
+        foreach (var record in live.Values.OrderBy(r => r.StartedAt))
+        {
+            if (_panes.Count >= MaxPanes) break;
+            var pane = CreateTerminalPane();
+            _panes.Add(pane);
+            pane.AttachSession(record);
+            reattached++;
+        }
+
+        if (_panes.Count == 0) _panes.Add(CreateTerminalPane());
         RebuildTerminalLayout();
+        UpdateUsagePollingInterval();
+
+        if (reattached > 0 || ended > 0)
+        {
+            StatusText.Text = (reattached, ended) switch
+            {
+                (> 0, 0) => $"Reattached {reattached} session(s) that kept running while AgentHub was closed.",
+                (0, > 0) => $"{ended} session(s) ended while AgentHub was closed.",
+                _ => $"Reattached {reattached} session(s); {ended} ended while AgentHub was closed."
+            };
+        }
+    }
+
+    /// <summary>Remembers the panes (order, folder, CLI, running session) so the next start brings them back.</summary>
+    private void SaveLayout()
+    {
+        _settings.PaneLayout = _panes.Select(p => p.LayoutEntry()).ToList();
+        _ = _settingsService.SaveAsync(_settings);
     }
 
     private void RebuildTerminalLayout()
@@ -389,7 +465,27 @@ public partial class MainWindow : Window
         _panes.Add(newPane);
         RebuildTerminalLayout();
         UpdateUsagePollingInterval();
+        SaveLayout();
         StatusText.Text = $"Added Terminal {_panes.Count}.";
+    }
+
+    /// <summary>Cockpit toolbar: end every running session, hosted ones included. Asks first; nothing else ends sessions in bulk.</summary>
+    private void StopAllSessions_Click(object sender, RoutedEventArgs e)
+    {
+        var running = _panes.Where(p => p.IsRunning).ToList();
+        if (running.Count == 0)
+        {
+            StatusText.Text = "No session is running.";
+            return;
+        }
+
+        var answer = MessageBox.Show(this,
+            $"End {running.Count} running session(s)? Anything the CLIs are doing stops now. Closing AgentHub instead leaves them running for the next start.",
+            "Stop all sessions", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (answer != MessageBoxResult.Yes) return;
+
+        foreach (var pane in running) pane.TerminalControl.StopSession();
+        StatusText.Text = $"Stopped {running.Count} session(s).";
     }
 
     private const string PlainPowerShellCommand = "powershell.exe -NoLogo";
@@ -514,10 +610,22 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Closing a pane is the one place a session ends without a Stop button: say so, since the session would
+        // otherwise have outlived AgentHub.
+        if (pane.IsRunning)
+        {
+            var name = string.IsNullOrEmpty(pane.TerminalControl.SessionName) ? pane.TerminalControl.WorkingDirectory : pane.TerminalControl.SessionName;
+            var answer = MessageBox.Show(this,
+                $"This terminal has a running session in {name}. Closing the terminal ends it. Close it?",
+                "Close terminal", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (answer != MessageBoxResult.Yes) return;
+        }
+
         pane.Dispose();
         _panes.Remove(pane);
         RebuildTerminalLayout();
         UpdateUsagePollingInterval();
+        SaveLayout();
         StatusText.Text = $"Terminal closed. {_panes.Count} session(s) active.";
     }
 
@@ -529,6 +637,7 @@ public partial class MainWindow : Window
 
         (_panes[currentIndex], _panes[targetIndex]) = (_panes[targetIndex], _panes[currentIndex]);
         RebuildTerminalLayout();
+        SaveLayout();
         StatusText.Text = $"Moved terminal to position {targetIndex + 1}.";
     }
 
@@ -1848,13 +1957,24 @@ public partial class MainWindow : Window
         public IntPtr Handle => new System.Windows.Interop.WindowInteropHelper(_window).Handle;
     }
 
+    // Closing AgentHub never ends a session: hosted ones are detached and reattached by the next start from the saved
+    // layout. Sessions running inside AgentHub (no host available) have nowhere to go and end here.
     protected override void OnClosed(EventArgs e)
     {
         _usageRefreshTimer.Stop();
         _historyArchive?.Dispose();
+        try
+        {
+            _settings.PaneLayout = _panes.Select(p => p.LayoutEntry()).ToList();
+            _settingsService.Save(_settings);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The sessions still show up next time: live hosts are listed from their own records.
+        }
         foreach (var pane in _panes)
         {
-            pane.Dispose();
+            pane.Detach();
         }
         base.OnClosed(e);
     }

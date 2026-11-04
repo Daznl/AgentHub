@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace AgentHub.Terminal;
+namespace AgentHub.Hosting;
 
 internal static class ConPtyNative
 {

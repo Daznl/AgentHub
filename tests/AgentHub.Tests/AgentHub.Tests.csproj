@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\AgentHub\AgentHub.csproj" />
+    <ProjectReference Include="..\..\src\AgentHub.Hosting\AgentHub.Hosting.csproj" />
   </ItemGroup>
 
   <ItemGroup>

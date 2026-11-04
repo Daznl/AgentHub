@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using AgentHub.Hosting;
 using AgentHub.Models;
 using AgentHub.Services.Context;
 using AgentHub.Services.History;
@@ -77,8 +78,9 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         ApplyHeaderMode(working: false);
         Terminal.SessionStarted += () =>
         {
-            _lastTranscript = null;
-            _context.Start(Terminal.CommandLine, Terminal.WorkingDirectory, DateTimeOffset.Now, _claudeContextWindowTokens);
+            _lastTranscript = Terminal.HostedRecord?.TranscriptPath;
+            // A reattached session's transcript was created when its process started, not now.
+            _context.Start(Terminal.CommandLine, Terminal.WorkingDirectory, Terminal.StartedAt, _claudeContextWindowTokens);
             BeginSession();
             SessionStateChanged?.Invoke();
         };
@@ -88,6 +90,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             RefreshContextFolder();
             SessionStateChanged?.Invoke();
         };
+        Terminal.ReattachFailed += OfferResume;
         _context.ReadingChanged += ShowContext;
         _context.PromptChanged += ShowPrompt;
         Terminal.StatusChanged += OnTerminalStatusChanged;
@@ -161,6 +164,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         }
 
         _lastTranscript = reading.FilePath;
+        Terminal.NoteTranscript(reading.FilePath);
         var fraction = reading.UsedFraction;
         ContextBarFill.Width = ContextBarWidth * fraction;
         ContextBarFill.Background = fraction switch
@@ -601,13 +605,22 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         if (generation != _resumeGeneration || _step != 3) return;
 
         ResumeList.ItemsSource = sessions.Take(ResumeListLimit).Select(s => new SessionRow(s)).ToList();
+        var lastHere = _resumeHint is { } hint
+            ? sessions.FindIndex(s => string.Equals(s.FilePath, hint, StringComparison.OrdinalIgnoreCase))
+            : -1;
         ResumeStatus.Text = sessions.Count switch
         {
             0 => "No earlier sessions in this folder.",
+            _ when lastHere >= 0 => $"This pane's last session is {Ordinal(lastHere + 1)} in the list. Continue it, or another:",
             > ResumeListLimit => $"Or continue an earlier one (newest {ResumeListLimit} of {sessions.Count}; all are in 🕘 History):",
             _ => "Or continue an earlier one:"
         };
     }
+
+    private static string Ordinal(int n) => n switch { 1 => "first", 2 => "second", 3 => "third", _ => $"number {n}" };
+
+    // Transcript of the session this pane had before AgentHub last closed, pointed out in the resume list.
+    private string? _resumeHint;
 
     // Running: Relaunch. Otherwise the header button reopens the launcher over the last session's output.
     private void Launch_Click(object sender, RoutedEventArgs e)
@@ -790,6 +803,84 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         Terminal.StartSession(commandLine, workingDirectory, title, repoName, isAgentSession);
     }
 
+    // ---- Sessions that outlive AgentHub ----
+
+    /// <summary>Sessions start in host processes through this service; null keeps them inside AgentHub.</summary>
+    public void ConfigureHost(SessionHostService? hosts) => Terminal.Host = hosts;
+
+    /// <summary>Picks up a session still running in its host from before AgentHub last closed; the launcher follows it.</summary>
+    public void AttachSession(SessionRecord record)
+    {
+        PlaceLauncher(record.WorkingDirectory, record.CommandLine);
+        _fresh = new FreshLaunch(_shell?.Command ?? PlainCommand(record.CommandLine), record.Title, record.IsAgent);
+        BeginSession();
+        Terminal.AttachSession(record);
+    }
+
+    /// <summary>Brings back an idle pane's launcher choices (folder and CLI) from a saved layout.</summary>
+    public void RestoreLayout(PaneLayoutEntry entry)
+    {
+        PlaceLauncher(entry.Folder, entry.Command);
+        _resumeHint = entry.TranscriptPath;
+        _launcherOpen = true;
+        GoToStep(_location is null ? 1 : _shell is null ? 2 : HasSessions(_shell) ? 3 : 2);
+    }
+
+    // The saved session is gone (ended while AgentHub was closed, or its host with it): open the launcher on its folder
+    // and CLI with the session list up, pointing at the one this pane had. Its last screen stays under "Back to output".
+    private void OfferResume(SessionRecord record, string how)
+    {
+        _resumeHint = record.TranscriptPath ?? _lastTranscript;
+        _hadSession = true;
+        if (_location is null || _shell is null) PlaceLauncher(record.WorkingDirectory, record.CommandLine);
+        _launcherOpen = true;
+        GoToStep(_location is null ? 1 : _shell is null ? 2 : HasSessions(_shell) ? 3 : 2);
+    }
+
+    // Launcher state for a folder and a command: the matching location (or a browsed one) and the function type whose
+    // command the session's command line starts with (a resume command starts with the CLI's plain command).
+    private void PlaceLauncher(string? folder, string? command)
+    {
+        if (!string.IsNullOrEmpty(folder))
+        {
+            var match = Locations().FirstOrDefault(l => SamePath(l.Path, folder));
+            if (match is not null) _location = match;
+            else if (Directory.Exists(folder)) _location = _customLocation = CustomLocation(folder);
+        }
+        if (!string.IsNullOrEmpty(command))
+        {
+            _shell = _shells.FirstOrDefault(s => s.Command == command)
+                ?? _shells.Where(s => command.StartsWith(s.Command + " ", StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(s => s.Command.Length).FirstOrDefault()
+                ?? _shell;
+        }
+        _step = _location is null ? 1 : 2;
+    }
+
+    private string PlainCommand(string commandLine) =>
+        _shells.Where(s => commandLine.StartsWith(s.Command + " ", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(s => s.Command.Length).Select(s => s.Command).FirstOrDefault() ?? commandLine;
+
+    /// <summary>This pane as the layout saves it: its hosted session while one runs, and its folder and CLI either way.</summary>
+    public PaneLayoutEntry LayoutEntry() => new()
+    {
+        SessionId = Terminal.IsRunning ? Terminal.HostedRecord?.Id : null,
+        Folder = Terminal.IsRunning && !string.IsNullOrEmpty(Terminal.WorkingDirectory) ? Terminal.WorkingDirectory : _location?.Path,
+        Command = _fresh?.Command ?? _shell?.Command,
+        ShellName = _shell?.DisplayName,
+        IsAgent = Terminal.IsRunning ? Terminal.IsAgentSession : _shell?.IsAgent ?? false,
+        RepoName = Terminal.IsRunning ? Terminal.SessionName : _location?.Repository?.Name ?? _location?.Name,
+        TranscriptPath = TranscriptPath
+    };
+
+    /// <summary>Lets go of a hosted session without ending it (AgentHub is closing); a session inside AgentHub ends.</summary>
+    public void Detach()
+    {
+        _context.Dispose();
+        Terminal.Detach();
+    }
+
+    /// <summary>Ends the session and releases the pane (the pane was closed).</summary>
     public void Dispose()
     {
         _context.Dispose();

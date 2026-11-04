@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
+using AgentHub.Hosting;
 using Microsoft.Web.WebView2.Core;
 using UserControl = System.Windows.Controls.UserControl;
 
@@ -20,25 +21,39 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     private void RaiseStatus(TerminalStatus status) => StatusChanged?.Invoke(status);
     private void RaiseSubtitle(string subtitle) => SubtitleChanged?.Invoke(subtitle);
 
-    private ConPtySession? _session;
+    private ITerminalSession? _session;
     private bool _isTerminalReady;
-    private bool _pendingStart;
+    // A launch asked for before the terminal page was ready; runs on "ready".
+    private Action? _pendingLaunch;
     private string _commandLine = string.Empty;
     private string _workingDirectory = string.Empty;
+    private string _title = string.Empty;
     private int _cols = 100;
     private int _rows = 30;
+    // Bumped on every launch or attach so a slow one that was replaced meanwhile lets go of what it started.
+    private int _launchGeneration;
+    private bool _disposed;
 
     private bool _isInitialized;
     private bool _isInitializing;
 
     public event Action? SessionStarted;
     public event Action? SessionExited;
+    /// <summary>Raised when a saved session could not be reattached (its host is gone or busy); the pane offers a resume instead.</summary>
+    public event Action<SessionRecord, string>? ReattachFailed;
     public bool IsRunning => _session?.IsRunning == true;
     /// <summary>Command line and folder of the current (or last) session.</summary>
     public string CommandLine => _commandLine;
     public string WorkingDirectory => _workingDirectory;
     /// <summary>The repository or place the current session was started for (its first subtitle), e.g. "AgentHub" or "SSH · host".</summary>
     public string SessionName { get; private set; } = "";
+    /// <summary>When the current session's process started: now for a launch, the recorded time for a reattach.</summary>
+    public DateTimeOffset StartedAt { get; private set; }
+
+    /// <summary>Starts sessions in host processes that outlive AgentHub. Null, or unavailable, means they run inside AgentHub.</summary>
+    public SessionHostService? Host { get; set; }
+    /// <summary>The host record of the current session, or null when it runs inside AgentHub.</summary>
+    public SessionRecord? HostedRecord { get; private set; }
 
     // Attention detection: only armed for coding-CLI sessions (not plain shells).
     private readonly AttentionDetector _attention = new();
@@ -165,85 +180,250 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     {
         _commandLine = commandLine;
         _workingDirectory = workingDirectory;
+        _title = title;
         SessionName = subtitle;
         IsAgentSession = isAgentSession;
         SetHeader(title, subtitle);
-
-        if (_isTerminalReady)
-        {
-            SpawnConPty();
-        }
-        else
-        {
-            _pendingStart = true;
-        }
+        Launch(SpawnSession);
     }
 
-    private void SpawnConPty()
+    /// <summary>Picks up a session that kept running in its host while AgentHub was closed.</summary>
+    public void AttachSession(SessionRecord record)
     {
-        _pendingStart = false;
-        _session?.Dispose();
-        _session = null;
+        _commandLine = record.CommandLine;
+        _workingDirectory = record.WorkingDirectory;
+        _title = record.Title;
+        SessionName = record.SessionName;
+        IsAgentSession = record.IsAgent;
+        SetHeader(record.Title, record.SessionName);
+        Launch(() => AttachAsync(record));
+    }
 
+    private void Launch(Action launch)
+    {
+        if (_isTerminalReady) launch();
+        else _pendingLaunch = launch;
+    }
+
+    /// <summary>Ends the current session's process (a hosted one too) and forgets it.</summary>
+    private void EndCurrent()
+    {
+        var session = _session;
+        _session = null;
+        if (session is null) return;
+        session.Kill();
+        session.Dispose();
+    }
+
+    private void ClearTerminal()
+    {
         try
         {
-            RaiseStatus(TerminalStatus.Running);
+            WebView.CoreWebView2?.PostWebMessageAsString(JsonSerializer.Serialize(new { type = "clear" }));
+        }
+        catch { }
+    }
 
+    // Hosted when a host is available, so the process survives AgentHub; inside AgentHub when the host cannot start.
+    private async void SpawnSession()
+    {
+        EndCurrent();
+        var generation = ++_launchGeneration;
+        RaiseStatus(TerminalStatus.Running);
+        ClearTerminal();
+        HostedRecord = null;
+        StartedAt = DateTimeOffset.Now;
+
+        ITerminalSession? session = null;
+        string note = "";
+        if (Host is { IsAvailable: true } host)
+        {
+            var record = new SessionRecord
+            {
+                Id = SessionStore.NewId(),
+                CommandLine = _commandLine,
+                WorkingDirectory = _workingDirectory,
+                Title = _title,
+                SessionName = SessionName,
+                IsAgent = IsAgentSession,
+                Cols = _cols,
+                Rows = _rows,
+                StartedAt = StartedAt
+            };
             try
             {
-                WebView.CoreWebView2?.PostWebMessageAsString(JsonSerializer.Serialize(new { type = "clear" }));
+                RaiseSubtitle("Starting the session host…");
+                var hosted = await host.StartAsync(record);
+                if (_disposed)
+                {
+                    // AgentHub closed while the host was starting: detach and let the next start pick it up.
+                    hosted.Dispose();
+                    return;
+                }
+                if (generation != _launchGeneration)
+                {
+                    // Replaced while the host was starting: nobody will look at this one.
+                    hosted.Kill();
+                    hosted.Dispose();
+                    return;
+                }
+                session = hosted;
+                HostedRecord = record;
             }
-            catch { }
-
-            var session = ConPtySession.Start(_commandLine, _workingDirectory, _cols, _rows);
-            _session = session;
-
-            _attention.OnSessionStarted(DateTimeOffset.Now);
-            _attentionTimer.IsEnabled = IsAgentSession && AttentionEnabled;
-
-            // Events of a replaced session (Relaunch, Restart) arrive after the new one has started; drop them,
-            // or its late exit marks the new session stopped and its last output lands in the cleared terminal.
-            session.OutputDataReceived += text =>
+            catch (Exception ex)
             {
-                Dispatcher.InvokeAsync(() =>
-                {
-                    if (!ReferenceEquals(_session, session)) return;
-                    _attention.OnOutput(text, DateTimeOffset.Now);
-                    try
-                    {
-                        WebView.CoreWebView2?.PostWebMessageAsString(text);
-                    }
-                    catch { }
-                });
-            };
+                note = $"Session host failed ({ex.Message}); this session runs inside AgentHub and ends with it.";
+            }
+        }
 
-            session.ProcessExited += exitCode =>
+        if (session is null)
+        {
+            try
             {
-                Dispatcher.InvokeAsync(() =>
-                {
-                    if (!ReferenceEquals(_session, session)) return;
-                    StopAttentionTracking();
-                    RaiseStatus(exitCode == 0 ? TerminalStatus.Stopped : TerminalStatus.Failed);
-                    RaiseSubtitle($"Exited (code {exitCode})");
-                    SessionExited?.Invoke();
-                });
-            };
+                session = LocalSession.Start(_commandLine, _workingDirectory, _cols, _rows);
+            }
+            catch (Exception ex)
+            {
+                RaiseStatus(TerminalStatus.Failed);
+                RaiseSubtitle("Launch failed: " + ex.Message);
+                return;
+            }
+        }
 
-            // The title row already names the repository; process id and full path are noise there. Exit and error text still show.
-            RaiseSubtitle("");
-            SessionStarted?.Invoke();
+        Hook(session, replay: null);
+        // The title row already names the repository; process id and full path are noise there. Exit and error text still show.
+        RaiseSubtitle(note);
+        SessionStarted?.Invoke();
 
-            // A freshly-launched TUI (e.g. Claude Code) reads the terminal size at
-            // startup. Force a couple of re-fits so it gets the true current size and
-            // its bottom input/mode line isn't rendered below the visible area.
-            ScheduleRefit();
-            FocusTerminal();
+        // A freshly-launched TUI (e.g. Claude Code) reads the terminal size at
+        // startup. Force a couple of re-fits so it gets the true current size and
+        // its bottom input/mode line isn't rendered below the visible area.
+        ScheduleRefit();
+        FocusTerminal();
+    }
+
+    private async void AttachAsync(SessionRecord record)
+    {
+        EndCurrent();
+        var generation = ++_launchGeneration;
+        RaiseStatus(TerminalStatus.Running);
+        ClearTerminal();
+        HostedRecord = record;
+        StartedAt = record.StartedAt;
+
+        HostedSession hosted;
+        try
+        {
+            if (Host is not { IsAvailable: true } host) throw new InvalidOperationException(Host?.UnavailableReason ?? "The session host is not available.");
+            RaiseSubtitle("Reattaching…");
+            hosted = await host.AttachAsync(record);
         }
         catch (Exception ex)
         {
-            RaiseStatus(TerminalStatus.Failed);
-            RaiseSubtitle("Launch failed: " + ex.Message);
+            if (generation != _launchGeneration || _disposed) return;
+            ShowEnded(record, ex.Message);
+            return;
         }
+
+        if (generation != _launchGeneration || _disposed)
+        {
+            hosted.Dispose();
+            return;
+        }
+
+        Hook(hosted, hosted.ReplayText);
+        // The pane may not be the size it was; the CLI redraws for the new one.
+        hosted.Resize(_cols, _rows);
+        RaiseSubtitle("");
+        SessionStarted?.Invoke();
+        ScheduleRefit();
+    }
+
+    // A saved session whose host is gone: show its last screen and how it ended, then let the pane offer a resume.
+    private void ShowEnded(SessionRecord record, string reason)
+    {
+        var latest = Host?.Store.Load(record.Id) ?? record;
+        try
+        {
+            var replayPath = Host?.Store.ReplayPath(record.Id);
+            if (replayPath is not null && File.Exists(replayPath))
+                Post(System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(replayPath)));
+        }
+        catch (IOException) { }
+
+        var how = latest.Error is not null ? $"Could not start: {latest.Error}"
+            : latest.ExitCode is { } code ? $"Exited (code {code}) while AgentHub was closed"
+            : $"Session lost: {reason}";
+        RaiseStatus(latest.ExitCode == 0 ? TerminalStatus.Stopped : TerminalStatus.Failed);
+        RaiseSubtitle(how);
+        ReattachFailed?.Invoke(latest, how);
+    }
+
+    private void Post(string text)
+    {
+        try
+        {
+            WebView.CoreWebView2?.PostWebMessageAsString(text);
+        }
+        catch { }
+    }
+
+    private void Hook(ITerminalSession session, string? replay)
+    {
+        _session = session;
+        _attention.OnSessionStarted(DateTimeOffset.Now);
+        _attentionTimer.IsEnabled = IsAgentSession && AttentionEnabled;
+        if (!string.IsNullOrEmpty(replay)) Post(replay);
+
+        // Events of a replaced session (Relaunch, Restart) arrive after the new one has started; drop them,
+        // or its late exit marks the new session stopped and its last output lands in the cleared terminal.
+        session.OutputDataReceived += text =>
+        {
+            Dispatcher.InvokeAsync(() =>
+            {
+                if (!ReferenceEquals(_session, session)) return;
+                _attention.OnOutput(text, DateTimeOffset.Now);
+                Post(text);
+            });
+        };
+
+        session.ProcessExited += exitCode =>
+        {
+            Dispatcher.InvokeAsync(() =>
+            {
+                if (!ReferenceEquals(_session, session)) return;
+                StopAttentionTracking();
+                var lost = session is HostedSession { HostLost: true };
+                RaiseStatus(exitCode == 0 ? TerminalStatus.Stopped : TerminalStatus.Failed);
+                RaiseSubtitle(lost ? "The session host stopped unexpectedly; see host.log in its session folder." : $"Exited (code {exitCode})");
+                SessionExited?.Invoke();
+            });
+        };
+
+        (session as HostedSession)?.Start();
+    }
+
+    /// <summary>Records the transcript the pane found for this session, so a reattach shows its context and prompt at once.</summary>
+    public void NoteTranscript(string? path)
+    {
+        if (HostedRecord is not { } record || Host is null || string.IsNullOrEmpty(path)) return;
+        if (string.Equals(record.TranscriptPath, path, StringComparison.OrdinalIgnoreCase)) return;
+        record.TranscriptPath = path;
+        var store = Host.Store;
+        var id = record.Id;
+        // The host owns the rest of the record (its pids, the exit code): change only this field in what is on disk.
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var latest = store.Load(id);
+                if (latest is null) return;
+                latest.TranscriptPath = path;
+                store.Save(latest);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        });
     }
 
     /// <summary>
@@ -301,7 +481,11 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
                     _isTerminalReady = true;
                     if (root.TryGetProperty("cols", out var c)) _cols = c.GetInt32();
                     if (root.TryGetProperty("rows", out var r)) _rows = r.GetInt32();
-                    if (_pendingStart) SpawnConPty();
+                    if (_pendingLaunch is { } launch)
+                    {
+                        _pendingLaunch = null;
+                        launch();
+                    }
                     break;
 
                 case "resize":
@@ -355,8 +539,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     {
         StopAttentionTracking();
         // Dropping the session as well as killing it means its exit event is ignored and cannot overwrite "Stopped by user".
-        _session?.Dispose();
-        _session = null;
+        EndCurrent();
         RaiseStatus(TerminalStatus.Stopped);
         RaiseSubtitle("Stopped by user");
         SessionExited?.Invoke();
@@ -367,13 +550,36 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     {
         if (!string.IsNullOrWhiteSpace(_commandLine))
         {
-            SpawnConPty();
+            SpawnSession();
         }
     }
 
+    /// <summary>
+    /// Lets go of the session without ending it: a hosted process keeps running for the next AgentHub to reattach; one
+    /// running inside AgentHub ends. Called when AgentHub closes.
+    /// </summary>
+    public void Detach()
+    {
+        _launchGeneration++;
+        _attentionTimer.Stop();
+        var session = _session;
+        _session = null;
+        session?.Detach();
+        ReleaseView();
+    }
+
+    /// <summary>Ends the session and releases the control. Called when the pane is closed.</summary>
     public void Dispose()
     {
+        _launchGeneration++;
         _attentionTimer.Stop();
+        EndCurrent();
+        ReleaseView();
+    }
+
+    private void ReleaseView()
+    {
+        _disposed = true;
         Loaded -= EmbeddedTerminalControl_Loaded;
         if (WebView.CoreWebView2 != null)
         {
@@ -384,7 +590,5 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
             }
             catch { }
         }
-        _session?.Dispose();
-        _session = null;
     }
 }

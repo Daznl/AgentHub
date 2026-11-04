@@ -81,4 +81,16 @@ public sealed class AppSettings
 
     /// <summary>Last folder chosen for "Scan folder for repos"; the picker starts here next time.</summary>
     public string? LastScanFolder { get; set; }
+
+    /// <summary>
+    /// Run each Cockpit session in its own AgentHub.SessionHost process, so closing (or updating) AgentHub leaves the CLI
+    /// running and the next start reattaches to it. Off, sessions run inside AgentHub and end with it.
+    /// </summary>
+    public bool SessionsOutliveAgentHub { get; set; } = true;
+
+    /// <summary>Where session host records, replays and logs live. One folder per session; ended ones are pruned to the newest 20.</summary>
+    public string SessionsDirectory { get; set; } = Hosting.SessionStore.DefaultRoot;
+
+    /// <summary>The Cockpit panes as last saved, in order, so the next start brings them back. Maintained by AgentHub.</summary>
+    public List<PaneLayoutEntry> PaneLayout { get; set; } = [];
 }

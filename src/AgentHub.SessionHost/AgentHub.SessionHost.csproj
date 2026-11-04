@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- One process per Cockpit session. Owns the pseudo-console and the CLI so AgentHub can close, update and reattach. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AgentHub.SessionHost</RootNamespace>
+    <AssemblyName>AgentHub.SessionHost</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Include="System.IO" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AgentHub.Hosting\AgentHub.Hosting.csproj" />
+  </ItemGroup>
+</Project>

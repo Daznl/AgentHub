@@ -11,9 +11,17 @@ public sealed class SettingsService
         PropertyNameCaseInsensitive = true
     };
 
-    public string SettingsDirectory { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "AgentHub");
+    // Several places save without awaiting each other; one write at a time keeps the file whole.
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
+
+    /// <summary>
+    /// %APPDATA%\AgentHub, or the folder in <c>AGENTHUB_SETTINGS_DIR</c> so a test copy of AgentHub keeps its own settings
+    /// and pane layout instead of sharing (and overwriting) the main instance's.
+    /// </summary>
+    public string SettingsDirectory { get; } =
+        Environment.GetEnvironmentVariable("AGENTHUB_SETTINGS_DIR") is { Length: > 0 } custom
+            ? custom
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AgentHub");
 
     public string SettingsPath => Path.Combine(SettingsDirectory, "settings.json");
 
@@ -51,8 +59,31 @@ public sealed class SettingsService
 
     public async Task SaveAsync(AppSettings settings)
     {
-        Directory.CreateDirectory(SettingsDirectory);
-        await using var stream = File.Create(SettingsPath);
-        await JsonSerializer.SerializeAsync(stream, settings, JsonOptions);
+        await _writeLock.WaitAsync();
+        try
+        {
+            Directory.CreateDirectory(SettingsDirectory);
+            await using var stream = File.Create(SettingsPath);
+            await JsonSerializer.SerializeAsync(stream, settings, JsonOptions);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    /// <summary>Writes before returning. For shutdown, where an awaited save would not finish.</summary>
+    public void Save(AppSettings settings)
+    {
+        _writeLock.Wait();
+        try
+        {
+            Directory.CreateDirectory(SettingsDirectory);
+            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 }

@@ -3,8 +3,13 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 
-namespace AgentHub.Terminal;
+namespace AgentHub.Hosting;
 
+/// <summary>
+/// A process on a Windows pseudo-console, owned by this process. Used in-process by AgentHub for sessions that need not
+/// survive it, and by <c>AgentHub.SessionHost</c> for the ones that do. Output is raised both as raw bytes (what the host
+/// relays and buffers) and as decoded text (what a terminal view writes).
+/// </summary>
 public sealed class ConPtySession : IDisposable
 {
     private IntPtr _hPC = IntPtr.Zero;
@@ -18,7 +23,10 @@ public sealed class ConPtySession : IDisposable
     public int ProcessId { get; private set; }
     public bool IsRunning { get; private set; }
 
+    /// <summary>Output decoded as UTF-8 text; a multi-byte character split across reads is joined.</summary>
     public event Action<string>? OutputDataReceived;
+    /// <summary>Output as the bytes the process wrote. Each call gets its own array.</summary>
+    public event Action<byte[]>? OutputBytesReceived;
     public event Action<int>? ProcessExited;
 
     public static ConPtySession Start(string commandLine, string workingDirectory, int cols = 120, int rows = 30)
@@ -141,12 +149,13 @@ public sealed class ConPtySession : IDisposable
         Task.Run(MonitorProcessExitAsync);
     }
 
-    public void Write(string data)
+    public void Write(string data) => Write(Encoding.UTF8.GetBytes(data));
+
+    public void Write(byte[] bytes)
     {
-        if (_disposed || _hPipeInWrite == IntPtr.Zero) return;
+        if (_disposed || _hPipeInWrite == IntPtr.Zero || bytes.Length == 0) return;
         try
         {
-            var bytes = Encoding.UTF8.GetBytes(data);
             ConPtyNative.WriteFile(_hPipeInWrite, bytes, (uint)bytes.Length, out _, IntPtr.Zero);
         }
         catch { }
@@ -174,6 +183,13 @@ public sealed class ConPtySession : IDisposable
             {
                 var bytesRead = _outStream.Read(buffer, 0, buffer.Length);
                 if (bytesRead <= 0) break;
+
+                if (OutputBytesReceived is { } bytesHandler)
+                {
+                    var copy = new byte[bytesRead];
+                    Buffer.BlockCopy(buffer, 0, copy, 0, bytesRead);
+                    bytesHandler(copy);
+                }
 
                 var charCount = decoder.GetChars(buffer, 0, bytesRead, charBuffer, 0, flush: false);
                 if (charCount > 0)
