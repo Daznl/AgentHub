@@ -20,7 +20,20 @@ public sealed record TimelineBranchTip(string Hash, string Name, bool IsRemote);
 /// A session as the timeline sees it: its summary, when it really ended (last transcript entry, which an archived copy's
 /// file time does not show), the commit hash prefixes its transcript mentions, and the folder it ran in.
 /// </summary>
-public sealed record TimelineSessionInput(SessionSummary Summary, DateTimeOffset EndedAt, IReadOnlySet<string> MentionedHashes, string? Folder = null);
+public sealed record TimelineSessionInput(SessionSummary Summary, DateTimeOffset EndedAt, IReadOnlySet<string> MentionedHashes, string? Folder = null,
+    IReadOnlySet<long>? ActiveMinutes = null, Func<string, DateTimeOffset, DateTimeOffset, bool>? MentionsBetween = null)
+{
+    /// <summary>True when the transcript wrote an entry within <see cref="TimelineBuilder.ActiveSlack"/> of <paramref name="time"/>; null when activity is unknown.</summary>
+    public bool? ActiveAt(DateTimeOffset time)
+    {
+        if (ActiveMinutes is null) return null;
+        var minute = time.ToUnixTimeSeconds() / 60;
+        var slack = (long)TimelineBuilder.ActiveSlack.TotalMinutes;
+        for (var m = minute - slack; m <= minute + slack; m++)
+            if (ActiveMinutes.Contains(m)) return true;
+        return false;
+    }
+}
 
 public enum TimelineRowKind
 {
@@ -94,6 +107,10 @@ public static class TimelineBuilder
     /// <summary>A commit this long before a session's first entry, or after its last, still counts as the session's.</summary>
     public static readonly TimeSpan Before = TimeSpan.FromMinutes(2);
     public static readonly TimeSpan After = TimeSpan.FromMinutes(5);
+    /// <summary>A session with a transcript entry this close to a commit was doing something when it was made.</summary>
+    public static readonly TimeSpan ActiveSlack = TimeSpan.FromMinutes(4);
+    /// <summary>How far before and after a commit its subject is looked for in a transcript (the message is written just before).</summary>
+    public static readonly TimeSpan SubjectBefore = TimeSpan.FromMinutes(15), SubjectAfter = TimeSpan.FromMinutes(2);
     /// <summary>A session written to this recently is shown as live.</summary>
     public static readonly TimeSpan LiveWindow = TimeSpan.FromMinutes(3);
 
@@ -161,8 +178,11 @@ public static class TimelineBuilder
     }
 
     /// <summary>
-    /// Gives each commit to the session running when it was made. With several running, the one whose transcript
-    /// mentions the hash wins (the latest started, if more than one does); with none mentioning it, it stays outside.
+    /// Gives each commit to the session that made it. Candidates are the sessions whose window covers the commit time and
+    /// that wrote a transcript entry within <see cref="ActiveSlack"/> of it (a session left open for days only counts while
+    /// it is doing something); with no activity known, every session whose window covers it. With several candidates the
+    /// one whose transcript mentions the hash wins (the latest started, if more than one does); otherwise a single
+    /// candidate wins and more than one leaves the commit outside.
     /// </summary>
     public static (Dictionary<TimelineSessionInput, List<TimelineCommit>> BySession, List<TimelineCommit> Outside) Attribute(
         IReadOnlyList<TimelineSessionInput> sessions, IReadOnlyList<TimelineCommit> commits)
@@ -171,8 +191,13 @@ public static class TimelineBuilder
         var outside = new List<TimelineCommit>();
         foreach (var commit in commits)
         {
-            var running = sessions.Where(s => commit.Time >= s.Summary.StartedAt - Before && commit.Time <= s.EndedAt + After).ToList();
+            var inWindow = sessions.Where(s => commit.Time >= s.Summary.StartedAt - Before && commit.Time <= s.EndedAt + After).ToList();
+            var active = inWindow.Where(s => s.ActiveAt(commit.Time) == true).ToList();
+            var running = active.Count > 0 ? active : inWindow.Where(s => s.ActiveAt(commit.Time) is null).ToList();
             var mentioning = running.Where(s => s.MentionedHashes.Contains(commit.Short)).ToList();
+            // Still tied: the session that wrote the commit message has its subject in the git commit it ran just before.
+            if (mentioning.Count == 0 && running.Count > 1 && SubjectFragment(commit.Subject) is { } fragment)
+                mentioning = running.Where(s => s.MentionsBetween?.Invoke(fragment, commit.Time - SubjectBefore, commit.Time + SubjectAfter) == true).ToList();
             var owner = mentioning.Count > 0 ? mentioning.MaxBy(s => s.Summary.StartedAt)
                 : running.Count == 1 ? running[0]
                 : null;
@@ -180,6 +205,18 @@ public static class TimelineBuilder
             else bySession[owner].Add(commit);
         }
         return (bySession, outside);
+    }
+
+    /// <summary>
+    /// The part of a commit subject searched for in transcripts: up to the first quote or backslash (JSON escapes them) and
+    /// at most 60 characters; null when too short to be telling.
+    /// </summary>
+    public static string? SubjectFragment(string subject)
+    {
+        var cut = subject.IndexOfAny(['"', '\\', '\n']);
+        var fragment = (cut < 0 ? subject : subject[..cut]).Trim();
+        if (fragment.Length > 60) fragment = fragment[..60];
+        return fragment.Length >= 12 ? fragment : null;
     }
 
     // Column 0 is the trunk. Each branch lane spans from its first row to its last (or to the row before the one holding

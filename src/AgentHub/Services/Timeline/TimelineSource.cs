@@ -95,7 +95,13 @@ public static partial class TimelineSource
             .SelectMany(folder => SessionHistoryReader.ListSessions(folder, archiveRoot: archiveRoot).Select(s => (Folder: folder, Summary: s)))
             .GroupBy(s => Path.GetFileName(s.Summary.FilePath), StringComparer.OrdinalIgnoreCase)
             .Select(g => g.MaxBy(s => s.Summary.SizeBytes))
-            .Select(s => new TimelineSessionInput(s.Summary, LastEntryTime(s.Summary.FilePath) ?? s.Summary.LastActivity, TranscriptHashes.Read(s.Summary.FilePath), s.Folder))
+            .Select(s =>
+            {
+                var facts = TranscriptScan.Read(s.Summary.FilePath);
+                var path = s.Summary.FilePath;
+                return new TimelineSessionInput(s.Summary, LastEntryTime(path) ?? s.Summary.LastActivity, facts.Hashes, s.Folder, facts.ActiveMinutes,
+                    (text, from, to) => TranscriptScan.MentionsBetween(path, text, from, to));
+            })
             .ToList();
     }
 
@@ -149,31 +155,94 @@ public static partial class TimelineSource
         Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) is { Length: > 0 } n ? n : folder;
 }
 
-/// <summary>
-/// The commit hash prefixes (first 7 hex characters of every 7-to-40 character hex word) a transcript mentions. Scans are
-/// incremental: a growing live transcript is only read from where the last scan stopped.
-/// </summary>
+/// <summary>What one transcript scan found: hash prefixes mentioned, and the minutes (UTC, since the epoch) in which the session wrote an entry.</summary>
+public sealed record TranscriptFacts(IReadOnlySet<string> Hashes, IReadOnlySet<long> ActiveMinutes)
+{
+    public static readonly TranscriptFacts Empty = new(new HashSet<string>(), new HashSet<long>());
+}
+
+/// <summary>Kept for callers that only need the hashes; see <see cref="TranscriptScan"/>.</summary>
 public static class TranscriptHashes
 {
-    private static readonly ConcurrentDictionary<string, (long Scanned, HashSet<string> Hashes)> Cache = new(StringComparer.OrdinalIgnoreCase);
-    private const int ChunkBytes = 1024 * 1024;
+    public static IReadOnlySet<string> Read(string path) => TranscriptScan.Read(path).Hashes;
+}
 
-    public static IReadOnlySet<string> Read(string path)
+/// <summary>
+/// One pass over a transcript for two things the timeline needs: the commit hash prefixes it mentions (first 7 hex
+/// characters of every 7-to-40 character hex word) and the minutes in which it wrote an entry (every
+/// <c>"timestamp":"…"</c>), so a session open for days only claims commits made while it was actually doing something.
+/// Scans are incremental: a growing live transcript is only read from where the last scan stopped.
+/// </summary>
+public static class TranscriptScan
+{
+    private sealed record Scanned(long Length, HashSet<string> Hashes, HashSet<long> Minutes, SortedList<long, long> MinuteOffsets);
+
+    private static readonly ConcurrentDictionary<string, Scanned> Cache = new(StringComparer.OrdinalIgnoreCase);
+    private const int ChunkBytes = 1024 * 1024;
+    private static readonly byte[] TimestampKey = "\"timestamp\":\""u8.ToArray();
+
+    public static TranscriptFacts Read(string path) => Scan(path) is { } s ? new TranscriptFacts(s.Hashes, s.Minutes) : TranscriptFacts.Empty;
+
+    /// <summary>
+    /// Whether the transcript contains <paramref name="text"/> in the entries written between <paramref name="from"/> and
+    /// <paramref name="to"/>. Only that stretch of the file is read, found through the byte offset recorded for each minute,
+    /// so asking about a commit's subject costs a few hundred KB, not the whole transcript.
+    /// </summary>
+    public static bool MentionsBetween(string path, string text, DateTimeOffset from, DateTimeOffset to)
+    {
+        if (text.Length == 0 || Scan(path) is not { } scanned) return false;
+        var offsets = scanned.MinuteOffsets;
+        if (offsets.Count == 0) return false;
+        var fromMinute = from.ToUnixTimeSeconds() / 60;
+        var toMinute = to.ToUnixTimeSeconds() / 60;
+        // From the first entry written in the window to the first written after it.
+        var start = -1L;
+        var end = scanned.Length;
+        foreach (var (minute, offset) in offsets)
+        {
+            if (minute < fromMinute) continue;
+            if (minute > toMinute) { end = offset; break; }
+            if (start < 0) start = offset;
+        }
+        if (start < 0 || end <= start) return false;
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var length = (int)Math.Min(end - start, 64 * 1024 * 1024);
+            stream.Seek(start, SeekOrigin.Begin);
+            var buffer = new byte[length];
+            var read = stream.Read(buffer, 0, length);
+            return buffer.AsSpan(0, read).IndexOf(Encoding.UTF8.GetBytes(text)) >= 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static Scanned? Scan(string path)
     {
         try
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            if (Cache.TryGetValue(path, out var cached) && cached.Scanned == stream.Length) return cached.Hashes;
-            var resume = cached.Hashes is not null && cached.Scanned < stream.Length;
-            var scanned = resume ? cached.Scanned : 0L;
-            var hashes = resume ? new HashSet<string>(cached.Hashes!, StringComparer.Ordinal) : new HashSet<string>(StringComparer.Ordinal);
+            if (Cache.TryGetValue(path, out var cached) && cached.Length == stream.Length) return cached;
+            var resume = cached is not null && cached.Length < stream.Length;
+            var scanned = resume ? cached!.Length : 0L;
+            var hashes = resume ? new HashSet<string>(cached!.Hashes, StringComparer.Ordinal) : new HashSet<string>(StringComparer.Ordinal);
+            var minutes = resume ? new HashSet<long>(cached!.Minutes) : new HashSet<long>();
+            var offsets = resume ? new SortedList<long, long>(cached!.MinuteOffsets) : new SortedList<long, long>();
 
-            // Re-read a little before the old end, so a hash split across two scans is still found whole. Starting
-            // mid-file, the first run may be the tail of a longer word, so it only counts after a separator.
+            // Re-read a little before the old end, so a hash or timestamp split across two scans is still found whole.
+            // Starting mid-file, the first run may be the tail of a longer word, so it only counts after a separator.
             var from = Math.Max(0, scanned - 64);
             stream.Seek(from, SeekOrigin.Begin);
             var buffer = new byte[ChunkBytes];
             var run = new StringBuilder(40);
+            var stamp = new StringBuilder(40);
+            var keyAt = 0;          // how much of "timestamp":" has matched so far
+            var inStamp = false;    // reading the timestamp value
+            var stampAt = 0L;       // where the entry holding it begins, near enough: the key's position
+            var position = from;    // absolute offset of buffer[0]
             int read;
             var boundary = from == 0; // the byte before the run is not a letter or digit
             while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
@@ -181,6 +250,30 @@ public static class TranscriptHashes
                 for (var i = 0; i < read; i++)
                 {
                     var b = buffer[i];
+
+                    if (inStamp)
+                    {
+                        if (b == (byte)'"' || stamp.Length >= 40)
+                        {
+                            inStamp = false;
+                            if (DateTimeOffset.TryParse(stamp.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var t))
+                            {
+                                var minute = t.ToUnixTimeSeconds() / 60;
+                                minutes.Add(minute);
+                                if (!offsets.ContainsKey(minute)) offsets[minute] = stampAt;
+                            }
+                            stamp.Clear();
+                        }
+                        else stamp.Append((char)b);
+                    }
+                    else if (b == TimestampKey[keyAt])
+                    {
+                        if (keyAt == 0) stampAt = position + i;
+                        if (++keyAt == TimestampKey.Length) { keyAt = 0; inStamp = true; }
+                    }
+                    else if (b == TimestampKey[0]) { keyAt = 1; stampAt = position + i; }
+                    else keyAt = 0;
+
                     var hex = b is >= (byte)'0' and <= (byte)'9' or >= (byte)'a' and <= (byte)'f';
                     if (hex)
                     {
@@ -193,14 +286,16 @@ public static class TranscriptHashes
                     run.Clear();
                     boundary = !word && !(b is >= (byte)'0' and <= (byte)'9');
                 }
+                position += read;
             }
             if (run.Length is >= 7 and <= 40) hashes.Add(run.ToString(0, 7));
-            Cache[path] = (stream.Length, hashes);
-            return hashes;
+            var result = new Scanned(stream.Length, hashes, minutes, offsets);
+            Cache[path] = result;
+            return result;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return new HashSet<string>();
+            return null;
         }
     }
 }

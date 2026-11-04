@@ -150,6 +150,40 @@ public class TimelineSourceTests : IDisposable
     }
 
     [Fact]
+    public void TranscriptScan_CollectsTheMinutesTheSessionWroteEntries()
+    {
+        var path = Write("t.jsonl",
+            "{\"type\":\"user\",\"timestamp\":\"2026-10-26T06:47:12.345Z\"}\n" +
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-10-26T06:47:59.000Z\"}\n" +
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-10-26T14:53:00+08:00\"}\n" +
+            "{\"type\":\"ai-title\",\"aiTitle\":\"no timestamp here\"}\n");
+
+        var facts = TranscriptScan.Read(path);
+
+        var minute = new DateTimeOffset(2026, 10, 26, 6, 47, 0, TimeSpan.Zero).ToUnixTimeSeconds() / 60;
+        var later = new DateTimeOffset(2026, 10, 26, 6, 53, 0, TimeSpan.Zero).ToUnixTimeSeconds() / 60; // the +08:00 offset is honoured
+        Assert.Equal([minute, later], facts.ActiveMinutes.OrderBy(m => m));
+
+        File.AppendAllText(path, "{\"type\":\"user\",\"timestamp\":\"2026-10-26T07:00:00.000Z\"}\n");
+        Assert.Equal(3, TranscriptScan.Read(path).ActiveMinutes.Count);
+    }
+
+    [Fact]
+    public void TranscriptScan_MentionsBetween_LooksOnlyAtTheEntriesInTheWindow()
+    {
+        var path = Write("m.jsonl",
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-10-26T06:30:00.000Z\",\"text\":\"git commit -m early subject\"}\n" +
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-10-26T06:45:00.000Z\",\"text\":\"git commit -m feat(clusters): location clusters page\"}\n" +
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-10-26T07:30:00.000Z\",\"text\":\"later subject\"}\n");
+        var commitTime = new DateTimeOffset(2026, 10, 26, 6, 47, 0, TimeSpan.Zero);
+
+        Assert.True(TranscriptScan.MentionsBetween(path, "feat(clusters): location clusters page", commitTime.AddMinutes(-15), commitTime.AddMinutes(2)));
+        Assert.False(TranscriptScan.MentionsBetween(path, "early subject", commitTime.AddMinutes(-10), commitTime.AddMinutes(2)));
+        Assert.False(TranscriptScan.MentionsBetween(path, "later subject", commitTime.AddMinutes(-15), commitTime.AddMinutes(2)));
+        Assert.False(TranscriptScan.MentionsBetween(path, "", commitTime.AddMinutes(-15), commitTime.AddMinutes(2)));
+    }
+
+    [Fact]
     public void TranscriptHashes_MissingFileGivesNothing()
     {
         Assert.Empty(TranscriptHashes.Read(Path.Combine(_root, "none.jsonl")));

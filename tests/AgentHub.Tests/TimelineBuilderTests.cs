@@ -93,6 +93,72 @@ public class TimelineBuilderTests
         Assert.Equal([commit], outside);
     }
 
+    [Fact]
+    public void Attribute_ASessionOpenForDaysOnlyCountsWhileItIsActive()
+    {
+        // "idle" has the commit inside its window but wrote nothing near it; "busy" has a tool call seconds before.
+        var idle = Session("idle", -48, 48) with { ActiveMinutes = Minutes(At(-48), At(-47)) };
+        var busy = Session("busy", 0, 2) with { ActiveMinutes = Minutes(At(1).AddSeconds(-20), At(1).AddSeconds(5)) };
+        var commit = Commit("aaaaaaa", 1);
+
+        var (bySession, outside) = TimelineBuilder.Attribute([idle, busy], [commit]);
+
+        Assert.Equal([commit], bySession[busy]);
+        Assert.Empty(bySession[idle]);
+        Assert.Empty(outside);
+    }
+
+    [Fact]
+    public void Attribute_WithNoSessionActive_TheCommitStaysOutside()
+    {
+        // The session is open but idle: a commit then was made by hand or on GitHub, not by it.
+        var a = Session("a", 0, 2) with { ActiveMinutes = Minutes(At(0)) };
+        var byHand = Commit("aaaaaaa", 1);
+
+        var (bySession, outside) = TimelineBuilder.Attribute([a], [byHand]);
+
+        Assert.Empty(bySession[a]);
+        Assert.Equal([byHand], outside);
+    }
+
+    [Fact]
+    public void Attribute_TwoActiveSessionsStillNeedAMention()
+    {
+        var a = Session("a", 0, 2) with { ActiveMinutes = Minutes(At(1)) };
+        var b = Session("b", 0, 2, "aaaaaaa") with { ActiveMinutes = Minutes(At(1)) };
+        var commit = Commit("aaaaaaa", 1);
+        var silent = Commit("bbbbbbb", 1.01);
+
+        var (bySession, outside) = TimelineBuilder.Attribute([a, b], [commit, silent]);
+
+        Assert.Equal([commit], bySession[b]);
+        Assert.Equal([silent], outside);
+    }
+
+    [Fact]
+    public void Attribute_TwoActiveSessionsWithoutAMention_TheOneWhoseTranscriptHasTheSubjectWins()
+    {
+        var a = Session("a", 0, 2) with { ActiveMinutes = Minutes(At(1)), MentionsBetween = (_, _, _) => false };
+        var b = Session("b", 0, 2) with { ActiveMinutes = Minutes(At(1)), MentionsBetween = (text, from, to) => text == "feat(clusters): location clusters page" && from < At(1) && to > At(1) };
+        var commit = Commit("aaaaaaa", 1, "feat(clusters): location clusters page");
+
+        var (bySession, outside) = TimelineBuilder.Attribute([a, b], [commit]);
+
+        Assert.Equal([commit], bySession[b]);
+        Assert.Empty(outside);
+    }
+
+    [Theory]
+    [InlineData("feat(maps): the picture — whiten the paper, contrast, brightness, colour, fade a colour, for every sheet", "feat(maps): the picture — whiten the paper, contrast, bright")]
+    [InlineData("fix(maps): quote \"this\" properly", "fix(maps): quote")]
+    [InlineData("fix: quote \"this\"", null)]
+    [InlineData("fix(snow): every connection sets QUERY_TAG", "fix(snow): every connection sets QUERY_TAG")]
+    [InlineData("wip", null)]
+    public void SubjectFragment_StopsAtQuotesAndSixtyCharacters(string subject, string? expected) =>
+        Assert.Equal(expected, TimelineBuilder.SubjectFragment(subject));
+
+    private static HashSet<long> Minutes(params DateTimeOffset[] times) => times.Select(t => t.ToUnixTimeSeconds() / 60).ToHashSet();
+
     // ---- branch graph ----
 
     [Fact]
