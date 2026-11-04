@@ -67,6 +67,16 @@ public class TimelineSourceTests : IDisposable
     }
 
     [Fact]
+    public void ParseLog_HeadNamesNoBranch()
+    {
+        foreach (var head in new[] { "HEAD", "refs/remotes/origin/HEAD" })
+        {
+            var log = $"1234567{Sep}{Sep}2026-11-03T08:00:00Z{Sep}A{Sep}Subject{Sep}{head}\n";
+            Assert.Null(Assert.Single(TimelineSource.ParseLog(log)).Branch);
+        }
+    }
+
+    [Fact]
     public void ParseLog_HandlesCarriageReturnsAndTags()
     {
         var log = $"1234567{Sep}{Sep}2026-11-03T08:00:00Z{Sep}A{Sep}Subject{Sep}refs/tags/v1.0\r\n";

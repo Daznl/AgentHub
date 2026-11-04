@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -135,6 +136,8 @@ public partial class TimelineWindow : Window
 
     // ---- rendering ----
 
+    private const double SessionsShare = 1.15, CommitsShare = 1;
+
     private void Render(TimelineModel model, bool scrollToEnd)
     {
         var wasAtBottom = Scroller.VerticalOffset >= Scroller.ScrollableHeight - 2;
@@ -147,17 +150,29 @@ public partial class TimelineWindow : Window
         if (_scope.Folders.Count > 1) parts.Add($"{_scope.Folders.Count} worktrees");
         SubheadingText.Text = string.Join(" · ", parts) + " · " + _scope.Root;
 
+        // Three verticals: the tree, then what happened in sessions, then what landed in Git, each row at its time.
+        HeaderGutter.Width = TimelineGutter.LaneWidth * Math.Max(1, model.Columns);
         RowsPanel.Children.Clear();
         foreach (var row in model.Rows)
         {
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var gutter = new TimelineGutter { Row = row, Columns = model.Columns };
-            var card = BuildCard(row);
-            Grid.SetColumn(card, 1);
-            grid.Children.Add(gutter);
-            grid.Children.Add(card);
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SessionsShare, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(CommitsShare, GridUnitType.Star) });
+            grid.Children.Add(new TimelineGutter { Row = row, Columns = model.Columns });
+
+            var left = row.Kind == TimelineRowKind.Session ? SessionCard(row) : row.Kind == TimelineRowKind.Start ? StartCard(row) : null;
+            if (left is not null)
+            {
+                Grid.SetColumn(left, 1);
+                grid.Children.Add(left);
+            }
+            if (row.Commits.Count > 0)
+            {
+                var right = CommitsCard(row);
+                Grid.SetColumn(right, 2);
+                grid.Children.Add(right);
+            }
             RowsPanel.Children.Add(grid);
         }
 
@@ -167,32 +182,51 @@ public partial class TimelineWindow : Window
             : $"No Claude Code or Codex sessions recorded in\n{_scope.Root}\n(not a Git repository, so there are no commits to show)";
 
         Scroller.UpdateLayout();
+        // Keep the column headings over the columns when the scrollbar takes width from the rows.
+        var bar = Scroller.ComputedVerticalScrollBarVisibility == Visibility.Visible ? SystemParameters.VerticalScrollBarWidth : 0;
+        HeaderRow.Margin = new Thickness(0, 0, 8 + bar, 8);
         if (scrollToEnd || wasAtBottom) Scroller.ScrollToEnd();
         else Scroller.ScrollToVerticalOffset(offset);
     }
 
-    private FrameworkElement BuildCard(TimelineRow row)
+    // ---- cards ----
+
+    /// <summary>The pieces of a card that the three kinds fill in differently.</summary>
+    private sealed class Card
     {
-        var card = new Border
+        public required Border Border { get; init; }
+        public required DockPanel Header { get; init; }
+        public required StackPanel Body { get; init; }
+        public required StackPanel TitleStack { get; init; }
+        public required WrapPanel TitleRow { get; init; }
+        public required TextBlock Title { get; init; }
+        public required TextBlock Meta { get; init; }
+        public required TextBlock Right { get; init; }
+        public required TextBlock Chevron { get; init; }
+    }
+
+    private static Card NewCard(bool expandable, double leftMargin)
+    {
+        var border = new Border
         {
             Background = CardBack,
             BorderBrush = CardBorder,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
-            Margin = new Thickness(6, 0, 0, 10),
-            Padding = new Thickness(12, 8, 12, 9)
+            Margin = new Thickness(leftMargin, 0, 0, 10),
+            Padding = new Thickness(12, 8, 12, 9),
+            VerticalAlignment = VerticalAlignment.Top
         };
         var stack = new StackPanel();
-        card.Child = stack;
+        border.Child = stack;
 
-        var expandable = row.Kind != TimelineRowKind.Start;
         var header = new DockPanel { LastChildFill = true, Cursor = expandable ? Cursors.Hand : Cursors.Arrow, Background = Brushes.Transparent };
         var body = new StackPanel { Margin = new Thickness(0, 8, 0, 0), Visibility = Visibility.Collapsed };
         stack.Children.Add(header);
         stack.Children.Add(body);
 
-        var chevron = new TextBlock { Text = "▸", Foreground = Muted, FontSize = 12, Width = 14, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 1, 2, 0) };
-        if (!expandable) chevron.Text = ""; // keeps the titles of every card in line
+        // Every card keeps the chevron's width, so titles line up whether or not the card expands.
+        var chevron = new TextBlock { Text = expandable ? "▸" : "", Foreground = Muted, FontSize = 12, Width = 14, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 1, 2, 0) };
         DockPanel.SetDock(chevron, Dock.Left);
         header.Children.Add(chevron);
 
@@ -204,91 +238,111 @@ public partial class TimelineWindow : Window
         header.Children.Add(titleStack);
         var titleRow = new WrapPanel();
         titleStack.Children.Add(titleRow);
-        var title = new TextBlock { Foreground = Text, FontSize = 13, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 620, Margin = new Thickness(0, 0, 8, 0) };
+        var title = new TextBlock { Foreground = Text, FontSize = 13, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 0, 8, 0) };
         titleRow.Children.Add(title);
         var meta = new TextBlock { Foreground = Muted, FontSize = 11, Margin = new Thickness(0, 3, 0, 0), TextWrapping = TextWrapping.Wrap };
         titleStack.Children.Add(meta);
 
-        switch (row.Kind)
-        {
-            case TimelineRowKind.Start:
-                title.Text = "Start";
-                right.Text = When(row.Time);
-                meta.Text = row.Commits.Count > 0
-                    ? $"First commit · {row.Commits[0].Short} {row.Commits[0].Subject} · {row.Commits[0].Author}"
-                    : "First session";
-                break;
+        return new Card { Border = border, Header = header, Body = body, TitleStack = titleStack, TitleRow = titleRow, Title = title, Meta = meta, Right = right, Chevron = chevron };
+    }
 
-            case TimelineRowKind.Commits:
-                title.Text = $"{row.Commits.Count} commit{(row.Commits.Count == 1 ? "" : "s")} outside sessions";
-                right.Text = Span(row.Commits[0].Time, row.Commits[^1].Time);
-                meta.Text = Describe(row.Commits);
-                break;
-
-            default:
-                var session = row.Session!;
-                var summary = session.Summary;
-                title.Text = FirstLine(summary.Title) ?? FirstLine(summary.FirstPrompt) ?? "Untitled session";
-                title.ToolTip = summary.FilePath;
-                titleRow.Children.Add(Badge(summary.Agent == ContextSource.Codex ? "Codex" : "Claude Code", summary.Agent == ContextSource.Codex ? CodexBadge : ClaudeBadge, Text));
-                if (row.IsLive) titleRow.Children.Add(Badge("LIVE", LiveBack, LiveFore, "Written to in the last three minutes"));
-                if (summary.ArchivedOnly) titleRow.Children.Add(Badge("archived", ChipBack, Muted, "The CLI has deleted its copy; read from AgentHub's archive"));
-                right.Text = Span(summary.StartedAt, session.EndedAt);
-                var bits = new List<string> { Duration(session.EndedAt - summary.StartedAt) };
-                if (row.Column > 0) bits.Add("ran alongside another session");
-                bits.Add(row.Commits.Count == 0 ? "no commits" : $"{row.Commits.Count} commit{(row.Commits.Count == 1 ? "" : "s")}");
-                var branches = row.Commits.Select(c => c.Branch).Where(b => b is not null).Distinct().ToList();
-                if (branches.Count > 0) bits.Add(string.Join(", ", branches));
-                if (session.Folder is not null && _scope.Folders.Count > 1) bits.Add(Path.GetFileName(session.Folder.TrimEnd(Path.DirectorySeparatorChar)));
-                meta.Text = string.Join(" · ", bits);
-                break;
-        }
-
-        if (!expandable) return card;
-
-        var key = row.Key;
+    // Clicking the header shows or hides the body; the body is filled once, on first expansion. Expansion survives rebuilds by key.
+    private void MakeExpandable(Card card, string key, Action<StackPanel> fill)
+    {
         var filled = false;
         void SetExpanded(bool expanded)
         {
-            body.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
-            chevron.Text = expanded ? "▾" : "▸";
+            card.Body.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+            card.Chevron.Text = expanded ? "▾" : "▸";
             if (expanded) _expanded.Add(key); else _expanded.Remove(key);
             if (expanded && !filled)
             {
                 filled = true;
-                FillBody(body, row);
+                fill(card.Body);
             }
         }
-        header.MouseLeftButtonUp += (_, e) => { SetExpanded(body.Visibility != Visibility.Visible); e.Handled = true; };
-        header.MouseEnter += (_, _) => card.BorderBrush = CardHover;
-        header.MouseLeave += (_, _) => card.BorderBrush = CardBorder;
+        card.Header.MouseLeftButtonUp += (_, e) => { SetExpanded(card.Body.Visibility != Visibility.Visible); e.Handled = true; };
+        card.Header.MouseEnter += (_, _) => card.Border.BorderBrush = CardHover;
+        card.Header.MouseLeave += (_, _) => card.Border.BorderBrush = CardBorder;
         if (_expanded.Contains(key)) SetExpanded(true);
-        return card;
     }
 
-    private void FillBody(StackPanel body, TimelineRow row)
+    private static FrameworkElement StartCard(TimelineRow row)
     {
-        if (row.Session is { } session)
+        var card = NewCard(expandable: false, leftMargin: 6);
+        card.Title.Text = "Start";
+        card.Right.Text = When(row.Time);
+        card.Meta.Text = row.Commits.Count > 0 ? "The repository's first commit" : "The first session recorded here";
+        return card.Border;
+    }
+
+    private FrameworkElement SessionCard(TimelineRow row)
+    {
+        var session = row.Session!;
+        var summary = session.Summary;
+        var card = NewCard(expandable: true, leftMargin: 6);
+        card.Title.Text = FirstLine(summary.Title) ?? FirstLine(summary.FirstPrompt) ?? "Untitled session";
+        card.Title.ToolTip = summary.FilePath;
+        card.TitleRow.Children.Add(Badge(summary.Agent == ContextSource.Codex ? "Codex" : "Claude Code", summary.Agent == ContextSource.Codex ? CodexBadge : ClaudeBadge, Text));
+        if (row.IsLive) card.TitleRow.Children.Add(Badge("LIVE", LiveBack, LiveFore, "Written to in the last three minutes"));
+        if (summary.ArchivedOnly) card.TitleRow.Children.Add(Badge("archived", ChipBack, Muted, "The CLI has deleted its copy; read from AgentHub's archive"));
+        card.Right.Text = Span(summary.StartedAt, session.EndedAt);
+
+        var bits = new List<string> { Duration(session.EndedAt - summary.StartedAt) };
+        if (row.Column > 0) bits.Add("alongside another session");
+        bits.Add(row.Commits.Count == 0 ? "no commits" : $"{row.Commits.Count} commit{(row.Commits.Count == 1 ? "" : "s")} →");
+        if (session.Folder is not null && _scope.Folders.Count > 1) bits.Add(Path.GetFileName(session.Folder.TrimEnd(Path.DirectorySeparatorChar)));
+        card.Meta.Text = string.Join(" · ", bits);
+
+        MakeExpandable(card, row.Key, body =>
         {
             var prompts = new StackPanel();
             body.Children.Add(Section("Prompts"));
             body.Children.Add(prompts);
             _ = LoadPromptsAsync(prompts, session);
-        }
 
-        if (row.Commits.Count > 0)
-        {
-            body.Children.Add(Section(row.Kind == TimelineRowKind.Session ? "Commits during this session" : "Commits"));
-            foreach (var commit in row.Commits) body.Children.Add(CommitLine(commit));
-        }
+            if (session.Folder is { } folder)
+            {
+                var open = new Button { Content = "🕘 Open in History", Style = (Style)FindResource("CardButton"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 10, 0, 0), ToolTip = "Show the full transcript of this session: replies, thinking, tool calls and results" };
+                open.Click += (_, _) => HistoryRequested?.Invoke(folder, summary.FilePath);
+                body.Children.Add(open);
+            }
+        });
+        return card.Border;
+    }
 
-        if (row.Session is { } s && s.Folder is not null)
+    /// <summary>Commits in the right column, level with the session that made them: the first few always shown, the rest behind the chevron.</summary>
+    private FrameworkElement CommitsCard(TimelineRow row)
+    {
+        const int shown = 3;
+        var commits = row.Commits;
+        var card = NewCard(expandable: commits.Count > shown, leftMargin: 10);
+        card.Title.Text = row.Kind switch
         {
-            var open = new Button { Content = "🕘 Open in History", Style = (Style)FindResource("CardButton"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 10, 0, 0), ToolTip = "Show the full transcript of this session: replies, thinking, tool calls and results" };
-            var folder = s.Folder;
-            open.Click += (_, _) => HistoryRequested?.Invoke(folder, s.Summary.FilePath);
-            body.Children.Add(open);
+            TimelineRowKind.Start => "First commit",
+            TimelineRowKind.Session => $"{commits.Count} commit{(commits.Count == 1 ? "" : "s")} in this session",
+            _ => $"{commits.Count} commit{(commits.Count == 1 ? "" : "s")} outside sessions"
+        };
+        card.Right.Text = commits.Count > 1 ? Span(commits[0].Time, commits[^1].Time) : When(commits[0].Time);
+        var authors = commits.Select(c => c.Author).Distinct().ToList();
+        var branches = commits.Select(c => c.Branch).Where(b => b is not null).Distinct().ToList();
+        var bits = new List<string> { authors.Count == 1 ? authors[0] : $"{authors.Count} authors" };
+        if (branches.Count > 0) bits.Add(string.Join(", ", branches));
+        if (commits.Count > shown) bits.Add($"{commits.Count - shown} more below");
+        card.Meta.Text = string.Join(" · ", bits);
+        card.Meta.Margin = new Thickness(0, 3, 0, 6);
+
+        // The first commits sit under the title, so they are read without expanding.
+        foreach (var commit in commits.Take(shown)) card.TitleStack.Children.Add(CommitLine(commit, branches.Count > 1));
+        if (commits.Count > shown)
+        {
+            card.Body.Margin = new Thickness(16, 0, 0, 0);
+            MakeExpandable(card, row.Key + ":commits", body =>
+            {
+                foreach (var commit in commits.Skip(shown)) body.Children.Add(CommitLine(commit, branches.Count > 1));
+            });
         }
+        return card.Border;
     }
 
     private async Task LoadPromptsAsync(StackPanel target, TimelineSessionInput session)
@@ -340,22 +394,20 @@ public partial class TimelineWindow : Window
         }
     }
 
-    private static FrameworkElement CommitLine(TimelineCommit commit)
+    /// <summary>Time, hash and subject on one wrapping line; the branch follows the subject only when the card spans several.</summary>
+    private static FrameworkElement CommitLine(TimelineCommit commit, bool showBranch)
     {
         var line = new DockPanel { Margin = new Thickness(0, 0, 0, 3) };
-        var time = new TextBlock { Text = commit.Time.ToLocalTime().ToString("HH:mm", CultureInfo.CurrentCulture), Foreground = Dim, FontSize = 10, Width = 38, VerticalAlignment = VerticalAlignment.Center };
+        var time = new TextBlock { Text = commit.Time.ToLocalTime().ToString("HH:mm", CultureInfo.CurrentCulture), Foreground = Dim, FontSize = 10, Width = 38, Margin = new Thickness(0, 2, 0, 0), VerticalAlignment = VerticalAlignment.Top };
         DockPanel.SetDock(time, Dock.Left);
         line.Children.Add(time);
-        var hash = new TextBlock { Text = commit.Short, Foreground = Muted, FontFamily = Mono, FontSize = 11, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, ToolTip = $"{commit.Hash}\n{commit.Author}, {commit.Time.ToLocalTime():ddd d MMM yyyy HH:mm}" };
+        var hash = new TextBlock { Text = commit.Short, Foreground = Muted, FontFamily = Mono, FontSize = 11, Margin = new Thickness(0, 1, 8, 0), VerticalAlignment = VerticalAlignment.Top, ToolTip = $"{commit.Hash}\n{commit.Author}, {commit.Time.ToLocalTime():ddd d MMM yyyy HH:mm}" };
         DockPanel.SetDock(hash, Dock.Left);
         line.Children.Add(hash);
-        if (commit.Branch is { } branch)
-        {
-            var chip = new Border { Background = ChipBack, BorderBrush = CardBorder, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(6, 0, 6, 1), Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center, Child = new TextBlock { Text = branch, Foreground = Muted, FontSize = 10 } };
-            DockPanel.SetDock(chip, Dock.Right);
-            line.Children.Add(chip);
-        }
-        line.Children.Add(new TextBlock { Text = (commit.IsMerge ? "⇅ " : "") + commit.Subject, Foreground = Body, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center });
+        var subject = new TextBlock { Foreground = Body, FontSize = 12, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Top };
+        subject.Inlines.Add(new Run((commit.IsMerge ? "⇅ " : "") + commit.Subject));
+        if (showBranch && commit.Branch is { } branch) subject.Inlines.Add(new Run("  " + branch) { Foreground = Dim, FontSize = 10 });
+        line.Children.Add(subject);
         return line;
     }
 
@@ -380,18 +432,6 @@ public partial class TimelineWindow : Window
     };
 
     // ---- text helpers ----
-
-    private static string Describe(IReadOnlyList<TimelineCommit> commits)
-    {
-        var bits = new List<string>();
-        var authors = commits.Select(c => c.Author).Distinct().ToList();
-        bits.Add(authors.Count == 1 ? authors[0] : $"{authors.Count} authors");
-        var branches = commits.Select(c => c.Branch).Where(b => b is not null).Distinct().ToList();
-        if (branches.Count > 0) bits.Add(string.Join(", ", branches));
-        var subject = Shorten(commits[0].Subject, 80);
-        bits.Add(commits.Count > 1 && !subject.EndsWith('…') ? subject + " …" : subject);
-        return string.Join(" · ", bits);
-    }
 
     private static string When(DateTimeOffset time)
     {

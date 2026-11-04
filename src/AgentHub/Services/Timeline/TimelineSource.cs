@@ -56,14 +56,16 @@ public static partial class TimelineSource
         return commits;
     }
 
-    // refs/heads/feat/x -> feat/x, refs/remotes/origin/main -> main; tags and stash keep their short form.
+    // refs/heads/feat/x -> feat/x, refs/remotes/origin/main -> main; tags and stash keep their short form. HEAD, bare or as
+    // refs/remotes/origin/HEAD, names no branch.
     private static string? BranchName(string source)
     {
         var s = source.Trim();
         if (s.Length == 0) return null;
         foreach (var prefix in new[] { "refs/heads/", "refs/remotes/origin/", "refs/remotes/", "refs/tags/", "refs/" })
-            if (s.StartsWith(prefix, StringComparison.Ordinal)) return s[prefix.Length..];
-        return s;
+            if (s.StartsWith(prefix, StringComparison.Ordinal)) { s = s[prefix.Length..]; break; }
+        // HEAD, bare or as origin/HEAD, names no branch.
+        return s == "HEAD" ? null : s;
     }
 
     /// <summary>Claude Code and Codex sessions recorded in any of the scope's folders, live or archived, each once.</summary>
