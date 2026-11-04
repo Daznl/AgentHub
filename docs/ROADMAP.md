@@ -70,6 +70,7 @@
 - **Stage 3b (Shipped):** Per-pane context window badge for Claude Code and Codex, read from each CLI's own session transcript (`SessionContextReader` / `ContextWindowTracker`). Claude window size is a setting (`ClaudeContextWindowTokens`) because Claude Code does not record it. Resumed sessions bind to their exact transcript; new ones only to transcripts created after launch, so a session running elsewhere in the same folder is never shown. Remaining: track CLIs started by hand inside a shell pane, Antigravity.
 - **Stage 3c (Shipped):** Pane launcher in three steps: repository, then CLI, then session (new, or resume any recorded one via `SessionResume`, restoring archive-only sessions first). Also a per-pane **last prompt** strip from the same transcripts (`ReadClaudePrompt` / `ReadCodexPrompt`), with expand and copy.
 - **Stage 4:** Automated Git worktree isolation per task with cross-agent handoff orchestration.
+- **Stage 5 (Next, chosen 2026-11-04):** Sessions that outlive AgentHub. A separate session host process (`AgentHub.SessionHost`) owns each CLI's pseudo-console and a replay buffer; AgentHub attaches over a named pipe, detaches on close instead of killing, and reattaches on start from a saved pane layout, so AgentHub can be updated while Claude Code keeps running. Includes the pane layout persistence (resume each session when its host is gone). Design in `.agenthub/handoff.md` section 3b.
 
 ## Later
 
