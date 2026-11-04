@@ -619,7 +619,12 @@ public partial class TimelineWindow : Window
         slot.AddRules.IsEnabled = report.Additions.Count > 0;
 
         slot.Panel.Visibility = Visibility.Visible;
+        ReportsColumn.Visibility = Visibility.Visible;
     }
+
+    // The column beside the tree only takes its width while a report is open.
+    private void UpdateReportsColumn() =>
+        ReportsColumn.Visibility = _slots.Any(s => s.Panel.Visibility == Visibility.Visible) ? Visibility.Visible : Visibility.Collapsed;
 
     private static Border ReportCard() => new()
     {
@@ -705,7 +710,11 @@ public partial class TimelineWindow : Window
     // The panel buttons carry their review kind in Tag ("sessions" or "github").
     private ReviewSlot SlotOf(object sender) => Slot((sender as FrameworkElement)?.Tag as string == "github" ? ReviewKind.GitHub : ReviewKind.Interaction);
 
-    private void CloseReport_Click(object sender, RoutedEventArgs e) => SlotOf(sender).Panel.Visibility = Visibility.Collapsed;
+    private void CloseReport_Click(object sender, RoutedEventArgs e)
+    {
+        SlotOf(sender).Panel.Visibility = Visibility.Collapsed;
+        UpdateReportsColumn();
+    }
 
     private void AddRules_Click(object sender, RoutedEventArgs e)
     {

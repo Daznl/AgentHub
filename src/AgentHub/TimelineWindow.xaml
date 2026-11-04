@@ -46,7 +46,7 @@
             </Grid.ColumnDefinitions>
 
         <!-- The two review reports sit beside the tree, one above the other, not over it, so their evidence (session ids, hashes) can be matched to the cards -->
-        <Grid Grid.Column="1" Width="460" Margin="12,0,0,0">
+        <Grid x:Name="ReportsColumn" Grid.Column="1" Width="460" Margin="12,0,0,0" Visibility="Collapsed">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" />
                 <RowDefinition Height="*" />
