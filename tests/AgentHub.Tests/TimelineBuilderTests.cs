@@ -352,6 +352,7 @@ public class TimelineBuilderTests
         Assert.Same(a, b.ForkLane);
         Assert.Equal((iA, iB), (a.StartRow, a.EndRow));
         Assert.Equal(a.Column, b.Column);           // one straight stream
+        Assert.Equal(a.ColourIndex, b.ColourIndex); // in one colour
         Assert.False(a.MergesBack);
 
         // Row A: feat/a forks from the trunk and runs down. Row B: only feat/b is drawn there, coming in from the top in
@@ -361,6 +362,38 @@ public class TimelineBuilderTests
         Assert.DoesNotContain(rowB.Lines, l => l.Key == a.Key);
         var lineB = Assert.Single(rowB.Lines, l => l.Key == b.Key);
         Assert.True(!lineB.Fork && lineB.FromTop && lineB.Column == a.Column);
+    }
+
+    [Fact]
+    public void Layout_ASecondBranchOffACarriedOnTipForksFromTheLaneCarryingItOn()
+    {
+        // feat/a off main; feat/b carries it on; feat/c was also started at feat/a's tip while feat/b is still going.
+        // feat/c forks from feat/b's lane (the one drawn through its row), in its own colour; feat/a and feat/b share one.
+        var c1 = Commit("1111111", 0);
+        var a1 = Commit("a111111", 1, "a", "1111111");
+        var b1 = Commit("b111111", 3, "b on top of a", "a111111");
+        var cc = Commit("c111111", 5, "c on top of a", "a111111");
+        var b2 = Commit("b222222", 7, "more b", "b111111");
+        var sessionA = Session("A", 0.5, 1.5, "a111111");
+        var sessionB = Session("B", 2.5, 3.5, "b111111");
+        var sessionC = Session("C", 4.5, 5.5, "c111111");
+        var sessionB2 = Session("B2", 6.5, 7.5, "b222222");
+
+        var model = Build([sessionA, sessionB, sessionC, sessionB2], [b2, cc, b1, a1, c1],
+            Tip("main", "1111111"), Tip("feat/a", "a111111", remote: true), Tip("feat/b", "b222222", remote: true), Tip("feat/c", "c111111", remote: true));
+
+        var a = model.Branches.Single(b => b.Name == "feat/a");
+        var b = model.Branches.Single(b => b.Name == "feat/b");
+        var c = model.Branches.Single(b => b.Name == "feat/c");
+        Assert.Equal(a.Key, c.ParentKey);
+        Assert.Same(b, a.ContinuesInto);
+        Assert.Same(b, c.ForkLane);
+        Assert.Null(b.ContinuesInto);
+        Assert.Equal(a.ColourIndex, b.ColourIndex);
+        Assert.NotEqual(b.ColourIndex, c.ColourIndex);
+        Assert.NotEqual(b.Column, c.Column);
+        var lineC = Assert.Single(RowOf(model, sessionC).Lines, l => l.Key == c.Key);
+        Assert.True(lineC.Fork && lineC.ForkFrom == b.Column);
     }
 
     [Fact]

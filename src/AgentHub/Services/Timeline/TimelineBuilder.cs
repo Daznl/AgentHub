@@ -282,16 +282,19 @@ public static class TimelineBuilder
             lanes.Add(branch);
         }
 
-        // Where each lane forks from. A branch stacked on another forks from that lane when it runs through the start
-        // row; a branch started at an unmerged branch's tip carries it on: the parent lane is drawn down to the child's
-        // first row and hands over there. A parent merged before the child's first row is in the trunk by then.
+        // Where each lane forks from. A branch stacked on another forks from the lane drawn through its start row: the
+        // parent, or whichever lane carries the parent on by then. A branch started at an unmerged branch's tip carries
+        // it on: the parent lane is drawn down to the child's first row and hands over there. A parent merged before the
+        // child's first row is in the trunk by then, so the child forks from the trunk.
         var byKey = lanes.ToDictionary(l => l.Key, StringComparer.Ordinal);
         foreach (var lane in lanes.OrderBy(l => l.StartRow).ThenBy(l => l.EndRow))
         {
             if (lane.IsImported || lane.ParentKey is null || !byKey.TryGetValue(lane.ParentKey, out var parent) || parent == lane) continue;
-            if (parent.StartRow <= lane.StartRow && lane.StartRow <= parent.EndRow)
-                lane.ForkLane = parent;
-            else if (lane.StartRow > parent.EndRow && !parent.MergesBack && parent.ContinuesInto is null)
+            var carrier = parent;
+            while (carrier.ContinuesInto is { } next && lane.StartRow > carrier.EndRow) carrier = next;
+            if (carrier.StartRow <= lane.StartRow && lane.StartRow <= carrier.EndRow)
+                lane.ForkLane = carrier;
+            else if (carrier == parent && lane.StartRow > parent.EndRow && !parent.MergesBack && parent.ContinuesInto is null)
             {
                 parent.EndRow = lane.StartRow;
                 parent.ContinuesInto = lane;
@@ -303,21 +306,22 @@ public static class TimelineBuilder
         var colour = 0;
         foreach (var lane in lanes.OrderBy(l => l.StartRow).ThenBy(l => l.EndRow))
         {
-            int column;
             if (lane.ForkLane is { } carried && carried.ContinuesInto == lane)
             {
-                // Carrying a lane on: the same column, so the stream runs straight through the hand-over.
-                column = carried.Column;
+                // Carrying a lane on: the same column and the same colour, so the stream runs straight through the
+                // hand-over as one line.
+                lane.Column = carried.Column;
+                lane.ColourIndex = carried.ColourIndex;
             }
             else
             {
-                column = 1;
+                var column = 1;
                 while (column < busyUntil.Count && busyUntil[column] >= lane.StartRow) column++;
                 if (column == busyUntil.Count) busyUntil.Add(0);
+                lane.Column = column;
+                lane.ColourIndex = ++colour; // by order of appearance, not by column: a reused column gets a new colour
             }
-            busyUntil[column] = lane.EndRow;
-            lane.Column = column;
-            lane.ColourIndex = ++colour; // by order of appearance, not by column: a reused column gets a new colour
+            busyUntil[lane.Column] = lane.EndRow;
         }
 
         for (var i = 0; i < rows.Count; i++)
