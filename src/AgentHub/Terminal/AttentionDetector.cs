@@ -38,6 +38,13 @@ public sealed class AttentionDetector
     public bool IsWaiting => _notified;
 
     /// <summary>
+    /// How long the process has written nothing at all. Unlike <see cref="IsWaiting"/>, this notices an
+    /// agent that wakes itself (e.g. Claude Code resuming when a background job finishes) without input.
+    /// </summary>
+    public TimeSpan SilentFor(DateTimeOffset now) =>
+        _lastOutputAt is { } last ? now - last : TimeSpan.MaxValue;
+
+    /// <summary>
     /// True while the agent is producing a work burst (non-echo output within the idle threshold)
     /// and has not yet been declared waiting. Drives the "working" pulse on the pane.
     /// </summary>

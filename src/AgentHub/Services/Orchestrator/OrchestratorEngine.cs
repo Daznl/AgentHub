@@ -50,8 +50,12 @@ public sealed class OrchestratorEngine : IDisposable
     private int _handoffWaitTicks;
     private int _continueNudges;
 
-    /// <summary>Pause after a turn ends before nudging, so a slow tool or a brief redraw gap is not mistaken for a finished turn.</summary>
-    private static readonly TimeSpan ContinueNudgeDelay = TimeSpan.FromSeconds(15);
+    /// <summary>
+    /// How long a session must be completely silent after a turn ends before it is nudged. Long enough that
+    /// a slow tool, or an agent waiting on its own background job (Claude Code wakes itself when one
+    /// finishes, and any output restarts this clock), is left alone.
+    /// </summary>
+    private static readonly TimeSpan ContinueNudgeDelay = TimeSpan.FromMinutes(3);
 
     /// <summary>Upper bound on "keep going" nudges in one session, so an agent that keeps stopping cannot loop forever.</summary>
     private const int MaxContinueNudgesPerSession = 40;
@@ -66,7 +70,8 @@ public sealed class OrchestratorEngine : IDisposable
     /// <summary>Sent when the agent ends a turn while the idea is not finished.</summary>
     public const string ContinuePrompt =
         "[ORCHESTRATOR]: Keep building. Pick the next unfinished task from .agenthub/handoff.md (add tasks if the list is empty), " +
-        "implement and test it, update the handoff, and commit. If you were waiting on a question, choose the sensible option " +
+        "implement and test it, update the handoff, and commit. If a background job of yours is still running, check on it and " +
+        "work on something that does not depend on it meanwhile. If you were waiting on a question, choose the sensible option " +
         "yourself and carry on. When everything is done and tested, put [COMPLETED] at the top of .agenthub/handoff.md.";
 
     public event Action<OrchestratorState>? StateChanged;
@@ -387,13 +392,19 @@ public sealed class OrchestratorEngine : IDisposable
         var idea = _currentIdea;
         if (pane == null || idea == null) return;
 
-        await Task.Delay(ContinueNudgeDelay);
+        // Wait until the terminal has been silent for the whole delay. Output in between (the agent woke
+        // itself) restarts the wait; anything else changing (user typed, handoff or quota pause, session
+        // ended, another idea took the pane) abandons it, and the next finished turn schedules a new one.
+        while (true)
+        {
+            var silent = pane.TerminalControl.OutputSilentFor;
+            if (silent >= ContinueNudgeDelay) break;
+            await Task.Delay(ContinueNudgeDelay - silent + TimeSpan.FromSeconds(1));
 
-        // Something may have changed while waiting: the user typed, a handoff or quota pause began,
-        // the session ended, or another idea took the pane.
-        if (_state != OrchestratorState.Building || _handoffRequested || _activePane != pane ||
-            _currentIdea != idea || !pane.IsRunning || !pane.TerminalControl.IsAwaitingInput)
-            return;
+            if (_state != OrchestratorState.Building || _handoffRequested || _activePane != pane ||
+                _currentIdea != idea || !pane.IsRunning || !pane.TerminalControl.IsAwaitingInput)
+                return;
+        }
 
         if (_continueNudges >= MaxContinueNudgesPerSession)
         {
