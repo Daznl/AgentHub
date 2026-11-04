@@ -1,7 +1,7 @@
 # AgentHub Handoff Context
 
 **Updated:** 2026-11-04
-**Branch with the newest work:** `feature/timeline` (local only; built on `feature/context-review`, which is built on `main`)
+**Branch with the newest work:** `main` (`feature/timeline` and `feature/context-review` merged in and pushed 2026-11-04)
 **Next task:** phase 1 approved by Daniel on 2026-11-04 ("looks good, leave it as it is"). Next: push / merge when he asks; phase 2 needs his answers (section 3)
 
 Read `README.md`, `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` first; `AGENTS.md` has the engineering rules.
@@ -12,9 +12,9 @@ Read `README.md`, `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` first; `AGENTS.md
 
 | What | State |
 |---|---|
-| `main` = `origin/main` `1159f31` | Pushed 2026-11-03. Session picker (PR #6, now merged), 📄 Context / 📁 Repo context editors, two-row pane header (setup vs working mode, Relaunch), three-step pane launcher (① Repository → ② Function type → ③ Session; SSH listed under Function type only when 🏠 Home is chosen), fix for events from replaced sessions (Relaunch/Restart/Stop status). Daniel tested all of it. |
-| `feature/context-review` `462a03f` | Local, **not pushed**. ✨ Review in the context window (`InstructionReview`, `LineDiff`). Daniel tested the first version (it timed out on the 91 KB De Beers `CLAUDE.md`); the fixed version passed live tests (91 KB in ~170 s, all edits placed) but **Daniel has not retried it in the app yet**. |
-| `feature/timeline` | Local, **not pushed**. 🌳 Timeline phase 1 complete and wired in (section 3): builder, source, gutter, window, pane button, 28 tests, README and roadmap. Daniel saw the first version ("looks good") and asked for three verticals (tree, sessions, commits at their time), then for the tree to be the Git branch graph (an unmerged branch was on the trunk); both done and screenshot-checked on De Beers Explorer. Test build: `C:\data\agenthub\build-test15` (`AgentHub.exe --timeline <folder>` opens the window at once). |
+| `main` = `origin/main` `3d356e7` | Pushed 2026-11-04 (fast-forward of `feature/timeline`, which contains `feature/context-review`). Holds everything below: Review, Timeline phase 1, dark chrome. Before that, `1159f31` (2026-11-03): session picker (PR #6), 📄 Context / 📁 Repo context editors, two-row pane header, three-step launcher, replaced-session event fix; all tested by Daniel. |
+| `feature/context-review` `462a03f` | Pushed and merged to `main` 2026-11-04. ✨ Review in the context window (`InstructionReview`, `LineDiff`). Daniel tested the first version (it timed out on the 91 KB De Beers `CLAUDE.md`); the fixed version passed live tests (91 KB in ~170 s, all edits placed) but **Daniel has not retried it in the app yet**. |
+| `feature/timeline` `3d356e7` | Pushed and merged to `main` 2026-11-04 (fast-forward). 🌳 Timeline phase 1 complete and wired in (section 3): builder, source, gutter, window, pane button, 28 tests, README and roadmap. Daniel saw the first version ("looks good") and asked for three verticals (tree, sessions, commits at their time), then for the tree to be the Git branch graph (an unmerged branch was on the trunk); both done and screenshot-checked on De Beers Explorer. Test build: `C:\data\agenthub\build-test15` (`AgentHub.exe --timeline <folder>` opens the window at once). |
 | Taskbar build | `src\AgentHub\bin\Release\net8.0-windows\win-x64\publish` (inside the repo), updated with `C:\data\agenthub\publish-local.ps1 -Repo <repo>`. At `1159f31`: **no Review, no Timeline**. Republish only when Daniel asks. |
 | Test builds | `C:\data\agenthub\build-test*`, `build-check`: throwaway, safe to delete once no test instance runs from them. |
 
