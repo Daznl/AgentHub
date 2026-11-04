@@ -247,6 +247,73 @@ public class TimelineBuilderTests
     }
 
     [Fact]
+    public void Graph_ASquashMergedBranchCurvesBackAtTheSquashCommit()
+    {
+        var c1 = Commit("1111111", 0);
+        var f1 = Commit("f111111", 1, "work", "1111111");
+        var f2 = Commit("f222222", 2, "more", "f111111");
+        var squash = Commit("2222222", 3, "feat: the work (#21)", "1111111");
+
+        var (branches, _) = BranchGraph.Assign([squash, f2, f1, c1], [Tip("main", "2222222"), Tip("feat/x", "f222222", remote: true)],
+            new Dictionary<string, string> { ["feat/x"] = squash.Hash });
+
+        var feature = Assert.Single(branches, b => !b.IsTrunk);
+        Assert.Equal(squash.Hash, feature.MergeHash);
+        Assert.True(feature.IsSquash);
+        Assert.Equal([f2, f1], feature.Commits);
+
+        // Drawn: the lane ends with a merge curve on the row before the squash commit's row.
+        var model = Build([], [squash, f2, f1, c1], Tip("main", "2222222"), Tip("feat/x", "f222222", remote: true));
+        Assert.Null(Assert.Single(model.Branches, b => !b.IsTrunk).MergeHash); // without the map git alone sees it open
+        model = TimelineBuilder.Build([], [squash, f2, f1, c1], [Tip("main", "2222222"), Tip("feat/x", "f222222", remote: true)], Now,
+            new Dictionary<string, string> { ["feat/x"] = squash.Hash });
+        var lane = Assert.Single(model.Branches, b => !b.IsTrunk);
+        Assert.True(lane.MergesBack);
+        var last = model.Rows[lane.EndRow];
+        Assert.Contains(last.Lines, l => l.Key == lane.Key && l.MergeAtBottom);
+        Assert.Equal(lane.EndRow + 1, model.Rows.ToList().FindIndex(r => r.Commits.Contains(squash)));
+    }
+
+    [Fact]
+    public void Graph_ASquashMapOnlyCountsWhenTheCommitIsOnTheTrunk()
+    {
+        var c1 = Commit("1111111", 0);
+        var f1 = Commit("f111111", 1, "work", "1111111");
+        var (branches, _) = BranchGraph.Assign([f1, c1], [Tip("main", "1111111"), Tip("feat/x", "f111111")],
+            new Dictionary<string, string> { ["feat/x"] = f1.Hash });
+        Assert.Null(Assert.Single(branches, b => !b.IsTrunk).MergeHash);
+    }
+
+    [Fact]
+    public void Graph_LocalAndRemoteTipsOfOneBranchAreOneLane()
+    {
+        var c1 = Commit("1111111", 0);
+        var f1 = Commit("f111111", 1, "pushed", "1111111");
+        var f2 = Commit("f222222", 2, "not yet pushed", "f111111");
+
+        var (branches, _) = BranchGraph.Assign([f2, f1, c1], [Tip("main", "1111111"), Tip("feat/x", "f111111", remote: true), Tip("feat/x", "f222222")]);
+
+        var feature = Assert.Single(branches, b => !b.IsTrunk);
+        Assert.Equal("feat/x", feature.Name);
+        Assert.Equal([f2, f1], feature.Commits);
+        Assert.False(feature.IsLocalOnly);
+    }
+
+    [Fact]
+    public void Graph_OpenTipsAreTheOnesTheTrunkDoesNotReach()
+    {
+        var c1 = Commit("1111111", 0);
+        var c2 = Commit("2222222", 1, "on main", "1111111");
+        var f1 = Commit("f111111", 1, "open work", "1111111");
+        var tips = new[] { Tip("main", "2222222"), Tip("feat/open", "f111111", remote: true), Tip("feat/open", "f111111"), Tip("feat/done", "1111111") };
+
+        var open = BranchGraph.OpenTips([c2, f1, c1], tips);
+
+        var only = Assert.Single(open);
+        Assert.Equal(("feat/open", Full("f111111")), (only.Name, only.Hash));
+    }
+
+    [Fact]
     public void Graph_ABranchStackedOnAnotherOnlyClaimsItsOwnCommits()
     {
         var c1 = Commit("1111111", 0);

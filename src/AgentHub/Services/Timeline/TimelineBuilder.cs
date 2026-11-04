@@ -64,8 +64,13 @@ public sealed class TimelineBranch
     /// a merge with unrelated histories). Its lane starts on its own rather than forking off the trunk.
     /// </summary>
     public bool IsImported { get; init; }
-    /// <summary>The merge commit on the trunk that brought this branch in, when it was merged.</summary>
-    public string? MergeHash { get; init; }
+    /// <summary>
+    /// The trunk commit that brought this branch in, when it was merged: a merge commit, or the squash commit when
+    /// <see cref="IsSquash"/> (then the branch's own commits are not in the trunk's history).
+    /// </summary>
+    public string? MergeHash { get; set; }
+    /// <summary>Merged by a squash (GitHub's "Squash and merge"), found from the pull request or by matching the change.</summary>
+    public bool IsSquash { get; set; }
     /// <summary>A local branch with no remote counterpart: its commits have not been pushed.</summary>
     public bool IsLocalOnly { get; set; }
     public List<TimelineCommit> Commits { get; } = [];
@@ -126,11 +131,12 @@ public static class TimelineBuilder
     /// <summary>A session written to this recently is shown as live.</summary>
     public static readonly TimeSpan LiveWindow = TimeSpan.FromMinutes(3);
 
+    /// <param name="squashes">Branch name → the trunk commit that squash-merged it (see <see cref="SquashMatcher"/>); null for none.</param>
     public static TimelineModel Build(IReadOnlyList<TimelineSessionInput> sessions, IReadOnlyList<TimelineCommit> commits,
-        IReadOnlyList<TimelineBranchTip> tips, DateTimeOffset now)
+        IReadOnlyList<TimelineBranchTip> tips, DateTimeOffset now, IReadOnlyDictionary<string, string>? squashes = null)
     {
         var (bySession, outside) = Attribute(sessions, commits);
-        var (branches, trunkName) = BranchGraph.Assign(commits, tips);
+        var (branches, trunkName) = BranchGraph.Assign(commits, tips, squashes);
         var byKey = branches.ToDictionary(b => b.Key);
         TimelineBranch? LaneOf(TimelineCommit c) => c.Branch is { } key && byKey.TryGetValue(key, out var b) && !b.IsTrunk ? b : null;
 
@@ -293,13 +299,48 @@ public static class TimelineBuilder
 /// Assigns every commit to a branch of the graph. The trunk is the main branch's first-parent chain (local and remote
 /// tips both, whichever is ahead). Each merge into the trunk defines a branch: the commits reachable from the merge's
 /// other parents that nothing claimed yet, named after a branch tip among them or from the merge subject. Unmerged tips
-/// claim what is left reachable from them.
+/// claim what is left reachable from them (a branch's local and remote tips together); a branch among them that a
+/// squash merge brought in (<paramref name="squashes"/>) is marked merged at that trunk commit.
 /// </summary>
 public static partial class BranchGraph
 {
     private static readonly string[] TrunkNames = ["main", "master", "trunk", "develop"];
 
-    public static (List<TimelineBranch> Branches, string TrunkName) Assign(IReadOnlyList<TimelineCommit> commits, IReadOnlyList<TimelineBranchTip> tips)
+    /// <summary>The trunk's name among the tips: the first of main, master, trunk, develop that exists, else the newest tip's.</summary>
+    public static string TrunkNameOf(IReadOnlyList<TimelineCommit> commits, IReadOnlyList<TimelineBranchTip> tips)
+    {
+        var byHash = commits.Select(c => c.Hash).ToHashSet(StringComparer.Ordinal);
+        var times = commits.ToDictionary(c => c.Hash, c => c.Time, StringComparer.Ordinal);
+        var known = tips.Where(t => byHash.Contains(t.Hash)).ToList();
+        return TrunkNames.FirstOrDefault(n => known.Any(t => t.Name == n))
+            ?? known.OrderByDescending(t => times[t.Hash]).Select(t => t.Name).FirstOrDefault()
+            ?? "main";
+    }
+
+    /// <summary>
+    /// Tips of branches other than the trunk whose commit the trunk does not reach: the branches git alone calls unmerged.
+    /// Those are the ones a squash merge may have brought in without a trace in the graph. One tip per name (the newest).
+    /// </summary>
+    public static List<TimelineBranchTip> OpenTips(IReadOnlyList<TimelineCommit> commits, IReadOnlyList<TimelineBranchTip> tips)
+    {
+        var byHash = commits.ToDictionary(c => c.Hash, StringComparer.Ordinal);
+        var trunkName = TrunkNameOf(commits, tips);
+        var reached = new HashSet<string>(StringComparer.Ordinal);
+        var stack = new Stack<string>(tips.Where(t => t.Name == trunkName).Select(t => t.Hash));
+        while (stack.Count > 0)
+        {
+            var hash = stack.Pop();
+            if (!reached.Add(hash) || !byHash.TryGetValue(hash, out var c)) continue;
+            foreach (var p in c.Parents) stack.Push(p);
+        }
+        return tips.Where(t => t.Name != trunkName && byHash.ContainsKey(t.Hash) && !reached.Contains(t.Hash))
+            .GroupBy(t => t.Name, StringComparer.Ordinal)
+            .Select(g => g.OrderByDescending(t => byHash[t.Hash].Time).First())
+            .ToList();
+    }
+
+    public static (List<TimelineBranch> Branches, string TrunkName) Assign(IReadOnlyList<TimelineCommit> commits, IReadOnlyList<TimelineBranchTip> tips,
+        IReadOnlyDictionary<string, string>? squashes = null)
     {
         var byHash = new Dictionary<string, TimelineCommit>(StringComparer.Ordinal);
         foreach (var c in commits)
@@ -310,9 +351,7 @@ public static partial class BranchGraph
         var branches = new List<TimelineBranch>();
         var known = tips.Where(t => byHash.ContainsKey(t.Hash)).ToList();
 
-        var trunkName = TrunkNames.FirstOrDefault(n => known.Any(t => t.Name == n))
-            ?? known.OrderByDescending(t => byHash[t.Hash].Time).Select(t => t.Name).FirstOrDefault()
-            ?? "main";
+        var trunkName = TrunkNameOf(commits, tips);
         var trunk = new TimelineBranch { Name = trunkName, Key = TimelineBranch.TrunkKey, IsTrunk = true };
         branches.Add(trunk);
         var trunkTips = known.Where(t => t.Name == trunkName).Select(t => t.Hash).ToList();
@@ -377,12 +416,23 @@ public static partial class BranchGraph
             AddBranch(branches, name, merge.Hash, set);
         }
 
-        // What the remaining tips reach that nothing claimed is still open on that branch.
-        foreach (var tip in known.Where(t => t.Name != trunkName).OrderBy(t => byHash[t.Hash].Time))
+        // What the remaining tips reach that nothing claimed is still open on that branch. A branch's local and remote
+        // tips are one branch (one ahead of the other), not two lanes of the same name.
+        foreach (var group in known.Where(t => t.Name != trunkName).GroupBy(t => t.Name, StringComparer.Ordinal).OrderBy(g => g.Min(t => byHash[t.Hash].Time)))
         {
-            var set = Reach([tip.Hash], byHash);
-            if (set.Count > 0) AddBranch(branches, tip.Name, null, set);
+            var set = Reach(group.Select(t => t.Hash), byHash);
+            if (set.Count > 0) AddBranch(branches, group.Key, null, set);
         }
+
+        // A squash merge leaves no merge commit: git sees the branch as open. The pull request (or a matching change on
+        // the trunk) says which trunk commit brought it in; the lane curves back there like any merged branch.
+        if (squashes is not null)
+            foreach (var b in branches.Where(b => !b.IsTrunk && !b.IsImported && b.MergeHash is null))
+                if (squashes.TryGetValue(b.Name, out var squash) && byHash.TryGetValue(squash, out var at) && at.Branch == trunk.Key)
+                {
+                    b.MergeHash = squash;
+                    b.IsSquash = true;
+                }
 
         // Anything left (dangling history no ref reaches) goes with the trunk rather than vanishing.
         foreach (var c in commits.Where(c => c.Branch is null)) Claim(trunk, c);
