@@ -1,8 +1,8 @@
 # AgentHub Handoff Context
 
 **Updated:** 2026-11-04 17:15 (exact screen restore in the session host; squash-merged lanes and a Close button in the Timeline, see the "Squash merges" paragraph before section 3a; taskbar build republished)
-**Branch with the newest work:** `deploy/local-timeline-review-session-host`, local only: `feature/session-host` (✨ sessions that outlive AgentHub, section 3b, local only, built on `main` `d53ebf3`; now three commits, the third is the exact restore) merged with `feature/timeline-review` (section 3a, pushed). The merge had doc conflicts only (README, ROADMAP, this file; resolved, this handoff supersedes the timeline-review one). **The taskbar build runs it.**
-**Next task:** Daniel is already on the session host build (pid 14348, started 16:00) and saw a pane render badly (section 3b, "first feedback"); the fix is in the republished build, which he picks up at his next restart (that restart saves the screens and reattaches; the old build he runs now can also reattach, just not exactly). Then merge order when he says so: see below. Then merge order when he says so: `feature/timeline-review` first (check CI with `gh run list --branch feature/timeline-review`, fast-forward, push), then `feature/session-host` (push it with `gh auth switch -u Daznl`, merge; resolve the doc conflicts exactly as the deploy branch did, or merge the deploy branch itself), CI, push; then the deploy branch can go. Queued after that: Timeline phase 2 (section 3), the follow-ups (section 4).
+**Branch with the newest work:** `main` (Daniel asked for the merge 2026-11-04 17:20, "Looks good can you commit it to main"): the deploy branch (`feature/session-host`, section 3b, + `feature/timeline-review`, section 3a) was fast-forwarded onto `main` and pushed. **The taskbar build runs the same commit.**
+**Next task:** nothing queued by Daniel. Candidates: Timeline phase 2 (section 3), the follow-ups (section 4), the session host limits (section 3b). Daniel's running AgentHub (started 16:40) predates the Timeline squash-merge change; his next restart picks it up.
 
 Read `README.md`, `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` first; `AGENTS.md` has the engineering rules.
 
@@ -12,10 +12,10 @@ Read `README.md`, `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` first; `AGENTS.md
 
 | What | State |
 |---|---|
-| `main` = `origin/main` `d53ebf3` | Pushed 2026-11-04 as a fast-forward of `feature/timeline`. CI (`build.yml`) green. Holds: ✨ Review of context files, 🌳 Timeline phase 1, dark window chrome everywhere, plus the 2026-11-03 work (session picker PR #6, 📄 Context / 📁 Repo context editors, two-row pane header, three-step launcher, replaced-session event fix). |
-| `feature/session-host` | **Local only**, three commits on top of `main` (`86c757a`, `d6042b1`, then the exact restore). 186 tests pass (3 live usage/review tests skipped; the 4 live host tests run). Not pushed. |
-| `deploy/local-timeline-review-session-host` | **Local only**, `6c25d59` = `feature/session-host` + `feature/timeline-review` (merge commit, doc conflicts resolved). The published taskbar build. Throwaway once both feature branches are in `main`. |
-| `feature/timeline-review` | Pushed (`origin/feature/timeline-review`), eleven commits on top of `main` (`e8cf72e` … `4036f7f`). Two timeline reviews, lane colours by branch order, unmerged/unpushed counts, imported-history root fix. Not merged: wait for Daniel. |
+| `main` = `origin/main` | Pushed 2026-11-04 17:25 as a fast-forward of the deploy branch: everything below plus the earlier ✨ Review of context files, 🌳 Timeline phase 1, dark window chrome, the 2026-11-03 work (session picker PR #6, 📄 Context / 📁 Repo context editors, two-row pane header, three-step launcher, replaced-session event fix). 214 tests pass (4 live tests skipped without their CLIs). Check CI: `gh run list --workflow build.yml --branch main`. |
+| `feature/session-host` | Merged into `main` (sessions that outlive AgentHub + exact screen restore, section 3b). Pushed for the record; safe to delete on GitHub. |
+| `deploy/local-timeline-review-session-host` | Was the combined branch the taskbar build ran; now equal to `main` and deleted locally. |
+| `feature/timeline-review` | Merged into `main` (two timeline reviews, lane colours by branch order, unmerged/unpushed counts, imported-history root fix, squash-merged lanes, Close button; sections 3 and 3a). Safe to delete on GitHub. |
 | `feature/context-review`, `feature/timeline` | Pushed, merged, finished. Safe to delete on GitHub when Daniel wants. |
 | ✨ Review | Daniel tested the first version (timed out on the 91 KB De Beers `CLAUDE.md`); the fixed version passed live tests (91 KB in ~170 s) but **Daniel has not retried it in the app**. |
 | 🌳 Timeline | Approved by Daniel 2026-11-04 ("looks good, leave it as it is"). |
