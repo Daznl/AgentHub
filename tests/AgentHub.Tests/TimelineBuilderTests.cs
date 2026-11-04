@@ -28,8 +28,12 @@ public class TimelineBuilderTests
 
     private static TimelineRow RowOf(TimelineModel model, TimelineSessionInput session) => model.Rows.Single(r => r.Session == session);
 
-    private static TimelineModel Build(IReadOnlyList<TimelineSessionInput> sessions, IReadOnlyList<TimelineCommit> commits, params TimelineBranchTip[] tips) =>
-        TimelineBuilder.Build(sessions, commits, tips, Now);
+    private static TimelineModel Build(IReadOnlyList<TimelineSessionInput> sessions, IReadOnlyList<TimelineCommit> commits, params TimelineBranchTip[] tips)
+    {
+        var model = TimelineBuilder.Build(sessions, commits, tips, Now);
+        TimelineGraphInvariantTests.AssertConnected(model);
+        return model;
+    }
 
     // ---- attribution ----
 
