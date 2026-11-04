@@ -26,17 +26,17 @@ public class TimelineSourceTests : IDisposable
         return path;
     }
 
-    // ---- git log ----
+    // ---- git log and branch tips ----
 
     private const string Sep = "\u001f";
 
     [Fact]
-    public void ParseLog_ReadsEveryFieldAndShortensRefNames()
+    public void ParseLog_ReadsEveryField()
     {
         var log = string.Join("\n",
-            $"a1b2c3d4e5f60718293a4b5c6d7e8f9012345678{Sep}0000000000000000000000000000000000000001{Sep}2026-11-03T16:31:29+08:00{Sep}Daznl{Sep}Timeline phase 1{Sep}refs/heads/feature/timeline",
-            $"0000000000000000000000000000000000000001{Sep}0000000000000000000000000000000000000002 0000000000000000000000000000000000000003{Sep}2026-11-03T08:00:00Z{Sep}Daniel{Sep}Merge pull request #6{Sep}refs/remotes/origin/main",
-            $"0000000000000000000000000000000000000002{Sep}{Sep}2026-10-01T00:00:00Z{Sep}Daniel{Sep}Initial commit{Sep}",
+            $"a1b2c3d4e5f60718293a4b5c6d7e8f9012345678{Sep}0000000000000000000000000000000000000001{Sep}2026-11-03T16:31:29+08:00{Sep}Daznl{Sep}Timeline phase 1",
+            $"0000000000000000000000000000000000000001{Sep}0000000000000000000000000000000000000002 0000000000000000000000000000000000000003{Sep}2026-11-03T08:00:00Z{Sep}Daniel{Sep}Merge pull request #6",
+            $"0000000000000000000000000000000000000002{Sep}{Sep}2026-10-01T00:00:00Z{Sep}Daniel{Sep}Initial commit\r",
             "garbage line",
             "");
 
@@ -50,39 +50,41 @@ public class TimelineSourceTests : IDisposable
                 Assert.Equal(new DateTimeOffset(2026, 11, 3, 16, 31, 29, TimeSpan.FromHours(8)), c.Time);
                 Assert.Equal("Daznl", c.Author);
                 Assert.Equal("Timeline phase 1", c.Subject);
-                Assert.Equal("feature/timeline", c.Branch);
+                Assert.Null(c.Branch); // the graph fills this in
                 Assert.False(c.IsMerge);
             },
             c =>
             {
                 Assert.True(c.IsMerge);
                 Assert.Equal(2, c.Parents.Count);
-                Assert.Equal("main", c.Branch);
             },
             c =>
             {
                 Assert.Empty(c.Parents);
-                Assert.Null(c.Branch);
+                Assert.Equal("Initial commit", c.Subject);
             });
     }
 
     [Fact]
-    public void ParseLog_HeadNamesNoBranch()
+    public void ParseTips_ReadsLocalAndRemoteHeads_DropsTheSymbolicRemoteHead()
     {
-        foreach (var head in new[] { "HEAD", "refs/remotes/origin/HEAD" })
-        {
-            var log = $"1234567{Sep}{Sep}2026-11-03T08:00:00Z{Sep}A{Sep}Subject{Sep}{head}\n";
-            Assert.Null(Assert.Single(TimelineSource.ParseLog(log)).Branch);
-        }
-    }
+        var refs = string.Join("\n",
+            $"1111111111111111111111111111111111111111{Sep}refs/heads/main{Sep}",
+            $"2222222222222222222222222222222222222222{Sep}refs/heads/feat/x{Sep}",
+            $"3333333333333333333333333333333333333333{Sep}refs/remotes/origin/HEAD{Sep}refs/remotes/origin/main",
+            $"3333333333333333333333333333333333333333{Sep}refs/remotes/origin/main{Sep}",
+            $"4444444444444444444444444444444444444444{Sep}refs/remotes/upstream/feat/y{Sep}\r",
+            "");
 
-    [Fact]
-    public void ParseLog_HandlesCarriageReturnsAndTags()
-    {
-        var log = $"1234567{Sep}{Sep}2026-11-03T08:00:00Z{Sep}A{Sep}Subject{Sep}refs/tags/v1.0\r\n";
-        var commit = Assert.Single(TimelineSource.ParseLog(log));
-        Assert.Equal("v1.0", commit.Branch);
-        Assert.Equal("Subject", commit.Subject);
+        var tips = TimelineSource.ParseTips(refs);
+
+        Assert.Equal(
+        [
+            new TimelineBranchTip("1111111111111111111111111111111111111111", "main", false),
+            new TimelineBranchTip("2222222222222222222222222222222222222222", "feat/x", false),
+            new TimelineBranchTip("3333333333333333333333333333333333333333", "main", true),
+            new TimelineBranchTip("4444444444444444444444444444444444444444", "feat/y", true)
+        ], tips);
     }
 
     // ---- last entry time ----

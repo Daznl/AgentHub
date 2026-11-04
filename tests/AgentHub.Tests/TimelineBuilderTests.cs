@@ -19,8 +19,17 @@ public class TimelineBuilderTests
         new(new SessionSummary($@"C:\sessions\{name}.jsonl", ContextSource.ClaudeCode, name, null, At(startHours), At(endHours), 100),
             At(endHours), mentions.ToHashSet(StringComparer.Ordinal));
 
-    private static TimelineCommit Commit(string hash, double hours, string subject = "work", string? branch = "main") =>
-        new(hash.PadRight(40, '0'), [], At(hours), "Daniel", subject, branch);
+    private static string Full(string hash) => hash.PadRight(40, '0');
+
+    private static TimelineCommit Commit(string hash, double hours, string subject = "work", params string[] parents) =>
+        new(Full(hash), parents.Select(Full).ToList(), At(hours), "Daniel", subject);
+
+    private static TimelineBranchTip Tip(string name, string hash, bool remote = false) => new(Full(hash), name, remote);
+
+    private static TimelineRow RowOf(TimelineModel model, TimelineSessionInput session) => model.Rows.Single(r => r.Session == session);
+
+    private static TimelineModel Build(IReadOnlyList<TimelineSessionInput> sessions, IReadOnlyList<TimelineCommit> commits, params TimelineBranchTip[] tips) =>
+        TimelineBuilder.Build(sessions, commits, tips, Now);
 
     // ---- attribution ----
 
@@ -80,6 +89,124 @@ public class TimelineBuilderTests
         Assert.Equal([commit], outside);
     }
 
+    // ---- branch graph ----
+
+    [Fact]
+    public void Graph_TrunkIsMainsFirstParentChain_LocalAndRemoteTipsBoth()
+    {
+        var c1 = Commit("1111111", 0, "initial");
+        var c2 = Commit("2222222", 1, "second", "1111111");
+        var c3 = Commit("3333333", 2, "third (only on origin)", "2222222");
+
+        var (branches, trunk) = BranchGraph.Assign([c3, c2, c1], [Tip("main", "2222222"), Tip("main", "3333333", remote: true)]);
+
+        Assert.Equal("main", trunk);
+        var main = Assert.Single(branches);
+        Assert.True(main.IsTrunk);
+        Assert.Equal(3, main.Commits.Count);
+        Assert.All(new[] { c1, c2, c3 }, c => Assert.Equal(main.Key, c.Branch));
+    }
+
+    [Fact]
+    public void Graph_MasterIsTheTrunkWhenThereIsNoMain()
+    {
+        var c1 = Commit("1111111", 0);
+        var (_, trunk) = BranchGraph.Assign([c1], [Tip("master", "1111111"), Tip("feat/x", "1111111")]);
+        Assert.Equal("master", trunk);
+    }
+
+    [Fact]
+    public void Graph_AMergedBranchIsRecoveredFromTheMergeCommit_NamedFromTheSubjectWhenItsTipIsGone()
+    {
+        var c1 = Commit("1111111", 0, "initial");
+        var f1 = Commit("f111111", 1, "feature work", "1111111");
+        var f2 = Commit("f222222", 2, "more feature work", "f111111");
+        var merge = Commit("3333333", 3, "Merge pull request #7 from IGOLimited/feat/x", "1111111", "f222222");
+
+        var (branches, _) = BranchGraph.Assign([merge, f2, f1, c1], [Tip("main", "3333333")]);
+
+        var feature = Assert.Single(branches, b => !b.IsTrunk);
+        Assert.Equal("feat/x", feature.Name);
+        Assert.Equal(merge.Hash, feature.MergeHash);
+        Assert.Equal([f2, f1], feature.Commits);
+        Assert.Equal(feature.Key, f1.Branch);
+        Assert.Equal(branches[0].Key, merge.Branch); // the merge commit itself is on the trunk
+    }
+
+    [Fact]
+    public void Graph_AMergedBranchKeepsItsTipNameWhenTheTipStillExists()
+    {
+        var c1 = Commit("1111111", 0);
+        var f1 = Commit("f111111", 1, "work", "1111111");
+        var merge = Commit("3333333", 3, "Merge branch 'whatever'", "1111111", "f111111");
+
+        var (branches, _) = BranchGraph.Assign([merge, f1, c1], [Tip("main", "3333333"), Tip("feat/kept", "f111111")]);
+
+        Assert.Equal("feat/kept", Assert.Single(branches, b => !b.IsTrunk).Name);
+    }
+
+    [Fact]
+    public void Graph_AMergeOfMainIntoAFeatureClaimsNothingNew()
+    {
+        var c1 = Commit("1111111", 0);
+        var c2 = Commit("2222222", 1, "on main", "1111111");
+        var f1 = Commit("f111111", 0.5, "work", "1111111");
+        var back = Commit("f222222", 2, "Merge remote-tracking branch 'origin/main' into feat/x", "f111111", "2222222");
+        var merge = Commit("3333333", 3, "Merge pull request #8 from IGOLimited/feat/x", "2222222", "f222222");
+
+        var (branches, _) = BranchGraph.Assign([merge, back, f1, c2, c1], [Tip("main", "3333333")]);
+
+        var feature = Assert.Single(branches, b => !b.IsTrunk);
+        Assert.Equal([back, f1], feature.Commits);
+        Assert.Equal(branches[0].Key, c2.Branch);
+    }
+
+    [Fact]
+    public void Graph_AnUnmergedTipIsAnOpenBranch()
+    {
+        var c1 = Commit("1111111", 0);
+        var f1 = Commit("f111111", 1, "work", "1111111");
+        var f2 = Commit("f222222", 2, "more", "f111111");
+
+        var (branches, _) = BranchGraph.Assign([f2, f1, c1], [Tip("main", "1111111"), Tip("feat/open", "f222222", remote: true)]);
+
+        var feature = Assert.Single(branches, b => !b.IsTrunk);
+        Assert.Equal("feat/open", feature.Name);
+        Assert.Null(feature.MergeHash);
+        Assert.Equal([f2, f1], feature.Commits);
+    }
+
+    [Fact]
+    public void Graph_ABranchStackedOnAnotherOnlyClaimsItsOwnCommits()
+    {
+        var c1 = Commit("1111111", 0);
+        var a1 = Commit("a111111", 1, "a", "1111111");
+        var b1 = Commit("b111111", 2, "b on top of a", "a111111");
+
+        var (branches, _) = BranchGraph.Assign([b1, a1, c1], [Tip("main", "1111111"), Tip("feat/a", "a111111"), Tip("feat/b", "b111111")]);
+
+        Assert.Equal([a1], branches.Single(b => b.Name == "feat/a").Commits);
+        Assert.Equal([b1], branches.Single(b => b.Name == "feat/b").Commits);
+    }
+
+    [Fact]
+    public void Graph_WithoutTipsEverythingIsTrunk()
+    {
+        var c1 = Commit("1111111", 0);
+        var c2 = Commit("2222222", 1, "x", "1111111");
+        var (branches, _) = BranchGraph.Assign([c2, c1], []);
+        Assert.Equal(2, Assert.Single(branches).Commits.Count);
+    }
+
+    [Theory]
+    [InlineData("Merge pull request #94 from IGOLimited/feat/file-sure-sheets", "feat/file-sure-sheets")]
+    [InlineData("Merge branch 'fix/thing'", "fix/thing")]
+    [InlineData("Merge branch 'fix/thing' into main", "fix/thing")]
+    [InlineData("Merge remote-tracking branch 'origin/feat/x'", "feat/x")]
+    [InlineData("chore: ordinary commit", null)]
+    public void Graph_MergedBranchNameComesFromTheSubject(string subject, string? expected) =>
+        Assert.Equal(expected, BranchGraph.MergedBranchName(subject));
+
     // ---- rows ----
 
     [Fact]
@@ -87,9 +214,9 @@ public class TimelineBuilderTests
     {
         var first = Commit("1111111", -24, "initial");
         var a = Session("a", 0, 1);
-        var outside = Commit("2222222", 2);
+        var outside = Commit("2222222", 2, "later", "1111111");
 
-        var model = TimelineBuilder.Build([a], [outside, first], Now);
+        var model = Build([a], [outside, first], Tip("main", "2222222"));
 
         Assert.Collection(model.Rows,
             r => { Assert.Equal(TimelineRowKind.Start, r.Kind); Assert.Equal(At(-24), r.Time); Assert.Equal([first], r.Commits); },
@@ -98,13 +225,14 @@ public class TimelineBuilderTests
         Assert.Equal(1, model.SessionCount);
         Assert.Equal(2, model.CommitCount);
         Assert.Equal(1, model.Columns);
+        Assert.Equal("main", model.TrunkName);
     }
 
     [Fact]
     public void Build_WithoutCommits_StartsAtTheFirstSession()
     {
         var a = Session("a", 0, 1);
-        var model = TimelineBuilder.Build([a], [], Now);
+        var model = Build([a], []);
 
         Assert.Equal(TimelineRowKind.Start, model.Rows[0].Kind);
         Assert.Equal(At(0), model.Rows[0].Time);
@@ -115,7 +243,7 @@ public class TimelineBuilderTests
     public void Build_ALoneFirstCommitIsTheStartRow()
     {
         var only = Commit("1111111", 0, "initial");
-        var model = TimelineBuilder.Build([], [only], Now);
+        var model = Build([], [only], Tip("main", "1111111"));
 
         var row = Assert.Single(model.Rows);
         Assert.Equal(TimelineRowKind.Start, row.Kind);
@@ -127,7 +255,7 @@ public class TimelineBuilderTests
     {
         var a = Session("a", 0, 2);
         var first = Commit("1111111", 1, "initial");
-        var model = TimelineBuilder.Build([a], [first], Now);
+        var model = Build([a], [first], Tip("main", "1111111"));
 
         Assert.Empty(model.Rows[0].Commits);
         Assert.Equal(At(0), model.Rows[0].Time);
@@ -137,7 +265,7 @@ public class TimelineBuilderTests
     [Fact]
     public void Build_NothingGivesNoRows()
     {
-        var model = TimelineBuilder.Build([], [], Now);
+        var model = Build([], []);
         Assert.Empty(model.Rows);
     }
 
@@ -145,44 +273,31 @@ public class TimelineBuilderTests
     public void Build_SessionRowHoldsItsCommitsInTimeOrder()
     {
         var a = Session("a", 0, 2);
-        var later = Commit("2222222", 1.5);
         var earlier = Commit("1111111", 0.5);
+        var later = Commit("2222222", 1.5, "x", "1111111");
 
-        var model = TimelineBuilder.Build([a], [later, earlier], Now);
+        var model = Build([a], [later, earlier], Tip("main", "2222222"));
 
-        var row = model.Rows.Single(r => r.Kind == TimelineRowKind.Session);
-        Assert.Equal([earlier, later], row.Commits);
+        Assert.Equal([earlier, later], RowOf(model, a).Commits);
     }
 
     [Fact]
-    public void Build_OutsideCommitsOnTheSameDayShareOneRow_AcrossDaysTheyDoNot()
+    public void Build_OutsideCommitsOnTheSameDayAndBranchShareOneRow()
     {
         var c0 = Commit("0000000", -24, "initial");
-        var c1 = Commit("1111111", 0);
-        var c2 = Commit("2222222", 3);
-        var nextDay = Commit("3333333", 26);
+        var c1 = Commit("1111111", 0, "a", "0000000");
+        var c2 = Commit("2222222", 3, "b", "1111111");
+        var nextDay = Commit("3333333", 26, "c", "2222222");
+        var feature = Commit("f111111", 4, "on a branch", "0000000");
 
-        var model = TimelineBuilder.Build([], [c1, c2, nextDay, c0], Now.AddDays(2));
+        var model = Build([], [c1, c2, nextDay, c0, feature], Tip("main", "3333333"), Tip("feat/x", "f111111"));
 
         Assert.Collection(model.Rows,
             r => Assert.Equal([c0], r.Commits),
             r => Assert.Equal([c1, c2], r.Commits),
+            r => { Assert.Equal([feature], r.Commits); Assert.Equal("feat/x", r.Branch!.Name); },
             r => Assert.Equal([nextDay], r.Commits));
         Assert.Equal("commits:" + c1.Hash, model.Rows[1].Key);
-    }
-
-    [Fact]
-    public void Build_ASessionBetweenOutsideCommitsSplitsThemEvenOnOneDay()
-    {
-        var c0 = Commit("0000000", -24, "initial");
-        var c1 = Commit("1111111", 0);
-        var a = Session("a", 1, 1.5);
-        var c2 = Commit("2222222", 3);
-
-        var model = TimelineBuilder.Build([a], [c0, c1, c2], Now);
-
-        Assert.Equal([TimelineRowKind.Start, TimelineRowKind.Commits, TimelineRowKind.Session, TimelineRowKind.Commits],
-            model.Rows.Select(r => r.Kind));
     }
 
     [Fact]
@@ -190,7 +305,7 @@ public class TimelineBuilderTests
     {
         var old = Session("old", 0, 1);
         var live = Session("live", 2, 3);
-        var model = TimelineBuilder.Build([old, live], [], At(3).AddMinutes(1));
+        var model = TimelineBuilder.Build([old, live], [], [], At(3).AddMinutes(1));
 
         Assert.False(model.Rows.Single(r => r.Session == old).IsLive);
         Assert.True(model.Rows.Single(r => r.Session == live).IsLive);
@@ -198,116 +313,107 @@ public class TimelineBuilderTests
 
     // ---- lanes ----
 
-    private static TimelineRow RowOf(TimelineModel model, TimelineSessionInput session) => model.Rows.Single(r => r.Session == session);
-
     [Fact]
-    public void Layout_SessionsOneAfterAnotherStayOnTheTrunk()
+    public void Layout_SessionsOnTheTrunkStayInColumnZero_WithoutCommitsTheyAreHollow()
     {
+        var c0 = Commit("0000000", -24, "initial");
         var a = Session("a", 0, 1);
         var b = Session("b", 2, 3);
-        var model = TimelineBuilder.Build([a, b], [], Now);
+        var c1 = Commit("1111111", 2.5, "on main", "0000000");
+        var model = Build([a, b], [c0, c1], Tip("main", "1111111"));
 
         Assert.Equal(0, RowOf(model, a).Column);
+        Assert.True(RowOf(model, a).IsHollow);
         Assert.Equal(0, RowOf(model, b).Column);
+        Assert.False(RowOf(model, b).IsHollow);
         Assert.Equal(1, model.Columns);
         Assert.All(model.Rows, r => Assert.Single(r.Lines));
     }
 
     [Fact]
-    public void Layout_AnOverlappingSessionForksIntoALaneAndMergesBackWhenItEnds()
+    public void Layout_AMergedBranchForksAtItsFirstRowAndCurvesBackBeforeTheMergeRow()
     {
-        var a = Session("a", 0, 4);
-        var b = Session("b", 1, 2);
-        var c = Session("c", 5, 6);
-        var model = TimelineBuilder.Build([a, b, c], [], Now);
+        var c0 = Commit("0000000", -24, "initial");
+        var a = Session("a", 0, 1);           // works on feat/x
+        var f1 = Commit("f111111", 0.5, "feature", "0000000");
+        var b = Session("b", 2, 3);           // merges it (on the trunk)
+        var merge = Commit("3333333", 2.5, "Merge pull request #1 from IGOLimited/feat/x", "0000000", "f111111");
+        var later = Commit("4444444", 5, "after", "3333333");
 
-        Assert.Equal(2, model.Columns);
-        var rowB = RowOf(model, b);
-        Assert.Equal(1, rowB.Column);
-        var lane = Assert.Single(rowB.Lines, l => l.Column == 1);
+        var model = Build([a, b], [c0, f1, merge, later], Tip("main", "4444444"));
+
+        var rowA = RowOf(model, a);
+        Assert.Equal("feat/x", rowA.Branch!.Name);
+        Assert.Equal(1, rowA.Column);
+        var lane = Assert.Single(rowA.Lines, l => l.Column == 1);
         Assert.True(lane.Fork);
         Assert.False(lane.FromTop);
-        Assert.True(lane.ToBottom);
-        // b ended before c started, so its lane rejoins the trunk at the bottom of the last row before c.
         Assert.True(lane.MergeAtBottom);
 
-        var rowC = RowOf(model, c);
-        Assert.Equal(0, rowC.Column);
-        Assert.Single(rowC.Lines);
-    }
-
-    [Fact]
-    public void Layout_AFreedLaneIsReusedByTheNextOverlappingSession()
-    {
-        var a = Session("a", 0, 10);
-        var b = Session("b", 1, 2);
-        var c = Session("c", 3, 4);
-        var outside = Commit("1111111", 12);
-        var model = TimelineBuilder.Build([a, b, c], [Commit("0000000", -24, "initial"), outside], Now);
-
-        // a holds the trunk; b and c each take lane 1 in turn.
-        Assert.Equal(0, RowOf(model, a).Column);
-        Assert.Equal(1, RowOf(model, b).Column);
-        Assert.Equal(1, RowOf(model, c).Column);
-
+        // b made the merge commit, but the feature lane wins for a session only when it has feature commits: b has none.
         var rowB = RowOf(model, b);
-        var laneB = Assert.Single(rowB.Lines, l => l.Column == 1);
-        Assert.True(laneB.Fork && laneB.MergeAtBottom); // b starts and ends between a's row and c's row
-
-        var rowC = RowOf(model, c);
-        var laneC = Assert.Single(rowC.Lines, l => l.Column == 1);
-        Assert.True(laneC.Fork && laneC.MergeAtBottom); // c ended before the outside commit
-
-        var commitsRow = model.Rows.Single(r => r.Kind == TimelineRowKind.Commits);
-        Assert.Single(commitsRow.Lines); // only the trunk is left
-        Assert.False(commitsRow.Lines[0].ToBottom);
+        Assert.Equal(0, rowB.Column);
+        Assert.Single(rowB.Lines);
+        Assert.Equal(2, model.Columns);
     }
 
     [Fact]
-    public void Layout_ThreeAtOnceUseThreeColumns()
+    public void Layout_ASessionThatMergesItsOwnBranchSitsOnTheBranchLaneAndClosesIt()
     {
-        var a = Session("a", 0, 10);
-        var b = Session("b", 1, 9);
-        var c = Session("c", 2, 8);
-        var model = TimelineBuilder.Build([a, b, c], [], Now);
+        var c0 = Commit("0000000", -24, "initial");
+        var a = Session("a", 0, 3);
+        var f1 = Commit("f111111", 1, "feature", "0000000");
+        var merge = Commit("3333333", 2, "Merge pull request #1 from IGOLimited/feat/x", "0000000", "f111111");
+        var later = Commit("4444444", 5, "after", "3333333");
 
+        var model = Build([a], [c0, f1, merge, later], Tip("main", "4444444"));
+
+        var rowA = RowOf(model, a);
+        Assert.Equal("feat/x", rowA.Branch!.Name);
+        var lane = Assert.Single(rowA.Lines, l => l.Column == 1);
+        Assert.True(lane.Fork && lane.MergeAtBottom);
+        var laterRow = model.Rows.Single(r => r.Commits.Contains(later));
+        Assert.Single(laterRow.Lines); // the lane is closed by then
+    }
+
+    [Fact]
+    public void Layout_AnOpenBranchRunsThroughTheRowsBetweenItsCommitsAndStopsAtItsLast()
+    {
+        var c0 = Commit("0000000", -24, "initial");
+        var f1 = Commit("f111111", 0, "feature start", "0000000");
+        var m1 = Commit("1111111", 1, "on main meanwhile", "0000000");
+        var f2 = Commit("f222222", 26, "feature next day", "f111111");
+        var m2 = Commit("2222222", 30, "main later", "1111111");
+
+        var model = Build([], [c0, f1, m1, f2, m2], Tip("main", "2222222"), Tip("feat/open", "f222222"));
+
+        Assert.Collection(model.Rows,
+            r => Assert.Single(r.Lines),
+            r => { Assert.Equal(1, r.Column); var l = Assert.Single(r.Lines, l => l.Column == 1); Assert.True(l.Fork && l.ToBottom && !l.MergeAtBottom); },
+            r => { Assert.Equal(0, r.Column); var l = Assert.Single(r.Lines, l => l.Column == 1); Assert.True(l.FromTop && l.ToBottom && !l.Fork); },
+            r => { Assert.Equal(1, r.Column); var l = Assert.Single(r.Lines, l => l.Column == 1); Assert.True(l.FromTop && !l.ToBottom && !l.MergeAtBottom); },
+            r => Assert.Single(r.Lines));
+    }
+
+    [Fact]
+    public void Layout_TwoBranchesAliveAtOnceTakeTwoColumns_AFreedColumnIsReused()
+    {
+        var c0 = Commit("0000000", -24, "initial");
+        var a1 = Commit("a111111", 0, "a", "0000000");
+        var b1 = Commit("b111111", 1, "b", "0000000");
+        var mergeA = Commit("1111111", 2, "Merge pull request #1 from IGOLimited/feat/a", "0000000", "a111111");
+        var b2 = Commit("b222222", 26, "b again", "b111111");
+        var c1 = Commit("c111111", 27, "c", "1111111");
+
+        var model = Build([], [c0, a1, b1, mergeA, b2, c1], Tip("main", "1111111"), Tip("feat/b", "b222222"), Tip("feat/c", "c111111"));
+
+        var rowA = model.Rows.Single(r => r.Commits.Contains(a1));
+        var rowB = model.Rows.Single(r => r.Commits.Contains(b1));
+        var rowC = model.Rows.Single(r => r.Commits.Contains(c1));
+        Assert.Equal(1, rowA.Column);
+        Assert.Equal(2, rowB.Column);
+        Assert.Equal(1, rowC.Column); // feat/a's column, free since its merge
         Assert.Equal(3, model.Columns);
-        Assert.Equal(2, RowOf(model, c).Column);
-        var rowC = RowOf(model, c);
-        Assert.Equal([0, 1, 2], rowC.Lines.Select(l => l.Column).OrderBy(c => c));
-        Assert.True(rowC.Lines.Single(l => l.Column == 1).FromTop);
-    }
-
-    [Fact]
-    public void Layout_ALiveLaneStaysOpenAtTheBottom()
-    {
-        var a = Session("a", 0, 10);
-        var b = Session("b", 1, 2);
-        var model = TimelineBuilder.Build([a, b], [], At(10).AddMinutes(1)); // a still live, b long finished
-
-        var laneB = Assert.Single(RowOf(model, b).Lines, l => l.Column == 1);
-        Assert.True(laneB.MergeAtBottom);
-
-        var live = Session("live", 3, 4);
-        var model2 = TimelineBuilder.Build([a, live], [], At(4).AddMinutes(1));
-        var laneLive = Assert.Single(RowOf(model2, live).Lines, l => l.Column == 1);
-        Assert.False(laneLive.MergeAtBottom);
-        Assert.True(laneLive.ToBottom);
-    }
-
-    [Fact]
-    public void Layout_TheTrunkRunsFromTheSecondRowToTheLast()
-    {
-        var a = Session("a", 0, 1);
-        var b = Session("b", 2, 3);
-        var model = TimelineBuilder.Build([a, b], [], Now);
-
-        var trunks = model.Rows.Select(r => r.Lines.Single(l => l.Column == 0)).ToList();
-        Assert.False(trunks[0].FromTop);
-        Assert.True(trunks[0].ToBottom);
-        Assert.True(trunks[1].FromTop && trunks[1].ToBottom);
-        Assert.True(trunks[2].FromTop);
-        Assert.False(trunks[2].ToBottom);
     }
 
     [Fact]
@@ -315,9 +421,9 @@ public class TimelineBuilderTests
     {
         var c0 = Commit("0000000", -24, "initial");
         var a = Session("a", 0, 1);
-        var c = Commit("1111111", 3);
-        var first = TimelineBuilder.Build([a], [c0, c], Now);
-        var second = TimelineBuilder.Build([a], [c0, c, Commit("2222222", 3.5)], Now);
+        var c = Commit("1111111", 3, "x", "0000000");
+        var first = Build([a], [c0, c], Tip("main", "1111111"));
+        var second = Build([a], [c0, c, Commit("2222222", 3.5, "y", "1111111")], Tip("main", "2222222"));
 
         Assert.Equal(first.Rows.Select(r => r.Key), second.Rows.Select(r => r.Key));
         Assert.Equal(a.Summary.FilePath, first.Rows[1].Key);

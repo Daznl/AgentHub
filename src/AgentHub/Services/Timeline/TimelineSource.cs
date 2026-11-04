@@ -33,12 +33,12 @@ public static partial class TimelineSource
         return new TimelineScope(folders[0], FolderName(folders[0]), folders.Distinct(StringComparer.OrdinalIgnoreCase).ToList(), IsGit: true);
     }
 
-    /// <summary>Every commit on every branch, newest first as git gives them.</summary>
+    /// <summary>Every commit reachable from a local or remote branch, newest first as git gives them (stashes and tags left out).</summary>
     public static async Task<List<TimelineCommit>> ReadCommitsAsync(ProcessRunner runner, TimelineScope scope, CancellationToken cancellationToken = default)
     {
         if (!scope.IsGit) return [];
         var output = await RunGitAsync(runner, scope.Root,
-            ["log", "--all", "--source", $"--format=%H{Sep}%P{Sep}%cI{Sep}%an{Sep}%s{Sep}%S"], cancellationToken) ?? "";
+            ["log", "--branches", "--remotes", $"--format=%H{Sep}%P{Sep}%cI{Sep}%an{Sep}%s"], cancellationToken) ?? "";
         return ParseLog(output);
     }
 
@@ -48,24 +48,44 @@ public static partial class TimelineSource
         foreach (var line in output.Split('\n'))
         {
             var f = line.TrimEnd('\r').Split(Sep);
-            if (f.Length < 6 || f[0].Length < 7) continue;
+            if (f.Length < 5 || f[0].Length < 7) continue;
             if (!DateTimeOffset.TryParse(f[2], CultureInfo.InvariantCulture, DateTimeStyles.None, out var time)) continue;
             var parents = f[1].Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            commits.Add(new TimelineCommit(f[0], parents, time, f[3], f[4], BranchName(f[5])));
+            commits.Add(new TimelineCommit(f[0], parents, time, f[3], f[4]));
         }
         return commits;
     }
 
-    // refs/heads/feat/x -> feat/x, refs/remotes/origin/main -> main; tags and stash keep their short form. HEAD, bare or as
-    // refs/remotes/origin/HEAD, names no branch.
-    private static string? BranchName(string source)
+    /// <summary>Every local and remote branch head. Remote names lose their remote prefix; the symbolic <c>origin/HEAD</c> is left out.</summary>
+    public static async Task<List<TimelineBranchTip>> ReadBranchTipsAsync(ProcessRunner runner, TimelineScope scope, CancellationToken cancellationToken = default)
     {
-        var s = source.Trim();
-        if (s.Length == 0) return null;
-        foreach (var prefix in new[] { "refs/heads/", "refs/remotes/origin/", "refs/remotes/", "refs/tags/", "refs/" })
-            if (s.StartsWith(prefix, StringComparison.Ordinal)) { s = s[prefix.Length..]; break; }
-        // HEAD, bare or as origin/HEAD, names no branch.
-        return s == "HEAD" ? null : s;
+        if (!scope.IsGit) return [];
+        var output = await RunGitAsync(runner, scope.Root,
+            ["for-each-ref", $"--format=%(objectname){Sep}%(refname){Sep}%(symref)", "refs/heads", "refs/remotes"], cancellationToken) ?? "";
+        return ParseTips(output);
+    }
+
+    public static List<TimelineBranchTip> ParseTips(string output)
+    {
+        var tips = new List<TimelineBranchTip>();
+        foreach (var line in output.Split('\n'))
+        {
+            var f = line.TrimEnd('\r').Split(Sep);
+            if (f.Length < 2 || f[0].Length < 7) continue;
+            if (f.Length > 2 && f[2].Length > 0) continue; // a symbolic ref such as refs/remotes/origin/HEAD
+            var name = f[1];
+            if (name.StartsWith("refs/heads/", StringComparison.Ordinal)) tips.Add(new TimelineBranchTip(f[0], name["refs/heads/".Length..], IsRemote: false));
+            else if (name.StartsWith("refs/remotes/", StringComparison.Ordinal))
+            {
+                var rest = name["refs/remotes/".Length..];
+                var slash = rest.IndexOf('/');
+                if (slash <= 0 || slash == rest.Length - 1) continue;
+                var branch = rest[(slash + 1)..];
+                if (branch == "HEAD") continue;
+                tips.Add(new TimelineBranchTip(f[0], branch, IsRemote: true));
+            }
+        }
+        return tips;
     }
 
     /// <summary>Claude Code and Codex sessions recorded in any of the scope's folders, live or archived, each once.</summary>

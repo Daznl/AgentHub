@@ -87,10 +87,11 @@ public partial class TimelineWindow : Window
         try
         {
             var commits = await TimelineSource.ReadCommitsAsync(_runner, _scope);
+            var tips = await TimelineSource.ReadBranchTipsAsync(_runner, _scope);
             var model = await Task.Run(() =>
             {
                 var sessions = TimelineSource.ReadSessions(_scope, _archiveRoot);
-                return TimelineBuilder.Build(sessions, commits, DateTimeOffset.UtcNow);
+                return TimelineBuilder.Build(sessions, commits, tips, DateTimeOffset.UtcNow);
             });
             if (generation != _generation) return;
 
@@ -151,7 +152,9 @@ public partial class TimelineWindow : Window
         SubheadingText.Text = string.Join(" · ", parts) + " · " + _scope.Root;
 
         // Three verticals: the tree, then what happened in sessions, then what landed in Git, each row at its time.
-        HeaderGutter.Width = TimelineGutter.LaneWidth * Math.Max(1, model.Columns);
+        _branchNames = model.Branches.ToDictionary(b => b.Key, b => b.Name, StringComparer.Ordinal);
+        _trunkName = model.TrunkName;
+        HeaderGutter.Width = TimelineGutter.GutterWidth(model.Columns);
         RowsPanel.Children.Clear();
         foreach (var row in model.Rows)
         {
@@ -289,8 +292,9 @@ public partial class TimelineWindow : Window
         card.Right.Text = Span(summary.StartedAt, session.EndedAt);
 
         var bits = new List<string> { Duration(session.EndedAt - summary.StartedAt) };
-        if (row.Column > 0) bits.Add("alongside another session");
         bits.Add(row.Commits.Count == 0 ? "no commits" : $"{row.Commits.Count} commit{(row.Commits.Count == 1 ? "" : "s")} →");
+        if (row.Branch is { } lane) bits.Add($"on {lane.Name}{(lane.MergeHash is null ? ", not merged" : "")}");
+        else if (row.Commits.Count > 0) bits.Add($"on {_trunkName}");
         if (session.Folder is not null && _scope.Folders.Count > 1) bits.Add(Path.GetFileName(session.Folder.TrimEnd(Path.DirectorySeparatorChar)));
         card.Meta.Text = string.Join(" · ", bits);
 
@@ -325,9 +329,10 @@ public partial class TimelineWindow : Window
         };
         card.Right.Text = commits.Count > 1 ? Span(commits[0].Time, commits[^1].Time) : When(commits[0].Time);
         var authors = commits.Select(c => c.Author).Distinct().ToList();
-        var branches = commits.Select(c => c.Branch).Where(b => b is not null).Distinct().ToList();
+        var branches = commits.Select(BranchName).Where(b => b is not null).Distinct().ToList();
         var bits = new List<string> { authors.Count == 1 ? authors[0] : $"{authors.Count} authors" };
         if (branches.Count > 0) bits.Add(string.Join(", ", branches));
+        if (row.Branch is { MergeHash: null } open && row.Kind != TimelineRowKind.Session) bits.Add("not merged");
         if (commits.Count > shown) bits.Add($"{commits.Count - shown} more below");
         card.Meta.Text = string.Join(" · ", bits);
         card.Meta.Margin = new Thickness(0, 3, 0, 6);
@@ -395,6 +400,13 @@ public partial class TimelineWindow : Window
     }
 
     /// <summary>Time, hash and subject on one wrapping line; the branch follows the subject only when the card spans several.</summary>
+    // Branch names by the graph's lane keys, and the trunk's name, from the model last rendered.
+    private static Dictionary<string, string> _branchNames = new(StringComparer.Ordinal);
+    private static string _trunkName = "main";
+
+    private static string? BranchName(TimelineCommit commit) =>
+        commit.Branch is { } key && _branchNames.TryGetValue(key, out var name) ? name : null;
+
     private static FrameworkElement CommitLine(TimelineCommit commit, bool showBranch)
     {
         var line = new DockPanel { Margin = new Thickness(0, 0, 0, 3) };
@@ -406,7 +418,7 @@ public partial class TimelineWindow : Window
         line.Children.Add(hash);
         var subject = new TextBlock { Foreground = Body, FontSize = 12, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Top };
         subject.Inlines.Add(new Run((commit.IsMerge ? "⇅ " : "") + commit.Subject));
-        if (showBranch && commit.Branch is { } branch) subject.Inlines.Add(new Run("  " + branch) { Foreground = Dim, FontSize = 10 });
+        if (showBranch && BranchName(commit) is { } branch) subject.Inlines.Add(new Run("  " + branch) { Foreground = Dim, FontSize = 10 });
         line.Children.Add(subject);
         return line;
     }

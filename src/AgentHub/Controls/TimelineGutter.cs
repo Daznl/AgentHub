@@ -17,7 +17,9 @@ namespace AgentHub.Controls;
 /// </summary>
 public sealed class TimelineGutter : FrameworkElement
 {
-    public const double LaneWidth = 22;
+    /// <summary>Space between lanes: comfortable for a few, tighter when a repository has had many branches alive at once.</summary>
+    public static double LaneWidth(int columns) => columns <= 6 ? 22 : Math.Max(12, Math.Floor(150.0 / columns));
+    public static double GutterWidth(int columns) => LaneWidth(Math.Max(1, columns)) * Math.Max(1, columns);
     /// <summary>Where the node sits below the row's top, level with the card's title line.</summary>
     public const double NodeY = 19;
     private const double LeftPad = 11;
@@ -54,7 +56,7 @@ public sealed class TimelineGutter : FrameworkElement
 
     public static Brush LaneBrush(int column) => column == 0 ? LaneBrushes[0] : LaneBrushes[column % LaneBrushes.Length];
 
-    protected override Size MeasureOverride(Size availableSize) => new(LaneWidth * Math.Max(1, Columns), 0);
+    protected override Size MeasureOverride(Size availableSize) => new(GutterWidth(Columns), 0);
 
     protected override void OnRender(DrawingContext dc)
     {
@@ -90,13 +92,15 @@ public sealed class TimelineGutter : FrameworkElement
                 break;
             default:
                 var index = row.Column % LaneBrushes.Length;
-                dc.DrawEllipse(LaneBrushes[index], null, centre, 5, 5);
+                // A session without commits sits on the trunk but belongs to no branch: a hollow node says so.
+                if (row.IsHollow) dc.DrawEllipse(StartFill, RingPens[index], centre, 4.5, 4.5);
+                else dc.DrawEllipse(LaneBrushes[index], null, centre, 5, 5);
                 if (row.IsLive) dc.DrawEllipse(null, RingPens[index], centre, 8.5, 8.5);
                 break;
         }
     }
 
-    private static double X(int column) => LeftPad + column * LaneWidth;
+    private double X(int column) => LeftPad + column * LaneWidth(Columns);
 
     // An S-curve: vertical at both ends, so it joins the straight lane lines without a kink.
     private static StreamGeometry Curve(Point from, Point to)
