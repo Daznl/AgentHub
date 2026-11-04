@@ -537,11 +537,6 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         });
     }
 
-    /// <summary>
-    /// Moves keyboard focus into this terminal so the user can type without clicking the pane first.
-    /// Deferred to Input priority so it runs after the click that triggered the launch has finished
-    /// (otherwise the Launch button keeps focus).
-    /// </summary>
     /// <summary>Sends text input directly into the running terminal process.</summary>
     public void SendInput(string data)
     {
@@ -552,6 +547,30 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         _session?.Write(data);
     }
 
+    /// <summary>
+    /// Types a prompt into an agent CLI and submits it. Agent TUIs (Claude Code, Codex, Gemini) treat a
+    /// burst of input as a paste, so a newline or carriage return inside the burst lands in the input box
+    /// instead of submitting it. The prompt is therefore flattened to one line and Enter is sent on its
+    /// own after a pause, the way a person would press it.
+    /// </summary>
+    public async Task SubmitPromptAsync(string prompt, int enterDelayMs = 600)
+    {
+        var oneLine = FlattenPrompt(prompt);
+        if (oneLine.Length == 0) return;
+        SendInput(oneLine);
+        await Task.Delay(enterDelayMs);
+        SendInput("\r");
+    }
+
+    /// <summary>Collapses line breaks and runs of whitespace into single spaces.</summary>
+    public static string FlattenPrompt(string prompt) =>
+        System.Text.RegularExpressions.Regex.Replace(prompt ?? "", @"\s+", " ").Trim();
+
+    /// <summary>
+    /// Moves keyboard focus into this terminal so the user can type without clicking the pane first.
+    /// Deferred to Input priority so it runs after the click that triggered the launch has finished
+    /// (otherwise the Launch button keeps focus).
+    /// </summary>
     public void FocusTerminal()
     {
         _ = Dispatcher.InvokeAsync(() =>

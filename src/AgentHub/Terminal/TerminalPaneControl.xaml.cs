@@ -161,6 +161,9 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     /// <summary>Sends text input directly into this pane's running session.</summary>
     public void SendInput(string data) => Terminal.SendInput(data);
 
+    /// <summary>Types a prompt into this pane's agent CLI and presses Enter separately so it submits.</summary>
+    public Task SubmitPromptAsync(string prompt) => Terminal.SubmitPromptAsync(prompt);
+
     private void ShowContext(ContextReading? reading)
     {
         LatestContextReading = reading;

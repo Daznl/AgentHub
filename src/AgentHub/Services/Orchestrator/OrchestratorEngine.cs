@@ -288,7 +288,7 @@ public sealed class OrchestratorEngine : IDisposable
                 $"and continue building the planned features.";
         }
 
-        _activePane.SendInput(promptText + "\r\n");
+        await _activePane.SubmitPromptAsync(promptText);
         Log($"Injected session prompt ({promptText.Length} chars).");
     }
 
@@ -315,7 +315,7 @@ public sealed class OrchestratorEngine : IDisposable
                 "3. Immediate next tasks for the next session\n" +
                 "When .agenthub/handoff.md is saved, end your turn cleanly so a fresh session can take over.\n";
 
-            _activePane?.SendInput(handoffPrompt + "\r\n");
+            if (_activePane != null) _ = _activePane.SubmitPromptAsync(handoffPrompt);
         }
     }
 
@@ -429,7 +429,7 @@ public sealed class OrchestratorEngine : IDisposable
 
                     if (_state == OrchestratorState.Building && _activePane?.IsRunning == true)
                     {
-                        _activePane.SendInput("\n\n[ORCHESTRATOR NOTICE]: Claude usage quota exhausted. Please save current work to .agenthub/handoff.md and wrap up.\r\n");
+                        await _activePane.SubmitPromptAsync("[ORCHESTRATOR NOTICE]: Claude usage quota exhausted. Please save current work to .agenthub/handoff.md and wrap up.");
                         await Task.Delay(5000);
                         if (_activePane.IsRunning) _activePane.TerminalControl.StopSession();
                     }
