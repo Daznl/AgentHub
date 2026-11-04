@@ -107,7 +107,7 @@ public sealed class TimelineGutter : FrameworkElement
             var bottom = line.ToBottom || (line.Column == 0 && trunkToBottom) ? height : NodeY;
             if (line.MergeAtBottom) bottom = Math.Max(NodeY, height - CurveRun);
 
-            if (line.Fork) dc.DrawGeometry(null, pen, Curve(new Point(trunkX, 0), new Point(x, NodeY)));
+            if (line.Fork) dc.DrawGeometry(null, pen, Curve(new Point(X(line.ForkFrom), 0), new Point(x, NodeY)));
             if (bottom > top) dc.DrawLine(pen, new Point(x, top), new Point(x, bottom));
             if (line.MergeAtBottom) dc.DrawGeometry(null, pen, Curve(new Point(x, bottom), new Point(trunkX, height)));
         }

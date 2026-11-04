@@ -322,8 +322,67 @@ public class TimelineBuilderTests
 
         var (branches, _) = BranchGraph.Assign([b1, a1, c1], [Tip("main", "1111111"), Tip("feat/a", "a111111"), Tip("feat/b", "b111111")]);
 
-        Assert.Equal([a1], branches.Single(b => b.Name == "feat/a").Commits);
-        Assert.Equal([b1], branches.Single(b => b.Name == "feat/b").Commits);
+        var a = branches.Single(b => b.Name == "feat/a");
+        var b = branches.Single(b => b.Name == "feat/b");
+        Assert.Equal([a1], a.Commits);
+        Assert.Equal([b1], b.Commits);
+        Assert.Equal(TimelineBranch.TrunkKey, a.ParentKey);
+        Assert.Equal(a.Key, b.ParentKey);
+    }
+
+    [Fact]
+    public void Layout_ABranchStartedAtAnotherBranchsTipCarriesItsLaneOn()
+    {
+        // Stacked work, nothing merged: feat/a off main in session A, feat/b started at feat/a's tip in session B later.
+        var c1 = Commit("1111111", 0);
+        var a1 = Commit("a111111", 1, "a", "1111111");
+        var b1 = Commit("b111111", 5, "b on top of a", "a111111");
+        var sessionA = Session("A", 0.5, 1.5, "a111111");
+        var sessionB = Session("B", 4.5, 5.5, "b111111");
+
+        var model = Build([sessionA, sessionB], [b1, a1, c1], Tip("main", "1111111"), Tip("feat/a", "a111111", remote: true), Tip("feat/b", "b111111", remote: true));
+
+        var a = model.Branches.Single(b => b.Name == "feat/a");
+        var b = model.Branches.Single(b => b.Name == "feat/b");
+        var rowA = RowOf(model, sessionA);
+        var rowB = RowOf(model, sessionB);
+        var iA = model.Rows.ToList().IndexOf(rowA);
+        var iB = model.Rows.ToList().IndexOf(rowB);
+        Assert.Same(b, a.ContinuesInto);
+        Assert.Same(a, b.ForkLane);
+        Assert.Equal((iA, iB), (a.StartRow, a.EndRow));
+        Assert.Equal(a.Column, b.Column);           // one straight stream
+        Assert.False(a.MergesBack);
+
+        // Row A: feat/a forks from the trunk and runs down. Row B: only feat/b is drawn there, coming in from the top in
+        // the same column (no fork curve: the stream runs straight through the hand-over).
+        var lineA = Assert.Single(rowA.Lines, l => l.Key == a.Key);
+        Assert.True(lineA.Fork && lineA.ToBottom && lineA.ForkFrom == 0);
+        Assert.DoesNotContain(rowB.Lines, l => l.Key == a.Key);
+        var lineB = Assert.Single(rowB.Lines, l => l.Key == b.Key);
+        Assert.True(!lineB.Fork && lineB.FromTop && lineB.Column == a.Column);
+    }
+
+    [Fact]
+    public void Layout_ABranchOffAMergedBranchForksFromTheTrunkOnceThatIsMerged()
+    {
+        var c1 = Commit("1111111", 0);
+        var a1 = Commit("a111111", 1, "a", "1111111");
+        var merge = Commit("2222222", 2, "Merge pull request #1 from IGOLimited/feat/a", "1111111", "a111111");
+        var b1 = Commit("b111111", 5, "b on top of a", "a111111");
+        var sessionA = Session("A", 0.5, 2.5, "a111111", "2222222");
+        var sessionB = Session("B", 4.5, 5.5, "b111111");
+
+        var model = Build([sessionA, sessionB], [b1, merge, a1, c1], Tip("main", "2222222"), Tip("feat/b", "b111111", remote: true));
+
+        var a = model.Branches.Single(b => b.Name == "feat/a");
+        var b = model.Branches.Single(b => b.Name == "feat/b");
+        Assert.Equal(a.Key, b.ParentKey);
+        Assert.Null(a.ContinuesInto);
+        Assert.Null(b.ForkLane);
+        Assert.True(a.MergesBack);
+        var lineB = Assert.Single(RowOf(model, sessionB).Lines, l => l.Key == b.Key);
+        Assert.True(lineB.Fork && lineB.ForkFrom == 0);
     }
 
     [Fact]

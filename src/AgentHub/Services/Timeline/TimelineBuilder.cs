@@ -46,10 +46,10 @@ public enum TimelineRowKind
 
 /// <summary>
 /// One lane line through a row of the graph. <see cref="FromTop"/> false: the line starts at this row's node (a branch
-/// leaving the trunk, drawn with a fork curve when <see cref="Fork"/>). <see cref="MergeAtBottom"/>: the branch was merged,
-/// and its lane curves back into the trunk at the bottom of the row.
+/// leaving another lane, drawn with a fork curve from column <see cref="ForkFrom"/> when <see cref="Fork"/>; 0 is the
+/// trunk). <see cref="MergeAtBottom"/>: the branch was merged, and its lane curves back into the trunk at the bottom of the row.
 /// </summary>
-public sealed record TimelineLine(int Column, bool FromTop, bool ToBottom, bool Fork, bool MergeAtBottom, string Key = TimelineBranch.TrunkKey, int Colour = 0);
+public sealed record TimelineLine(int Column, bool FromTop, bool ToBottom, bool Fork, bool MergeAtBottom, string Key = TimelineBranch.TrunkKey, int Colour = 0, int ForkFrom = 0);
 
 /// <summary>A branch as a lane of the graph: which rows it spans and whether it rejoined the trunk.</summary>
 public sealed class TimelineBranch
@@ -84,6 +84,18 @@ public sealed class TimelineBranch
     public int EndRow { get; set; } = -1;
     /// <summary>True when the lane is drawn curving back into the trunk at its last row.</summary>
     public bool MergesBack { get; set; }
+    /// <summary>
+    /// The branch this one was started from: the one holding the parent of its first commit. The trunk key for a branch
+    /// off the main line; another lane's key for a branch stacked on a branch. Null for imported history.
+    /// </summary>
+    public string? ParentKey { get; set; }
+    /// <summary>The lane the fork curve leaves from: the parent lane when it is drawn through the start row, else the trunk.</summary>
+    public TimelineBranch? ForkLane { get; set; }
+    /// <summary>
+    /// The lane that carries this one on: a branch started at this one's tip while this one was never merged. This lane
+    /// is drawn down to that lane's first row and hands over there, so stacked work reads as one stream.
+    /// </summary>
+    public TimelineBranch? ContinuesInto { get; set; }
 }
 
 /// <summary>A row of the timeline: a node in <see cref="Column"/>, on <see cref="Branch"/>'s lane, and the lane lines running through it.</summary>
@@ -270,13 +282,39 @@ public static class TimelineBuilder
             lanes.Add(branch);
         }
 
+        // Where each lane forks from. A branch stacked on another forks from that lane when it runs through the start
+        // row; a branch started at an unmerged branch's tip carries it on: the parent lane is drawn down to the child's
+        // first row and hands over there. A parent merged before the child's first row is in the trunk by then.
+        var byKey = lanes.ToDictionary(l => l.Key, StringComparer.Ordinal);
+        foreach (var lane in lanes.OrderBy(l => l.StartRow).ThenBy(l => l.EndRow))
+        {
+            if (lane.IsImported || lane.ParentKey is null || !byKey.TryGetValue(lane.ParentKey, out var parent) || parent == lane) continue;
+            if (parent.StartRow <= lane.StartRow && lane.StartRow <= parent.EndRow)
+                lane.ForkLane = parent;
+            else if (lane.StartRow > parent.EndRow && !parent.MergesBack && parent.ContinuesInto is null)
+            {
+                parent.EndRow = lane.StartRow;
+                parent.ContinuesInto = lane;
+                lane.ForkLane = parent;
+            }
+        }
+
         var busyUntil = new List<int> { int.MaxValue }; // column 0 is the trunk, never free
         var colour = 0;
         foreach (var lane in lanes.OrderBy(l => l.StartRow).ThenBy(l => l.EndRow))
         {
-            var column = 1;
-            while (column < busyUntil.Count && busyUntil[column] >= lane.StartRow) column++;
-            if (column == busyUntil.Count) busyUntil.Add(0);
+            int column;
+            if (lane.ForkLane is { } carried && carried.ContinuesInto == lane)
+            {
+                // Carrying a lane on: the same column, so the stream runs straight through the hand-over.
+                column = carried.Column;
+            }
+            else
+            {
+                column = 1;
+                while (column < busyUntil.Count && busyUntil[column] >= lane.StartRow) column++;
+                if (column == busyUntil.Count) busyUntil.Add(0);
+            }
             busyUntil[column] = lane.EndRow;
             lane.Column = column;
             lane.ColourIndex = ++colour; // by order of appearance, not by column: a reused column gets a new colour
@@ -288,8 +326,15 @@ public static class TimelineBuilder
             row.Column = row.Branch?.Column ?? 0;
             row.Lines.Add(new TimelineLine(0, FromTop: i > 0, ToBottom: i < rows.Count - 1, Fork: false, MergeAtBottom: false));
             foreach (var lane in lanes.Where(l => l.StartRow <= i && i <= l.EndRow))
-                row.Lines.Add(new TimelineLine(lane.Column, FromTop: i > lane.StartRow, ToBottom: i < lane.EndRow,
-                    Fork: i == lane.StartRow && !lane.IsImported, MergeAtBottom: lane.MergesBack && i == lane.EndRow, Key: lane.Key, Colour: lane.ColourIndex));
+            {
+                // The row a lane hands over in is drawn by the lane carrying it on, which comes in from the top like any
+                // continuing line; no fork curve, the colour changes at the node.
+                if (lane.ContinuesInto is not null && i == lane.EndRow) continue;
+                var carriesOn = i == lane.StartRow && lane.ForkLane is { } from && from.ContinuesInto == lane;
+                row.Lines.Add(new TimelineLine(lane.Column, FromTop: i > lane.StartRow || carriesOn, ToBottom: i < lane.EndRow,
+                    Fork: i == lane.StartRow && !lane.IsImported && !carriesOn, MergeAtBottom: lane.MergesBack && i == lane.EndRow,
+                    Key: lane.Key, Colour: lane.ColourIndex, ForkFrom: lane.ForkLane?.Column ?? 0));
+            }
         }
         return busyUntil.Count;
     }
@@ -413,7 +458,7 @@ public static partial class BranchGraph
             // "Merge branch 'main' of github": the other line of main itself (the work GitHub's initial commit was joined
             // with, or a pull from the remote); that is trunk, not a branch beside it.
             if (name == trunkName) { foreach (var c in set) Claim(trunk, c); continue; }
-            AddBranch(branches, name, merge.Hash, set);
+            AddBranch(branches, name, merge.Hash, set, byHash);
         }
 
         // What the remaining tips reach that nothing claimed is still open on that branch. A branch's local and remote
@@ -421,7 +466,7 @@ public static partial class BranchGraph
         foreach (var group in known.Where(t => t.Name != trunkName).GroupBy(t => t.Name, StringComparer.Ordinal).OrderBy(g => g.Min(t => byHash[t.Hash].Time)))
         {
             var set = Reach(group.Select(t => t.Hash), byHash);
-            if (set.Count > 0) AddBranch(branches, group.Key, null, set);
+            if (set.Count > 0) AddBranch(branches, group.Key, null, set, byHash);
         }
 
         // A squash merge leaves no merge commit: git sees the branch as open. The pull request (or a matching change on
@@ -477,10 +522,18 @@ public static partial class BranchGraph
         return roots;
     }
 
-    private static void AddBranch(List<TimelineBranch> branches, string name, string? mergeHash, List<TimelineCommit> set)
+    private static void AddBranch(List<TimelineBranch> branches, string name, string? mergeHash, List<TimelineCommit> set, Dictionary<string, TimelineCommit> byHash)
     {
         var branch = new TimelineBranch { Name = name, Key = name + "@" + set.MinBy(c => c.Time)!.Hash, MergeHash = mergeHash };
         foreach (var c in set) Claim(branch, c);
+        // Where the branch started: the branch holding the first parent of its oldest commit that has a parent outside
+        // the set. Whatever that parent belongs to was claimed before this branch reached it (or it is off the log: trunk).
+        var inSet = set.Select(c => c.Hash).ToHashSet(StringComparer.Ordinal);
+        var basis = set.Where(c => c.Parents.Count > 0 && !inSet.Contains(c.Parents[0])).MinBy(c => c.Time)
+                    ?? set.Where(c => c.Parents.Count == 0).MinBy(c => c.Time);
+        branch.ParentKey = basis is { Parents.Count: > 0 } && byHash.TryGetValue(basis.Parents[0], out var parentCommit)
+            ? parentCommit.Branch ?? TimelineBranch.TrunkKey
+            : basis is null ? null : TimelineBranch.TrunkKey;
         branches.Add(branch);
     }
 

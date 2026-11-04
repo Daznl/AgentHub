@@ -172,7 +172,7 @@ public partial class TimelineWindow : Window
         {
             sb.Append(row.Key).Append(':').Append(row.Column).Append(':').Append(row.IsLive ? 'L' : '-').Append(':').Append(row.Commits.Count).Append(':');
             if (row.Session is { } s) sb.Append(s.EndedAt.ToUnixTimeSeconds()).Append(':').Append(s.Summary.SizeBytes);
-            foreach (var l in row.Lines) sb.Append(l.Column).Append(l.FromTop ? 't' : '-').Append(l.ToBottom ? 'b' : '-').Append(l.Fork ? 'f' : '-').Append(l.MergeAtBottom ? 'm' : '-');
+            foreach (var l in row.Lines) sb.Append(l.Column).Append(l.FromTop ? 't' : '-').Append(l.ToBottom ? 'b' : '-').Append(l.Fork ? 'f' : '-').Append(l.MergeAtBottom ? 'm' : '-').Append(l.ForkFrom);
             sb.Append('\n');
         }
         return sb.ToString();
