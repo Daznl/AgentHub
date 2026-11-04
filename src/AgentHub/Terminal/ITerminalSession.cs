@@ -12,8 +12,12 @@ public interface ITerminalSession : IDisposable
     /// <summary>Hosted session id, or null for a process AgentHub runs itself.</summary>
     string? HostedId { get; }
 
-    /// <summary>Decoded output text, in order.</summary>
-    event Action<string>? OutputDataReceived;
+    /// <summary>
+    /// Decoded output text, in order, with the session's stream offset after it (how many bytes the process has written up
+    /// to and including this piece; -1 when the session does not count). A piece may be empty when it only completed a
+    /// character split across two reads; the offset still moves.
+    /// </summary>
+    event Action<string, long>? OutputDataReceived;
 
     /// <summary>The process ended with this exit code. -1 when the host was lost rather than the process ending.</summary>
     event Action<int>? ProcessExited;

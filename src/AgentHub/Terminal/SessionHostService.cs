@@ -77,7 +77,7 @@ public sealed class SessionHostService
             }
             try
             {
-                var session = await HostedSession.AttachAsync(record, TimeSpan.FromMilliseconds(500), cancellation).ConfigureAwait(false);
+                var session = await HostedSession.AttachAsync(record, TimeSpan.FromMilliseconds(500), -1, cancellation).ConfigureAwait(false);
                 // The host wrote its own process id and the CLI's; carry them so the layout can tell whether it is alive.
                 if (Store.Load(record.Id) is { } saved)
                 {
@@ -93,9 +93,12 @@ public sealed class SessionHostService
         throw new TimeoutException("The session host did not answer in time.", last);
     }
 
-    /// <summary>Attaches to a running host. Throws when it is gone, busy with another AgentHub, or speaks another protocol.</summary>
-    public Task<HostedSession> AttachAsync(SessionRecord record, CancellationToken cancellation = default) =>
-        HostedSession.AttachAsync(record, AttachTimeout, cancellation);
+    /// <summary>
+    /// Attaches to a running host. Throws when it is gone, busy with another AgentHub, or speaks another protocol. With
+    /// <paramref name="fromOffset"/> (the stream offset a saved screen stands at) the host replays only what came after it.
+    /// </summary>
+    public Task<HostedSession> AttachAsync(SessionRecord record, long fromOffset = -1, CancellationToken cancellation = default) =>
+        HostedSession.AttachAsync(record, AttachTimeout, fromOffset, cancellation);
 
     /// <summary>Records whose host process still runs, newest first.</summary>
     public List<SessionRecord> ListLive() => Store.ListAll().Where(SessionStore.IsHostAlive).ToList();

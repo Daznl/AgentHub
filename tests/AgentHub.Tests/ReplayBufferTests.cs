@@ -54,6 +54,47 @@ public class ReplayBufferTests
     }
 
     [Fact]
+    public void Slice_from_an_offset_is_the_tail_when_held_and_the_whole_ring_when_not()
+    {
+        var buffer = new ReplayBuffer(8);
+        buffer.Append("abcdef"u8);
+        Assert.Equal(0, buffer.Start);
+        Assert.Equal(6, buffer.TotalAppended);
+
+        var tail = buffer.SnapshotFrom(4);
+        Assert.Equal((4L, "ef"), (tail.Offset, Encoding.ASCII.GetString(tail.Bytes)));
+        var end = buffer.SnapshotFrom(6);
+        Assert.Equal((6L, ""), (end.Offset, Encoding.ASCII.GetString(end.Bytes)));
+        var none = buffer.SnapshotFrom(-1);
+        Assert.Equal((0L, "abcdef"), (none.Offset, Encoding.ASCII.GetString(none.Bytes)));
+
+        buffer.Append("ghij"u8);   // 10 written, 8 kept: the ring now starts at offset 2
+        Assert.Equal(2, buffer.Start);
+        var kept = buffer.SnapshotFrom(7);
+        Assert.Equal((7L, "hij"), (kept.Offset, Encoding.ASCII.GetString(kept.Bytes)));
+        var gone = buffer.SnapshotFrom(1);
+        Assert.Equal((2L, "cdefghij"), (gone.Offset, Encoding.ASCII.GetString(gone.Bytes)));
+        var ahead = buffer.SnapshotFrom(11);
+        Assert.Equal((2L, "cdefghij"), (ahead.Offset, Encoding.ASCII.GetString(ahead.Bytes)));
+    }
+
+    [Fact]
+    public void A_slice_the_client_asked_for_keeps_its_offset_even_inside_a_character()
+    {
+        var buffer = new ReplayBuffer(16);
+        buffer.Append(Encoding.UTF8.GetBytes("a€b"));   // a, E2 82 AC, b
+        var asked = buffer.SnapshotFrom(2);              // starts at 82, a continuation byte: the client drops it
+        Assert.Equal(2, asked.Offset);
+        Assert.Equal(new byte[] { 0x82, 0xAC, (byte)'b' }, asked.Bytes);
+
+        var wrapped = new ReplayBuffer(5);
+        wrapped.Append(Encoding.UTF8.GetBytes("a€b"));
+        wrapped.Append("cd"u8);                          // ring holds 82 AC 'b' 'c' 'd' from offset 2; trimmed to 'b' at 4
+        var whole = wrapped.SnapshotFrom(-1);
+        Assert.Equal((4L, "bcd"), (whole.Offset, Encoding.UTF8.GetString(whole.Bytes)));
+    }
+
+    [Fact]
     public void Many_small_appends_match_one_big_tail()
     {
         var buffer = new ReplayBuffer(1000);

@@ -40,6 +40,7 @@
   <div id="terminal-container"></div>
   <script src="xterm.js"></script>
   <script src="xterm-addon-fit.js"></script>
+  <script src="xterm-addon-serialize.js"></script>
   <script>
     const term = new Terminal({
       cursorBlink: true,
@@ -73,7 +74,12 @@
 
     const fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
+    const serializeAddon = new SerializeAddon.SerializeAddon();
+    term.loadAddon(serializeAddon);
     term.open(document.getElementById('terminal-container'));
+
+    // True while a session's screen is being put back (see restoreTerminal): no fitting, and nothing typed or answered goes out.
+    let restoring = false;
 
     // Write output while keeping the view pinned to the latest content.
     // We only auto-scroll when the user was already at the bottom, so
@@ -86,7 +92,36 @@
       });
     }
 
+    // Puts the terminal back as a session last showed it: at the size the session's console has, so every escape
+    // sequence lands where it did; the saved screen first (if any), then the output written since. Replies the terminal
+    // would send to queries inside that output are dropped (they were answered long ago), and fitting the pane waits
+    // until it is all in.
+    function restoreTerminal(msg) {
+      restoring = true;
+      term.reset();
+      const cols = msg.cols | 0, rows = msg.rows | 0;
+      if (cols > 0 && rows > 0 && (term.cols !== cols || term.rows !== rows)) term.resize(cols, rows);
+      term.write((msg.screen || '') + (msg.data || ''), () => {
+        restoring = false;
+        term.scrollToBottom();
+        notifyResize();
+      });
+    }
+
+    // The terminal as shown, as escape sequences that rebuild it (scrollback, colours, cursor), once everything
+    // written so far is in. Answered with the token so the host matches it to its request.
+    function captureTerminal(token) {
+      term.write('', () => {
+        let data = '';
+        try { data = serializeAddon.serialize(); } catch (e) {}
+        window.chrome.webview.postMessage(JSON.stringify({
+          type: 'screen', token: token, cols: term.cols, rows: term.rows, data: data
+        }));
+      });
+    }
+
     function notifyResize() {
+      if (restoring) return;
       try {
         const wasAtBottom = term.buffer.active.viewportY >= term.buffer.active.baseY;
         fitAddon.fit();
@@ -121,6 +156,7 @@
     resizeObserver.observe(document.getElementById('terminal-container'));
 
     term.onData(data => {
+      if (restoring) return;
       if (window.chrome && window.chrome.webview) {
         window.chrome.webview.postMessage(JSON.stringify({
           type: 'input',
@@ -236,6 +272,10 @@
           term.reset();
         } else if (msg && msg.type === 'write') {
           writeToTerminal(msg.data);
+        } else if (msg && msg.type === 'restore') {
+          restoreTerminal(msg);
+        } else if (msg && msg.type === 'capture') {
+          captureTerminal(msg.token);
         }
       });
 

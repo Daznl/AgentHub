@@ -33,6 +33,11 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     // Bumped on every launch or attach so a slow one that was replaced meanwhile lets go of what it started.
     private int _launchGeneration;
     private bool _disposed;
+    // Stream offset of the hosted session's output the page has been given so far (-1 when unknown). Kept on the UI thread in
+    // step with what was posted, so a screen saved at close says exactly where its replay should continue.
+    private long _postedOffset = -1;
+    private int _captureToken;
+    private readonly Dictionary<int, TaskCompletionSource<(int Cols, int Rows, string Screen)>> _captures = new();
 
     private bool _isInitialized;
     private bool _isInitializing;
@@ -291,6 +296,13 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         }
 
         Hook(session, replay: null);
+        if (session is HostedSession started)
+        {
+            _postedOffset = started.Offset;
+            // The pane may have been resized while the host was starting, with nothing yet to tell; the console still has
+            // the size it was started with, and the CLI draws for that one until told otherwise.
+            if (_cols != started.Welcome.Cols || _rows != started.Welcome.Rows) started.Resize(_cols, _rows);
+        }
         // The title row already names the repository; process id and full path are noise there. Exit and error text still show.
         RaiseSubtitle(note);
         SessionStarted?.Invoke();
@@ -312,13 +324,15 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         StartedAt = record.StartedAt;
 
         HostedSession hosted;
+        ScreenSnapshot? screen = null;
         try
         {
             if (Host is not { IsAvailable: true } host) throw new InvalidOperationException(Host?.UnavailableReason ?? "The session host is not available.");
             // A dead host has no pipe to wait on; say so at once instead of timing out.
             if (!SessionStore.IsHostAlive(record)) throw new InvalidOperationException("its session host is no longer running");
             RaiseSubtitle("Reattaching…");
-            hosted = await host.AttachAsync(record);
+            screen = host.Store.LoadScreen(record.Id);
+            hosted = await host.AttachAsync(record, screen?.Offset ?? -1);
         }
         catch (Exception ex)
         {
@@ -333,9 +347,26 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
             return;
         }
 
-        Hook(hosted, hosted.ReplayText);
-        // The pane may not be the size it was; the CLI redraws for the new one.
-        hosted.Resize(_cols, _rows);
+        // Exact when the pane's last screen is on disk and the host still had everything written after it: the terminal is put
+        // back as it was and only the output since is played, so nothing is drawn twice or in the wrong place.
+        var exact = screen is not null && screen.Offset >= 0 && hosted.ReplayStart == screen.Offset
+                    && screen.Cols == hosted.Welcome.Cols && screen.Rows == hosted.Welcome.Rows;
+        Restore(hosted.Welcome.Cols, hosted.Welcome.Rows, exact ? screen!.Screen : "", hosted.ReplayText);
+        Hook(hosted, replay: null);
+        _postedOffset = hosted.Offset;
+        if (_cols != hosted.Welcome.Cols || _rows != hosted.Welcome.Rows)
+        {
+            // The pane is not the size the session had: the console repaints everything for the new size (which also
+            // covers a restore that was not exact).
+            hosted.Resize(_cols, _rows);
+        }
+        else if (!exact)
+        {
+            // Same size, but the screen was rebuilt from raw output that may start mid-frame: a size change and back makes
+            // the console repaint everything it shows.
+            hosted.Resize(_cols, _rows + 1);
+            hosted.Resize(_cols, _rows);
+        }
         RaiseSubtitle("");
         SessionStarted?.Invoke();
         ScheduleRefit();
@@ -348,8 +379,22 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         try
         {
             var replayPath = Host?.Store.ReplayPath(record.Id);
-            if (replayPath is not null && File.Exists(replayPath))
-                Post(System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(replayPath)));
+            var replay = replayPath is not null && File.Exists(replayPath) ? File.ReadAllBytes(replayPath) : [];
+            var screen = Host?.Store.LoadScreen(record.Id);
+            // The saved screen plus the rest of the replay after it, when the replay the host saved at exit reaches back that far.
+            if (screen is not null && screen.Offset >= 0 && latest.ReplayStart >= 0
+                && screen.Offset >= latest.ReplayStart && screen.Offset <= latest.ReplayStart + replay.Length
+                && screen.Cols == latest.Cols && screen.Rows == latest.Rows)
+            {
+                var rest = replay.AsSpan((int)(screen.Offset - latest.ReplayStart));
+                var skip = 0;
+                while (skip < rest.Length && skip < 4 && (rest[skip] & 0xC0) == 0x80) skip++;
+                Restore(screen.Cols, screen.Rows, screen.Screen, System.Text.Encoding.UTF8.GetString(rest[skip..]));
+            }
+            else
+            {
+                Restore(latest.Cols, latest.Rows, "", System.Text.Encoding.UTF8.GetString(replay));
+            }
         }
         catch (IOException) { }
 
@@ -370,6 +415,68 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         catch { }
     }
 
+    /// <summary>
+    /// Clears the page's terminal, sizes it as the session's console is (so every escape sequence lands where it did),
+    /// writes a saved screen (if any) and then the output written after it, and fits the pane once it is all in.
+    /// </summary>
+    private void Restore(int cols, int rows, string screen, string output)
+    {
+        try
+        {
+            WebView.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(new { type = "restore", cols, rows, screen, data = output }));
+        }
+        catch { }
+    }
+
+    /// <summary>True while the current session runs in a host, the kind a close lets go of rather than ends.</summary>
+    public bool IsHosted => _session is HostedSession { IsRunning: true };
+
+    /// <summary>
+    /// The terminal exactly as the page shows it now, with the stream offset it stands at, for the next attach to put back.
+    /// Null when there is no hosted session, the page is not up, or it does not answer in time.
+    /// </summary>
+    public async Task<ScreenSnapshot?> CaptureScreenAsync(TimeSpan timeout)
+    {
+        if (!IsHosted || WebView.CoreWebView2 is null || !_isTerminalReady) return null;
+        var token = ++_captureToken;
+        // Read before asking: everything posted so far is in the page's queue ahead of the request, and nothing after it is.
+        var offset = _postedOffset;
+        var pending = new TaskCompletionSource<(int Cols, int Rows, string Screen)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _captures[token] = pending;
+        try
+        {
+            WebView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new { type = "capture", token }));
+            var done = await Task.WhenAny(pending.Task, Task.Delay(timeout));
+            if (done != pending.Task) return null;
+            var (cols, rows, text) = pending.Task.Result;
+            return new ScreenSnapshot { Offset = offset, Cols = cols, Rows = rows, Screen = text, SavedAt = DateTimeOffset.Now };
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            _captures.Remove(token);
+        }
+    }
+
+    /// <summary>Saves the terminal as shown beside the hosted session's record, for the next attach. Called before AgentHub lets go.</summary>
+    public async Task SaveScreenAsync(TimeSpan timeout)
+    {
+        if (HostedRecord is not { } record || Host is null) return;
+        var screen = await CaptureScreenAsync(timeout);
+        if (screen is null) return;
+        try
+        {
+            Host.Store.SaveScreen(record.Id, screen);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The next attach falls back to the host's replay.
+        }
+    }
+
     private void Hook(ITerminalSession session, string? replay)
     {
         _session = session;
@@ -379,11 +486,13 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
 
         // Events of a replaced session (Relaunch, Restart) arrive after the new one has started; drop them,
         // or its late exit marks the new session stopped and its last output lands in the cleared terminal.
-        session.OutputDataReceived += text =>
+        session.OutputDataReceived += (text, offset) =>
         {
             Dispatcher.InvokeAsync(() =>
             {
                 if (!ReferenceEquals(_session, session)) return;
+                if (offset >= 0) _postedOffset = offset;
+                if (text.Length == 0) return;
                 _attention.OnOutput(text, DateTimeOffset.Now);
                 Post(text);
             });
@@ -513,6 +622,17 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
                             if (wasWaiting) AttentionCleared?.Invoke();
                             _session?.Write(data);
                         }
+                    }
+                    break;
+
+                case "screen":
+                    // The page's answer to a capture: the terminal as escape sequences that rebuild it.
+                    if (root.TryGetProperty("token", out var tokenProp) && _captures.TryGetValue(tokenProp.GetInt32(), out var capture))
+                    {
+                        var cols = root.TryGetProperty("cols", out var screenCols) ? screenCols.GetInt32() : _cols;
+                        var rows = root.TryGetProperty("rows", out var screenRows) ? screenRows.GetInt32() : _rows;
+                        var text = root.TryGetProperty("data", out var screenData) ? screenData.GetString() ?? "" : "";
+                        capture.TrySetResult((cols, rows, text));
                     }
                     break;
             }

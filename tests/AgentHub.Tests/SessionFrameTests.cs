@@ -19,9 +19,28 @@ public class SessionFrameTests
         var read = await RoundTrip(SessionFrame.Hello(4242));
         Assert.NotNull(read);
         Assert.Equal(FrameType.Hello, read!.Type);
-        var (version, pid) = SessionFrame.ReadHello(read);
+        var (version, pid, from) = SessionFrame.ReadHello(read);
         Assert.Equal(SessionFrame.ProtocolVersion, version);
         Assert.Equal(4242, pid);
+        Assert.Equal(-1, from);
+    }
+
+    [Fact]
+    public async Task Offsets_round_trip_and_the_first_shapes_still_read()
+    {
+        var hello = await RoundTrip(SessionFrame.Hello(7, fromOffset: 123_456_789_012));
+        Assert.Equal(123_456_789_012, SessionFrame.ReadHello(hello!).FromOffset);
+
+        var welcome = SessionFrame.ReadWelcome((await RoundTrip(SessionFrame.Welcome(1, true, 0, 145, 47, totalAppended: 5_000_000, replayStart: 2_902_848)))!);
+        Assert.Equal(5_000_000, welcome.TotalAppended);
+        Assert.Equal(2_902_848, welcome.ReplayStart);
+
+        // A host or client from the first build sends the shorter payloads; the offsets then read as unknown.
+        var oldHello = new SessionFrame(FrameType.Hello, SessionFrame.Hello(9).Payload[..6]);
+        Assert.Equal((SessionFrame.ProtocolVersion, 9, -1L), SessionFrame.ReadHello(oldHello));
+        var oldWelcome = new SessionFrame(FrameType.Welcome, SessionFrame.Welcome(2, false, 3, 80, 24).Payload[..15]);
+        var info = SessionFrame.ReadWelcome(oldWelcome);
+        Assert.Equal((2, false, 3, 80, 24, -1L, -1L), (info.ProcessId, info.Running, info.ExitCode, info.Cols, info.Rows, info.TotalAppended, info.ReplayStart));
     }
 
     [Fact]
