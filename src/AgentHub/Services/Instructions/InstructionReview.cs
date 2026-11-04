@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.IO;
 using System.Text.Json;
 
 namespace AgentHub.Services.Instructions;
@@ -29,10 +27,10 @@ public sealed record ReviewPlan(IReadOnlyList<DiffSegment> Segments, IReadOnlyLi
 public static class InstructionReview
 {
     /// <summary>Where the CLI runs: an empty folder, so no repository's own CLAUDE.md or settings are picked up.</summary>
-    public const string WorkingDirectory = @"C:\data\agenthub\review";
+    public const string WorkingDirectory = ClaudePrint.WorkingDirectory;
 
     /// <summary>Generous: a large file with many edits can take a few minutes, and the window shows the time running.</summary>
-    public static readonly TimeSpan Timeout = TimeSpan.FromMinutes(10);
+    public static readonly TimeSpan Timeout = ClaudePrint.Timeout;
 
     public const int MaxEdits = 20;
 
@@ -68,12 +66,7 @@ public static class InstructionReview
     /// Print mode, JSON envelope with schema-checked output, no tools, no MCP servers, no saved session, and no settings
     /// or CLAUDE.md of the user's own (they would leak into the suggestions), with our system prompt.
     /// </summary>
-    public static IReadOnlyList<string> Arguments() =>
-    [
-        "-p", "--output-format", "json", "--json-schema", ReplySchema,
-        "--tools", "", "--strict-mcp-config", "--no-session-persistence", "--setting-sources", "",
-        "--system-prompt", SystemPrompt
-    ];
+    public static IReadOnlyList<string> Arguments() => ClaudePrint.Arguments(SystemPrompt, ReplySchema);
 
     /// <summary>The message sent on stdin: what the file is, where it applies, and its text.</summary>
     public static string BuildRequest(InstructionFile file, string text, string? repoFolder)
@@ -96,22 +89,8 @@ public static class InstructionReview
     public static async Task<ReviewSuggestion> RunAsync(ProcessRunner runner, string claudeCommand, InstructionFile file, string text,
         string? repoFolder, CancellationToken cancellationToken)
     {
-        Directory.CreateDirectory(WorkingDirectory);
-        (int ExitCode, string StdOut, string StdErr) run;
-        try
-        {
-            run = await runner.RunAsync(claudeCommand, Arguments(), WorkingDirectory, cancellationToken, Timeout,
-                standardInput: BuildRequest(file, text, repoFolder));
-        }
-        catch (Win32Exception)
-        {
-            throw new InvalidOperationException(
-                $"Claude Code ({claudeCommand}) was not found. Install it, or set its command under Settings → Agents.");
-        }
-        cancellationToken.ThrowIfCancellationRequested();
-
-        return ParseEnvelope(run.StdOut) ?? throw new InvalidOperationException(
-            $"Claude Code did not return a review (exit code {run.ExitCode}).\n{Trim(string.IsNullOrWhiteSpace(run.StdErr) ? run.StdOut : run.StdErr)}");
+        using var reply = await ClaudePrint.RunAsync(runner, claudeCommand, SystemPrompt, ReplySchema, BuildRequest(file, text, repoFolder), cancellationToken);
+        return ReadSuggestion(reply.RootElement);
     }
 
     /// <summary>
@@ -120,29 +99,8 @@ public static class InstructionReview
     /// </summary>
     public static ReviewSuggestion? ParseEnvelope(string stdout)
     {
-        var json = stdout.Trim();
-        if (!json.StartsWith('{')) return null;
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            var result = root.TryGetProperty("result", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString() : null;
-            if (root.TryGetProperty("is_error", out var e) && e.ValueKind == JsonValueKind.True)
-                throw new InvalidOperationException($"Claude Code reported an error: {Trim(result ?? json)}");
-
-            if (root.TryGetProperty("structured_output", out var structured) && structured.ValueKind == JsonValueKind.Object)
-                return ReadSuggestion(structured);
-            if (result is not null && result.TrimStart().StartsWith('{'))
-            {
-                using var inner = JsonDocument.Parse(result);
-                return ReadSuggestion(inner.RootElement);
-            }
-            throw new InvalidOperationException($"The review came back in an unexpected form, so nothing was changed.\n{Trim(result ?? json)}");
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
+        using var reply = ClaudePrint.ParseEnvelope(stdout);
+        return reply is null ? null : ReadSuggestion(reply.RootElement);
     }
 
     private static ReviewSuggestion ReadSuggestion(JsonElement element)
@@ -183,17 +141,18 @@ public static class InstructionReview
             placed.Add((r.First, r.Last, r.NewLines, edit.Why));
         }
 
-        placed.Sort((a, b) => a.First.CompareTo(b.First));
+        // A stable order: several appends share a position and must keep the order they were given in, matching Reasons.
+        var ordered = placed.OrderBy(p => p.First).ToList();
         var segments = new List<DiffSegment>();
         var next = 0;
-        foreach (var (first, last, newLines, _) in placed)
+        foreach (var (first, last, newLines, _) in ordered)
         {
             if (first > next) segments.Add(Same(lines, next, first - 1));
             segments.Add(new DiffSegment(true, lines[first..(last + 1)], newLines, first + 1));
             next = last + 1;
         }
         if (next < lines.Length) segments.Add(Same(lines, next, lines.Length - 1));
-        return new ReviewPlan(segments, placed.Select(p => p.Why).ToList(), unplaced);
+        return new ReviewPlan(segments, ordered.Select(p => p.Why).ToList(), unplaced);
     }
 
     private static DiffSegment Same(string[] lines, int first, int last)
@@ -216,9 +175,12 @@ public static class InstructionReview
 
         if (start.Length == 0)
         {
-            // Only an empty file may be filled in whole; anywhere else an empty start has no position.
-            if (lines.Any(l => l.Trim().Length > 0) || replace.Length == 0) return null;
-            return (0, lines.Length - 1, lines.Length > 1 ? [.. replace, ""] : replace);
+            if (replace.Length == 0) return null;
+            // An empty file is filled in whole; a file with text gets the lines appended, before a trailing empty line
+            // (text ending in a newline splits into one) so the file keeps its final newline.
+            if (!lines.Any(l => l.Trim().Length > 0)) return (0, lines.Length - 1, lines.Length > 1 ? [.. replace, ""] : replace);
+            var at = lines.Length > 0 && lines[^1].Length == 0 ? lines.Length - 1 : lines.Length;
+            return (at, at - 1, replace);
         }
 
         var starts = Find(lines, start, from: 0);
@@ -269,8 +231,6 @@ public static class InstructionReview
         if (text.EndsWith('\n')) text = text[..^1];
         return text;
     }
-
-    private static string Trim(string text) => text.Length > 600 ? text[..600].TrimEnd() + "…" : text.Trim();
 
     public static string CliName(InstructionCli cli) => cli switch
     {

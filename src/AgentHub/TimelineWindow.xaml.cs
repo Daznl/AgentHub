@@ -11,8 +11,10 @@ using AgentHub.Controls;
 using AgentHub.Services;
 using AgentHub.Services.Context;
 using AgentHub.Services.History;
+using AgentHub.Services.Instructions;
 using AgentHub.Services.Timeline;
 using Brush = System.Windows.Media.Brush;
+using MessageBox = System.Windows.MessageBox;
 using Brushes = System.Windows.Media.Brushes;
 using Button = System.Windows.Controls.Button;
 using Color = System.Windows.Media.Color;
@@ -48,14 +50,21 @@ public partial class TimelineWindow : Window
     private readonly List<(Border Card, string? LaneKey)> _cards = [];
     private readonly Dictionary<string, TimelineBranch> _branches = new(StringComparer.Ordinal);
     private string? _hoverKey, _pinnedKey, _statusBase;
-    // Prompts already read from a transcript, reused while its length is unchanged (a transcript can be tens of MB).
-    private readonly Dictionary<string, (long Length, List<HistoryEntry> Prompts)> _prompts = new(StringComparer.OrdinalIgnoreCase);
+    // Session cards by row key, so a report's evidence can jump to the session it names.
+    private readonly Dictionary<string, Border> _sessionCards = new(StringComparer.Ordinal);
     private int _generation;
     private bool _building;
     private string? _signature;
+    private TimelineModel? _model;
 
     /// <summary>Raised by a session card's "Open in History": the folder the session ran in and its transcript.</summary>
     public event Action<string, string>? HistoryRequested;
+
+    /// <summary>Raised by the report's "Add to CLAUDE.md…": rules to show in the user-wide Context editor with Apply boxes.</summary>
+    public event Action<ReviewSuggestion>? SuggestionsRequested;
+
+    /// <summary>Command that starts Claude Code for the review (from the configured agent, else <c>claude</c>).</summary>
+    public string ReviewCommand { get; set; } = "claude";
 
     public TimelineWindow(ProcessRunner runner, TimelineScope scope, string? archiveRoot)
     {
@@ -75,7 +84,7 @@ public partial class TimelineWindow : Window
         Loaded += async (_, _) => await RefreshAsync(first: true);
         _timer.Tick += async (_, _) => await RefreshAsync(first: false);
         _timer.Start();
-        Closed += (_, _) => _timer.Stop();
+        Closed += (_, _) => { _timer.Stop(); _reviewCts?.Cancel(); };
         // A click that reaches the scroller hit no lane and no card header: it clears a pinned highlight, as does Escape.
         Scroller.MouseLeftButtonUp += (_, e) => { if (!IsInsideCard(e.OriginalSource as DependencyObject)) Pin(null); };
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape && _pinnedKey is not null) { Pin(null); e.Handled = true; } };
@@ -103,6 +112,8 @@ public partial class TimelineWindow : Window
                 return TimelineBuilder.Build(sessions, commits, tips, DateTimeOffset.UtcNow);
             });
             if (generation != _generation) return;
+            _model = model;
+            ReviewBtn.IsEnabled = _reviewCts is not null || model.Rows.Count > 0;
 
             var signature = Signature(model);
             if (forced || signature != _signature)
@@ -114,7 +125,7 @@ public partial class TimelineWindow : Window
                 ? ""
                 : $"Read at {DateTime.Now:HH:mm:ss} from {(_scope.IsGit ? "git log and " : "")}the transcripts of {model.SessionCount} session{(model.SessionCount == 1 ? "" : "s")}. " +
                   "A commit belongs to the session running when it was made; with several, to the one whose transcript names its hash.";
-            if (ActiveKey is null) StatusText.Text = _statusBase;
+            if (ActiveKey is null && _reviewCts is null) StatusText.Text = _statusBase;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -169,6 +180,7 @@ public partial class TimelineWindow : Window
         foreach (var b in model.Branches) _branches[b.Key] = b;
         _gutters.Clear();
         _cards.Clear();
+        _sessionCards.Clear();
         RowsPanel.Children.Clear();
         foreach (var row in model.Rows)
         {
@@ -188,6 +200,7 @@ public partial class TimelineWindow : Window
                 Grid.SetColumn(left, 1);
                 grid.Children.Add(left);
                 _cards.Add((left, row.LaneKey));
+                if (row.Kind == TimelineRowKind.Session) _sessionCards[row.Key] = left;
             }
             if (row.Commits.Count > 0)
             {
@@ -239,7 +252,8 @@ public partial class TimelineWindow : Window
             card.Opacity = key is null || lit ? 1 : 0.4;
         }
 
-        if (key is null) StatusText.Text = _statusBase ?? "";
+        if (_reviewCts is not null) { }
+        else if (key is null) StatusText.Text = _statusBase ?? "";
         else if (_branches.TryGetValue(key, out var b))
         {
             var sessions = _cards.Count(c => c.LaneKey == key && c.Card.Tag is not null && Grid.GetColumn(c.Card) == 1);
@@ -424,18 +438,11 @@ public partial class TimelineWindow : Window
         var reading = new TextBlock { Text = "Reading transcript…", Foreground = Dim, FontSize = 11, Margin = new Thickness(0, 2, 0, 4) };
         target.Children.Add(reading);
 
-        List<HistoryEntry> prompts;
+        IReadOnlyList<HistoryEntry> prompts;
         try
         {
-            long length;
-            try { length = new FileInfo(path).Length; } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { length = -1; }
-            if (_prompts.TryGetValue(path, out var cached) && cached.Length == length) prompts = cached.Prompts;
-            else
-            {
-                prompts = await Task.Run(() => SessionHistoryReader.ReadEntries(path, session.Summary.Agent).Entries
-                    .Where(e => e.Kind == HistoryKind.Prompt && !e.IsSubAgent).ToList());
-                _prompts[path] = (length, prompts);
-            }
+            // One shared cache with the review, so an expanded card and a review read a transcript once between them.
+            prompts = (await Task.Run(() => TranscriptTexts.Read(path, session.Summary.Agent))).Prompts;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -465,6 +472,201 @@ public partial class TimelineWindow : Window
             });
             target.Children.Add(line);
         }
+    }
+
+    // ---- review: Claude Code reads a digest of the timeline and says what to do differently ----
+
+    private static readonly Brush ScoreGood = Frozen("#86EFAC"), ScoreMid = Frozen("#FCD34D"), ScorePoor = Frozen("#FCA5A5"), Accent = Frozen("#2FD4F5");
+    private static readonly Brush EvidenceBack = Frozen("#0E1622"), ReportCardBack = Frozen("#E6121A27");
+    private CancellationTokenSource? _reviewCts;
+    private TimelineReviewResult? _review;
+
+    private async void Review_Click(object sender, RoutedEventArgs e)
+    {
+        if (_reviewCts is { } running)
+        {
+            running.Cancel();
+            return;
+        }
+        if (_model is not { } model) return;
+
+        var cts = new CancellationTokenSource();
+        _reviewCts = cts;
+        ReviewBtn.Content = "■ Cancel review";
+        var started = DateTime.Now;
+        var stage = "Starting…";
+        void Tick() => StatusText.Text = $"Review: {stage} {(int)(DateTime.Now - started).TotalSeconds} s. Reading the transcripts takes seconds; Claude Code a minute or a few.";
+        var ticker = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        ticker.Tick += (_, _) => Tick();
+        Tick();
+        ticker.Start();
+        var progress = new Progress<string>(s => { stage = s; Tick(); });
+        try
+        {
+            var result = await TimelineReview.RunAsync(_runner, ReviewCommand, _scope, model, progress, cts.Token);
+            _review = result;
+            ShowReport(result);
+            StatusText.Text = $"Review done in {(int)(DateTime.Now - started).TotalSeconds} s. Report saved to {result.ReportPath}";
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText.Text = "Review cancelled.";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            StatusText.Text = "Review failed.";
+            MessageBox.Show(this, ex.Message, "AgentHub - Timeline review", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            ticker.Stop();
+            _reviewCts = null;
+            cts.Dispose();
+            ReviewBtn.Content = "✨ Review";
+            ReviewBtn.IsEnabled = _model is { Rows.Count: > 0 };
+        }
+    }
+
+    private void ShowReport(TimelineReviewResult result)
+    {
+        var report = result.Report;
+        ReportBody.Children.Clear();
+        ReportMeta.Text = $"{_scope.Name} · {DateTime.Now:ddd d MMM HH:mm} · Claude Code read a digest of {report.Facts.Checks.Count} checks, the sessions and the branches";
+
+        if (report.Summary.Length > 0)
+            ReportBody.Children.Add(new TextBlock { Text = report.Summary, Foreground = Body, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) });
+
+        ReportBody.Children.Add(PartCard("A", "You and Claude", report.PartA, result));
+        ReportBody.Children.Add(PartCard("B", "GitHub cycle", report.PartB, result));
+
+        var adds = ReportCard();
+        var addsStack = (StackPanel)adds.Child;
+        addsStack.Children.Add(new TextBlock { Text = "RULES TO ADD TO YOUR CLAUDE.md", Foreground = Dim, FontSize = 10, FontWeight = FontWeights.Bold });
+        if (report.Additions.Count == 0)
+            addsStack.Children.Add(new TextBlock { Text = "None suggested: your file already covers what went wrong, or nothing did.", Foreground = Muted, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) });
+        foreach (var a in report.Additions)
+        {
+            addsStack.Children.Add(new TextBlock { Text = a.Title, Foreground = Text, FontSize = 12, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 2) });
+            if (a.Why.Length > 0) addsStack.Children.Add(new TextBlock { Text = a.Why, Foreground = Muted, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 3) });
+            addsStack.Children.Add(new Border
+            {
+                Background = EvidenceBack, CornerRadius = new CornerRadius(5), Padding = new Thickness(8, 4, 8, 4),
+                Child = new TextBlock { Text = a.Markdown.Trim(), Foreground = Body, FontFamily = Mono, FontSize = 11, TextWrapping = TextWrapping.Wrap }
+            });
+        }
+        ReportBody.Children.Add(adds);
+        AddRulesBtn.IsEnabled = report.Additions.Count > 0;
+
+        ReportPanel.Visibility = Visibility.Visible;
+    }
+
+    private static Border ReportCard() => new()
+    {
+        Background = ReportCardBack, BorderBrush = CardBorder, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8),
+        Padding = new Thickness(12, 9, 12, 10), Margin = new Thickness(0, 0, 0, 10), Child = new StackPanel()
+    };
+
+    private Border PartCard(string letter, string title, ReviewPart part, TimelineReviewResult result)
+    {
+        var card = ReportCard();
+        var stack = (StackPanel)card.Child;
+
+        var head = new DockPanel { LastChildFill = true };
+        var score = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(12, 0, 0, 0) };
+        DockPanel.SetDock(score, Dock.Right);
+        var scoreBrush = part.Score is { } s ? s >= 8 ? ScoreGood : s >= 5 ? ScoreMid : ScorePoor : Dim;
+        score.Children.Add(new TextBlock { Text = part.Score is { } sc ? $"{sc}/10" : "–", Foreground = scoreBrush, FontSize = 22, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Right });
+        score.Children.Add(new TextBlock { Text = part.ScoreSource, Foreground = Dim, FontSize = 10, HorizontalAlignment = HorizontalAlignment.Right, ToolTip = letter == "A"
+            ? "Claude Code's judgement of how the sessions were run; an inference from the digest, not a measurement"
+            : "Computed by AgentHub from its checks over git and GitHub (share of items passing each applicable check, averaged); the findings are Claude Code's" });
+        head.Children.Add(score);
+        var titles = new StackPanel();
+        titles.Children.Add(new TextBlock { Text = $"PART {letter} · {title.ToUpperInvariant()}", Foreground = Dim, FontSize = 10, FontWeight = FontWeights.Bold });
+        if (part.Verdict.Length > 0) titles.Children.Add(new TextBlock { Text = part.Verdict, Foreground = Text, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
+        head.Children.Add(titles);
+        stack.Children.Add(head);
+
+        if (part.Findings.Count == 0)
+            stack.Children.Add(new TextBlock { Text = "No findings.", Foreground = Muted, FontSize = 11, Margin = new Thickness(0, 8, 0, 0) });
+        var n = 1;
+        foreach (var f in part.Findings)
+        {
+            var finding = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+            var line = new WrapPanel();
+            line.Children.Add(new TextBlock { Text = $"{n++}. {f.What}", Foreground = Text, FontSize = 12, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, MaxWidth = 330, Margin = new Thickness(0, 0, 8, 0) });
+            line.Children.Add(Badge(TimelineReview.Who(f.Who), f.Who == "claude" ? ClaudeBadge : f.Who == "you" ? CodexBadge : ChipBack, Text));
+            finding.Children.Add(line);
+            if (f.Evidence.Length > 0) finding.Children.Add(EvidenceLine(f.Evidence, result));
+            if (f.Instead.Length > 0)
+            {
+                var instead = new TextBlock { Foreground = Body, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 3, 0, 0) };
+                instead.Inlines.Add(new Run("Instead: ") { Foreground = Muted });
+                instead.Inlines.Add(new Run(f.Instead));
+                finding.Children.Add(instead);
+            }
+            stack.Children.Add(finding);
+        }
+        return card;
+    }
+
+    // Evidence in mono; a session id it names (S12) is a link that scrolls to that session's card and flashes it.
+    private TextBlock EvidenceLine(string evidence, TimelineReviewResult result)
+    {
+        var block = new TextBlock { Foreground = Muted, FontFamily = Mono, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 3, 0, 0) };
+        var at = 0;
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(evidence, @"\bS\d+\b"))
+        {
+            if (m.Index > at) block.Inlines.Add(new Run(evidence[at..m.Index]));
+            if (result.Digest.SessionRowKeys.TryGetValue(m.Value, out var key) && _sessionCards.ContainsKey(key))
+            {
+                var link = new Run(m.Value) { Foreground = Accent, TextDecorations = TextDecorations.Underline, Cursor = Cursors.Hand, ToolTip = "Show this session in the timeline" };
+                link.MouseLeftButtonUp += (_, e) => { JumpToSession(key); e.Handled = true; };
+                block.Inlines.Add(link);
+            }
+            else block.Inlines.Add(new Run(m.Value));
+            at = m.Index + m.Length;
+        }
+        if (at < evidence.Length) block.Inlines.Add(new Run(evidence[at..]));
+        return block;
+    }
+
+    private void JumpToSession(string key)
+    {
+        if (!_sessionCards.TryGetValue(key, out var card)) return;
+        card.BringIntoView();
+        card.BorderBrush = Accent;
+        card.BorderThickness = new Thickness(2);
+        var flash = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+        flash.Tick += (_, _) => { flash.Stop(); ApplyHighlight(); };
+        flash.Start();
+    }
+
+    private void CloseReport_Click(object sender, RoutedEventArgs e) => ReportPanel.Visibility = Visibility.Collapsed;
+
+    private void AddRules_Click(object sender, RoutedEventArgs e)
+    {
+        if (_review is not { } review) return;
+        var file = Services.Instructions.InstructionFiles.GlobalFiles().First(f => f.Cli == Services.Instructions.InstructionCli.ClaudeCode).Path;
+        string text;
+        try { text = File.Exists(file) ? File.ReadAllText(file) : ""; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { text = ""; }
+        var suggestion = TimelineReview.ToSuggestion(review.Report, text);
+        if (suggestion.Edits.Count == 0)
+        {
+            StatusText.Text = suggestion.Summary;
+            return;
+        }
+        SuggestionsRequested?.Invoke(suggestion);
+    }
+
+    private void OpenReport_Click(object sender, RoutedEventArgs e) => OpenFile(_review?.ReportPath);
+    private void OpenDigest_Click(object sender, RoutedEventArgs e) => OpenFile(_review?.DigestPath);
+
+    private void OpenFile(string? path)
+    {
+        if (path is null || !File.Exists(path)) return;
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true }); }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { StatusText.Text = "Could not open " + path + ": " + ex.Message; }
     }
 
     /// <summary>Time, hash and subject on one wrapping line; the branch follows the subject only when the card spans several.</summary>
