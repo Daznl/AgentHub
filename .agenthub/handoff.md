@@ -2,7 +2,7 @@
 
 **Updated:** 2026-11-04
 **Branch with the newest work:** `feature/timeline` (local only; built on `feature/context-review`, which is built on `main`)
-**Next task:** Daniel tests Timeline phase 1 in the app (section 3); then his answers decide phase 2
+**Next task:** phase 1 approved by Daniel on 2026-11-04 ("looks good, leave it as it is"). Next: push / merge when he asks; phase 2 needs his answers (section 3)
 
 Read `README.md`, `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` first; `AGENTS.md` has the engineering rules.
 
