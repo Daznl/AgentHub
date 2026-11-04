@@ -56,6 +56,11 @@ public partial class TimelineWindow : Window
     private bool _building;
     private string? _signature;
     private TimelineModel? _model;
+    // Squash merges leave no trace in git's graph: the pull requests (read once, and again on Refresh) and a change
+    // matcher say which trunk commit brought each such branch in, so its lane curves back like any other.
+    private List<PullRequestFact>? _pullRequests;
+    private bool _pullRequestsRead;
+    private readonly SquashMatcher _squashes;
 
     /// <summary>Raised by a session card's "Open in History": the folder the session ran in and its transcript.</summary>
     public event Action<string, string>? HistoryRequested;
@@ -73,6 +78,7 @@ public partial class TimelineWindow : Window
         _runner = runner;
         _scope = scope;
         _archiveRoot = archiveRoot;
+        _squashes = new SquashMatcher(runner, scope);
         Title = $"AgentHub - Timeline - {scope.Name}";
         HeadingText.Text = $"Timeline · {scope.Name}";
         SubheadingText.Text = scope.Root;
@@ -86,9 +92,18 @@ public partial class TimelineWindow : Window
         _timer.Start();
         Closed += (_, _) => { _timer.Stop(); _reviewCts?.Cancel(); };
         // A click that reaches the scroller hit no lane and no card header: it clears a pinned highlight, as does Escape.
+        // Escape with nothing pinned closes the window, like the ✕ Close button.
         Scroller.MouseLeftButtonUp += (_, e) => { if (!IsInsideCard(e.OriginalSource as DependencyObject)) Pin(null); };
-        PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape && _pinnedKey is not null) { Pin(null); e.Handled = true; } };
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Escape) return;
+            if (_pinnedKey is not null) Pin(null);
+            else Close();
+            e.Handled = true;
+        };
     }
+
+    private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
     /// <summary>The repository's main folder (or the plain folder); one window per root.</summary>
     public string Root => _scope.Root;
@@ -106,10 +121,16 @@ public partial class TimelineWindow : Window
         {
             var commits = await TimelineSource.ReadCommitsAsync(_runner, _scope);
             var tips = await TimelineSource.ReadBranchTipsAsync(_runner, _scope);
+            if (_scope.IsGit && (!_pullRequestsRead || forced))
+            {
+                _pullRequests = await TimelineSource.ReadPullRequestsAsync(_runner, _scope);
+                _pullRequestsRead = true;
+            }
+            var squashes = await _squashes.MatchAsync(commits, BranchGraph.OpenTips(commits, tips), SquashMatcher.FromPullRequests(_pullRequests, commits));
             var model = await Task.Run(() =>
             {
                 var sessions = TimelineSource.ReadSessions(_scope, _archiveRoot);
-                return TimelineBuilder.Build(sessions, commits, tips, DateTimeOffset.UtcNow);
+                return TimelineBuilder.Build(sessions, commits, tips, DateTimeOffset.UtcNow, squashes);
             });
             if (generation != _generation) return;
             _model = model;
@@ -264,7 +285,7 @@ public partial class TimelineWindow : Window
             var sessions = _cards.Count(c => c.LaneKey == key && c.Card.Tag is not null && Grid.GetColumn(c.Card) == 1);
             var commits = b.Commits.Count;
             StatusText.Text = $"{b.Name}: {sessions} session{(sessions == 1 ? "" : "s")}, {commits} commit{(commits == 1 ? "" : "s")}" +
-                              (b.IsTrunk ? "" : b.MergesBack ? ", merged" : ", not merged") + (b.IsLocalOnly ? ", not pushed" : "") +
+                              (b.IsTrunk ? "" : b.IsSquash ? ", squash-merged" : b.MergesBack ? ", merged" : ", not merged") + (b.IsLocalOnly ? ", not pushed" : "") +
                               (_pinnedKey is null ? " · click the line to keep it lit" : " · click empty space or press Esc to clear");
         }
     }

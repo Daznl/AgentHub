@@ -31,7 +31,8 @@
                         ToolTip="Ask Claude Code about the GitHub cycle: branch names, commits straight on main, merge commits versus squashes, branches left after merging, self-merged and unreviewed pull requests. Scored out of 10 by AgentHub's own checks, findings by Claude, with rules to add to your CLAUDE.md. Only a condensed digest is sent; the report is saved under C:\data\agenthub\timeline."
                         Padding="10,5" Margin="0,0,8,0" FontSize="12" />
                 <Button x:Name="RefreshBtn" Click="Refresh_Click" Content="↻ Refresh" ToolTip="Read the commits and transcripts again now (they are re-read every 20 seconds while this window is open)"
-                        Padding="10,5" Margin="0" FontSize="12" />
+                        Padding="10,5" Margin="0,0,8,0" FontSize="12" />
+                <Button Click="Close_Click" Content="✕ Close" ToolTip="Close the timeline (Esc does too)" Padding="10,5" Margin="0" FontSize="12" />
             </StackPanel>
             <StackPanel Margin="0,0,12,0">
                 <TextBlock x:Name="HeadingText" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />

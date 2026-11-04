@@ -21,6 +21,7 @@ MainWindow (WPF)
     +-- RepoContextService ---- .agenthub/handoff.md + Explorer/browser
     +-- ContextWindow --------- InstructionFiles (CLAUDE.md / AGENTS.md / GEMINI.md) + InstructionReview (claude -p via ClaudePrint)
     +-- TimelineWindow -------- TimelineSource (git log, for-each-ref, gh pr list, transcripts) -> TimelineBuilder (branch graph, attribution)
+    |     +-- SquashMatcher     squash merges (no merge commit): pull request head -> squash commit, else git diff --numstat match
     |     +-- TimelineReview     checks + digest -> ClaudePrint -> scored report; rules go to ContextWindow as review hunks
     |
     +-- Multi-Session Cockpit (WPF Grid + Splitters)
