@@ -1,8 +1,8 @@
 # AgentHub Handoff Context
 
 **Updated:** 2026-11-04 (Timeline review session, afternoon)
-**Branch with the newest work:** `feature/timeline-review` (local, **not pushed**, built on `main` `4ee8905`): ✨ Review on the Timeline window (section 3a). The taskbar build now runs this branch (pid 9440, opened on this repo's timeline); **Daniel has not yet clicked Review in the app**, only seen the live run's report.
-**Next task:** Daniel's verdict on the review (report at `C:\data\agenthub\timeline\diag-report.md`, digest beside it); then push and merge `feature/timeline-review` when he asks. Queued after that: republish the taskbar build (section 1), Timeline phase 2 (section 3), the follow-ups (section 4).
+**Branch with the newest work:** `feature/timeline-review` = `origin/feature/timeline-review` (**pushed 2026-11-04 13:52**, built on `main` `4ee8905`, eleven commits, not merged): ✨ two timeline reviews (section 3a), lane colours by branch order, unmerged/unpushed counts, imported-history root fix (section 3). The taskbar build runs it (`4036f7f`). Daniel ran **✨ You & Claude** in the app once; Claude did not see the result.
+**Next task:** merge `feature/timeline-review` to `main` when Daniel says so (check CI on the branch first: `gh run list --branch feature/timeline-review`), then delete the branch. Queued after that: Timeline phase 2 (section 3), the follow-ups (section 4).
 
 Read `README.md`, `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` first; `AGENTS.md` has the engineering rules.
 
@@ -13,11 +13,11 @@ Read `README.md`, `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` first; `AGENTS.md
 | What | State |
 |---|---|
 | `main` = `origin/main` `d53ebf3` | Pushed 2026-11-04 as a fast-forward of `feature/timeline` (which contained `feature/context-review`). CI (`build.yml`) green on all three branches. Holds: ✨ Review of context files, 🌳 Timeline phase 1, dark window chrome everywhere, plus the 2026-11-03 work (session picker PR #6, 📄 Context / 📁 Repo context editors, two-row pane header, three-step launcher, replaced-session event fix). |
-| `feature/timeline-review` | Local only, eight commits on top of `main` (`e8cf72e` the feature … `d39d647` the reports column). Tests 178 pass, 4 live skipped. Not pushed, not merged: wait for Daniel. |
+| `feature/timeline-review` | Pushed (`origin/feature/timeline-review`), eleven commits on top of `main` (`e8cf72e` the feature … `4036f7f` the tree fixes). Tests 184 pass, 4 live skipped. Not merged: wait for Daniel. |
 | `feature/context-review`, `feature/timeline` | Pushed, merged, finished. Safe to delete on GitHub when Daniel wants. |
 | ✨ Review | Daniel tested the first version (timed out on the 91 KB De Beers `CLAUDE.md`); the fixed version passed live tests (91 KB in ~170 s) but **Daniel has not retried it in the app**. |
 | 🌳 Timeline | **Approved by Daniel 2026-11-04** ("looks good, leave it as it is") after four rounds of corrections, all in `main` (section 3). |
-| Taskbar build | `src\AgentHub\bin\Release\net8.0-windows\win-x64\publish` (inside the repo), updated with `C:\data\agenthub\publish-local.ps1 -Repo <repo>`. **Republished 2026-11-04 13:12 from `feature/timeline-review` `d39d647`** (Daniel asked), so it runs an unmerged branch until that merges: Review, Timeline, timeline review, dark chrome all in. The `*.old-*` leftovers were deleted (no instance was running). Daniel's instance from it: pid 9440, opened on this repo's timeline. Republish only when Daniel asks. |
+| Taskbar build | `src\AgentHub\bin\Release\net8.0-windows\win-x64\publish` (inside the repo), updated with `C:\data\agenthub\publish-local.ps1 -Repo <repo>`. **Republished 2026-11-04 13:53 from `feature/timeline-review` `4036f7f`** (Daniel asked), so it runs an unmerged branch until that merges: Review, Timeline, timeline review, dark chrome all in. The `*.old-*` leftovers were deleted (no instance was running). Daniel's instance from it: pid 9440, opened on this repo's timeline. Republish only when Daniel asks. |
 | Test builds | `C:\data\agenthub\build-test1` … `build-test17`, `build-check`: throwaway. `build-test16` = `main`; `build-test17` = `feature/timeline-review` (running, pid 17648). Delete the folders once no instance runs from them. |
 
 Pushing: the repo is `Daznl/AgentHub` (Daniel's personal account). `gh auth switch -u Daznl`, push, then `gh auth switch -u DanielWallisBarker` straight after. Push or merge only when Daniel asks. Fast-forward is fine when the branch was built on `main`; check `origin/main` first (`git fetch`, `git log main..origin/main`).
