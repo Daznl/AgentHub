@@ -113,7 +113,7 @@ public partial class TimelineWindow : Window
             });
             if (generation != _generation) return;
             _model = model;
-            ReviewBtn.IsEnabled = _reviewCts is not null || model.Rows.Count > 0;
+            UpdateReviewButtons();
 
             var signature = Signature(model);
             if (forced || signature != _signature)
@@ -478,21 +478,64 @@ public partial class TimelineWindow : Window
 
     private static readonly Brush ScoreGood = Frozen("#86EFAC"), ScoreMid = Frozen("#FCD34D"), ScorePoor = Frozen("#FCA5A5"), Accent = Frozen("#2FD4F5");
     private static readonly Brush EvidenceBack = Frozen("#0E1622"), ReportCardBack = Frozen("#E6121A27");
-    private CancellationTokenSource? _reviewCts;
-    private TimelineReviewResult? _review;
 
-    private async void Review_Click(object sender, RoutedEventArgs e)
+    /// <summary>One review's button, panel and state; there is one per <see cref="ReviewKind"/>.</summary>
+    private sealed class ReviewSlot
     {
-        if (_reviewCts is { } running)
+        public required ReviewKind Kind { get; init; }
+        public required Button Button { get; init; }
+        public required string Label { get; init; }
+        public required Border Panel { get; init; }
+        public required StackPanel Body { get; init; }
+        public required TextBlock Meta { get; init; }
+        public required Button AddRules { get; init; }
+        public CancellationTokenSource? Cts { get; set; }
+        public TimelineReviewResult? Result { get; set; }
+    }
+
+    private ReviewSlot[] _slots = [];
+    private CancellationTokenSource? _reviewCts; // the one review running; only one at a time, so the status line is unambiguous
+
+    private ReviewSlot Slot(ReviewKind kind)
+    {
+        if (_slots.Length == 0)
+            _slots =
+            [
+                new ReviewSlot { Kind = ReviewKind.Interaction, Button = ReviewSessionsBtn, Label = "✨ You & Claude", Panel = SessionsReportPanel, Body = SessionsReportBody, Meta = SessionsReportMeta, AddRules = SessionsAddRulesBtn },
+                new ReviewSlot { Kind = ReviewKind.GitHub, Button = ReviewGitHubBtn, Label = "✨ GitHub cycle", Panel = GitHubReportPanel, Body = GitHubReportBody, Meta = GitHubReportMeta, AddRules = GitHubAddRulesBtn },
+            ];
+        return _slots.First(s => s.Kind == kind);
+    }
+
+    private void UpdateReviewButtons()
+    {
+        var canStart = _reviewCts is null && _model is { Rows.Count: > 0 };
+        foreach (var kind in new[] { ReviewKind.Interaction, ReviewKind.GitHub })
+        {
+            var slot = Slot(kind);
+            slot.Button.IsEnabled = canStart || slot.Cts is not null;
+            slot.Button.Content = slot.Cts is not null ? "■ Cancel" : slot.Label;
+        }
+    }
+
+    private async void ReviewSessions_Click(object sender, RoutedEventArgs e) => await RunReviewAsync(ReviewKind.Interaction);
+    private async void ReviewGitHub_Click(object sender, RoutedEventArgs e) => await RunReviewAsync(ReviewKind.GitHub);
+
+    private async Task RunReviewAsync(ReviewKind kind)
+    {
+        var slot = Slot(kind);
+        if (slot.Cts is { } running)
         {
             running.Cancel();
             return;
         }
-        if (_model is not { } model) return;
+        if (_reviewCts is not null || _model is not { } model) return;
 
         var cts = new CancellationTokenSource();
+        slot.Cts = cts;
         _reviewCts = cts;
-        ReviewBtn.Content = "■ Cancel review";
+        UpdateReviewButtons();
+        var title = TimelineReview.Title(kind);
         var started = DateTime.Now;
         var progress = new ReviewProgress("Starting…");
         var claudeFrom = (DateTime?)null;
@@ -502,15 +545,15 @@ public partial class TimelineWindow : Window
             var elapsed = (int)(DateTime.Now - started).TotalSeconds;
             if (progress.Estimate is not { } estimate || claudeFrom is not { } from)
             {
-                StatusText.Text = $"Review: {progress.Stage} {elapsed} s. Reading the transcripts takes seconds.";
+                StatusText.Text = $"{title} review: {progress.Stage} {elapsed} s. Reading the transcripts takes seconds.";
                 return;
             }
             var inClaude = (int)(DateTime.Now - from).TotalSeconds;
             var size = $"{progress.DigestChars / 1024.0:0} KB digest";
             var about = ReviewTimings.Describe(estimate);
             StatusText.Text = inClaude <= estimate.TotalSeconds
-                ? $"Review: {progress.Stage} {inClaude} s of {about} for a {size} (estimate from {progress.EstimateBasis}) · {elapsed} s in all"
-                : $"Review: {progress.Stage} {inClaude} s, past the {about} estimated for a {size}; still running · {elapsed} s in all";
+                ? $"{title} review: {progress.Stage} {inClaude} s of {about} for a {size} (estimate from {progress.EstimateBasis}) · {elapsed} s in all"
+                : $"{title} review: {progress.Stage} {inClaude} s, past the {about} estimated for a {size}; still running · {elapsed} s in all";
         }
         var ticker = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         ticker.Tick += (_, _) => Tick();
@@ -519,42 +562,43 @@ public partial class TimelineWindow : Window
         var reporter = new Progress<ReviewProgress>(p => { progress = p; if (p.Estimate is not null) claudeFrom ??= DateTime.Now; Tick(); });
         try
         {
-            var result = await TimelineReview.RunAsync(_runner, ReviewCommand, _scope, model, reporter, cts.Token);
-            _review = result;
-            ShowReport(result);
+            var result = await TimelineReview.RunAsync(_runner, ReviewCommand, _scope, model, kind, reporter, cts.Token);
+            slot.Result = result;
+            ShowReport(slot, result);
             var estimate = progress.Estimate is { } est ? $" (estimated {ReviewTimings.Describe(est)})" : "";
-            StatusText.Text = $"Review done in {(int)(DateTime.Now - started).TotalSeconds} s, {(int)result.ClaudeTime.TotalSeconds} s of it Claude Code on a {progress.DigestChars / 1024.0:0} KB digest{estimate}. Report saved to {result.ReportPath}";
+            StatusText.Text = $"{title} review done in {(int)(DateTime.Now - started).TotalSeconds} s, {(int)result.ClaudeTime.TotalSeconds} s of it Claude Code on a {progress.DigestChars / 1024.0:0} KB digest{estimate}. Report saved to {result.ReportPath}";
         }
         catch (OperationCanceledException)
         {
-            StatusText.Text = "Review cancelled.";
+            StatusText.Text = $"{title} review cancelled.";
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
         {
-            StatusText.Text = "Review failed.";
+            StatusText.Text = $"{title} review failed.";
             MessageBox.Show(this, ex.Message, "AgentHub - Timeline review", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
         {
             ticker.Stop();
+            slot.Cts = null;
             _reviewCts = null;
             cts.Dispose();
-            ReviewBtn.Content = "✨ Review";
-            ReviewBtn.IsEnabled = _model is { Rows.Count: > 0 };
+            UpdateReviewButtons();
         }
     }
 
-    private void ShowReport(TimelineReviewResult result)
+    private void ShowReport(ReviewSlot slot, TimelineReviewResult result)
     {
         var report = result.Report;
-        ReportBody.Children.Clear();
-        ReportMeta.Text = $"{_scope.Name} · {DateTime.Now:ddd d MMM HH:mm} · Claude Code read a digest of {report.Facts.Checks.Count} checks, the sessions and the branches";
+        slot.Body.Children.Clear();
+        var checks = report.Facts.Checks.Count(c => c.Kind == report.Kind);
+        slot.Meta.Text = $"{_scope.Name} · {DateTime.Now:ddd d MMM HH:mm} · Claude Code read {checks} checks, " +
+                         (report.Kind == ReviewKind.Interaction ? "the sessions with your prompts, and your CLAUDE.md" : "the branches, pull requests and sessions, and your CLAUDE.md");
 
         if (report.Summary.Length > 0)
-            ReportBody.Children.Add(new TextBlock { Text = report.Summary, Foreground = Body, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) });
+            slot.Body.Children.Add(new TextBlock { Text = report.Summary, Foreground = Body, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) });
 
-        ReportBody.Children.Add(PartCard("A", "You and Claude", report.PartA, result));
-        ReportBody.Children.Add(PartCard("B", "GitHub cycle", report.PartB, result));
+        slot.Body.Children.Add(PartCard(report.Kind, report.Part, result));
 
         var adds = ReportCard();
         var addsStack = (StackPanel)adds.Child;
@@ -571,10 +615,10 @@ public partial class TimelineWindow : Window
                 Child = new TextBlock { Text = a.Markdown.Trim(), Foreground = Body, FontFamily = Mono, FontSize = 11, TextWrapping = TextWrapping.Wrap }
             });
         }
-        ReportBody.Children.Add(adds);
-        AddRulesBtn.IsEnabled = report.Additions.Count > 0;
+        slot.Body.Children.Add(adds);
+        slot.AddRules.IsEnabled = report.Additions.Count > 0;
 
-        ReportPanel.Visibility = Visibility.Visible;
+        slot.Panel.Visibility = Visibility.Visible;
     }
 
     private static Border ReportCard() => new()
@@ -583,7 +627,7 @@ public partial class TimelineWindow : Window
         Padding = new Thickness(12, 9, 12, 10), Margin = new Thickness(0, 0, 0, 10), Child = new StackPanel()
     };
 
-    private Border PartCard(string letter, string title, ReviewPart part, TimelineReviewResult result)
+    private Border PartCard(ReviewKind kind, ReviewPart part, TimelineReviewResult result)
     {
         var card = ReportCard();
         var stack = (StackPanel)card.Child;
@@ -593,12 +637,12 @@ public partial class TimelineWindow : Window
         DockPanel.SetDock(score, Dock.Right);
         var scoreBrush = part.Score is { } s ? s >= 8 ? ScoreGood : s >= 5 ? ScoreMid : ScorePoor : Dim;
         score.Children.Add(new TextBlock { Text = part.Score is { } sc ? $"{sc}/10" : "–", Foreground = scoreBrush, FontSize = 22, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Right });
-        score.Children.Add(new TextBlock { Text = part.ScoreSource, Foreground = Dim, FontSize = 10, HorizontalAlignment = HorizontalAlignment.Right, ToolTip = letter == "A"
+        score.Children.Add(new TextBlock { Text = part.ScoreSource, Foreground = Dim, FontSize = 10, HorizontalAlignment = HorizontalAlignment.Right, ToolTip = kind == ReviewKind.Interaction
             ? "Claude Code's judgement of how the sessions were run; an inference from the digest, not a measurement"
             : "Computed by AgentHub from its checks over git and GitHub (share of items passing each applicable check, averaged); the findings are Claude Code's" });
         head.Children.Add(score);
         var titles = new StackPanel();
-        titles.Children.Add(new TextBlock { Text = $"PART {letter} · {title.ToUpperInvariant()}", Foreground = Dim, FontSize = 10, FontWeight = FontWeights.Bold });
+        titles.Children.Add(new TextBlock { Text = TimelineReview.Title(kind).ToUpperInvariant(), Foreground = Dim, FontSize = 10, FontWeight = FontWeights.Bold });
         if (part.Verdict.Length > 0) titles.Children.Add(new TextBlock { Text = part.Verdict, Foreground = Text, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
         head.Children.Add(titles);
         stack.Children.Add(head);
@@ -658,11 +702,14 @@ public partial class TimelineWindow : Window
         flash.Start();
     }
 
-    private void CloseReport_Click(object sender, RoutedEventArgs e) => ReportPanel.Visibility = Visibility.Collapsed;
+    // The panel buttons carry their review kind in Tag ("sessions" or "github").
+    private ReviewSlot SlotOf(object sender) => Slot((sender as FrameworkElement)?.Tag as string == "github" ? ReviewKind.GitHub : ReviewKind.Interaction);
+
+    private void CloseReport_Click(object sender, RoutedEventArgs e) => SlotOf(sender).Panel.Visibility = Visibility.Collapsed;
 
     private void AddRules_Click(object sender, RoutedEventArgs e)
     {
-        if (_review is not { } review) return;
+        if (SlotOf(sender).Result is not { } review) return;
         var file = Services.Instructions.InstructionFiles.GlobalFiles().First(f => f.Cli == Services.Instructions.InstructionCli.ClaudeCode).Path;
         string text;
         try { text = File.Exists(file) ? File.ReadAllText(file) : ""; }
@@ -676,8 +723,8 @@ public partial class TimelineWindow : Window
         SuggestionsRequested?.Invoke(suggestion);
     }
 
-    private void OpenReport_Click(object sender, RoutedEventArgs e) => OpenFile(_review?.ReportPath);
-    private void OpenDigest_Click(object sender, RoutedEventArgs e) => OpenFile(_review?.DigestPath);
+    private void OpenReport_Click(object sender, RoutedEventArgs e) => OpenFile(SlotOf(sender).Result?.ReportPath);
+    private void OpenDigest_Click(object sender, RoutedEventArgs e) => OpenFile(SlotOf(sender).Result?.DigestPath);
 
     private void OpenFile(string? path)
     {

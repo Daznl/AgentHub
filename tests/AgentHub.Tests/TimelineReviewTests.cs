@@ -87,8 +87,8 @@ public class TimelineReviewTests(ITestOutputHelper output)
         Assert.Equal(["feat/x"], by["B4"].Offenders);                 // merged yet still a tip
         Assert.False(by["B5"].Applies);                                  // no pull requests known
         Assert.False(facts.HasPullRequests);
-        Assert.NotNull(facts.PartBScore);
-        Assert.Equal(4, facts.PartBChecks);
+        Assert.NotNull(facts.GitHubScore);
+        Assert.Equal(4, facts.GitHubChecks);
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public class TimelineReviewTests(ITestOutputHelper output)
         Assert.Equal(["#8 → feat/x"], by["B7"].Offenders);
         Assert.Equal(["#8"], by["B8"].Offenders);
         Assert.True(facts.HasPullRequests);
-        Assert.Equal(8, facts.PartBChecks);
+        Assert.Equal(8, facts.GitHubChecks);
     }
 
     [Fact]
@@ -135,7 +135,7 @@ public class TimelineReviewTests(ITestOutputHelper output)
             [feature.Summary.FilePath] = new([Prompt("build the thing\nplease", 2.1), Prompt("now test it", 2.5)], "Done: the thing is built and tested.")
         };
         var input = Input(model, tips, transcripts: transcripts);
-        var digest = TimelineReview.Build(input, TimelineReview.Compute(input));
+        var digest = TimelineReview.Build(input, TimelineReview.Compute(input), ReviewKind.Interaction);
         var text = digest.Text;
         output.WriteLine(text);
 
@@ -144,18 +144,20 @@ public class TimelineReviewTests(ITestOutputHelper output)
         Assert.Contains("docs/pipeline-status.md: absent", text);
         Assert.Contains("CLAUDE.md: 1.2 KB; headings: # Project | ## Where things stand", text);
         Assert.Contains("github facts: unavailable", text);
-        Assert.Contains("B2 Commits made straight on main", text);
+        Assert.Contains("A1 Sessions open longer than 4 h", text);
+        Assert.DoesNotContain("B2 Commits made straight on main", text);
         Assert.Contains("S2 · 2026-11-03", text);
         Assert.Contains("lane feat/x · 2 commits · 2 prompts · did not touch", text);
         Assert.Contains("build the thing please", text);
         Assert.Contains("last reply: Done: the thing is built and tested.", text);
         Assert.Contains("S1 · ", text);
         Assert.Contains("about: idle", text);                     // no transcript read for it: title only
-        Assert.Contains("feat/x: 2 commits", text);
-        Assert.Contains("merged by merge commit m000000", text);
+        var github = TimelineReview.Build(input, TimelineReview.Compute(input), ReviewKind.GitHub).Text;
+        Assert.Contains("feat/x: 2 commits", github);
+        Assert.Contains("merged by merge commit m000000", github);
         Assert.Contains("<outside-sessions>", text);
         Assert.Contains("o000000 docs: by hand", text);
-        Assert.Contains("Part B, the GitHub cycle", text);
+        Assert.Contains("The user and Claude:", text);
         Assert.DoesNotContain("pipeline projects", text);
         Assert.Contains("<user-claude-md>\n# Rules\n- be concise", text.Replace("\r\n", "\n"));
         Assert.Equal(feature.Summary.FilePath, digest.SessionRowKeys["S2"]);
@@ -171,7 +173,7 @@ public class TimelineReviewTests(ITestOutputHelper output)
         var transcripts = sessions.ToDictionary(s => s.Summary.FilePath, _ => new TranscriptText(prompts, new string('r', TimelineReview.ReplyChars)), StringComparer.OrdinalIgnoreCase);
         var input = Input(model, [Tip("main", "a000000")], transcripts: transcripts);
 
-        var digest = TimelineReview.Build(input, TimelineReview.Compute(input));
+        var digest = TimelineReview.Build(input, TimelineReview.Compute(input), ReviewKind.Interaction);
 
         Assert.True(digest.Text.Length <= TimelineReview.DigestBudget + 2000, $"digest is {digest.Text.Length} chars");
         Assert.Contains("S1 · ", digest.Text);
@@ -183,47 +185,93 @@ public class TimelineReviewTests(ITestOutputHelper output)
     [Fact]
     public void Pipeline_rules_only_go_in_when_the_project_has_pipeline_status()
     {
-        Assert.Contains("pipeline projects", TimelineReview.RulesFor(hasPipeline: true));
-        Assert.DoesNotContain("pipeline projects", TimelineReview.RulesFor(hasPipeline: false));
+        Assert.Contains("Pipeline projects", TimelineReview.RulesFor(ReviewKind.Interaction, hasPipeline: true));
+        Assert.Contains("Pipeline projects", TimelineReview.RulesFor(ReviewKind.GitHub, hasPipeline: true));
+        Assert.DoesNotContain("Pipeline projects", TimelineReview.RulesFor(ReviewKind.GitHub, hasPipeline: false));
+        Assert.DoesNotContain("Pipeline projects", TimelineReview.RulesFor(ReviewKind.Interaction, hasPipeline: false));
         var (model, tips, _, _) = Project();
         var input = Input(model, tips, pipeline: true);
-        Assert.Contains("present, so the pipeline-stage rules apply", TimelineReview.Build(input, TimelineReview.Compute(input)).Text);
+        Assert.Contains("present, so the pipeline-stage rules apply", TimelineReview.Build(input, TimelineReview.Compute(input), ReviewKind.Interaction).Text);
     }
 
     [Fact]
-    public void Reply_is_parsed_with_part_b_scored_from_the_checks()
+    public void Sessions_reply_is_parsed_with_claudes_score()
     {
         var (model, tips, _, _) = Project();
         var facts = TimelineReview.Compute(Input(model, tips));
         var json = """
-            {"summary":"Decent.","partA":{"score":7,"verdict":"Mostly fine.","findings":[
+            {"summary":"Decent.","score":7,"verdict":"Mostly fine.","findings":[
               {"what":"One session ran six hours.","evidence":"S1","instead":"Restart after the handoff.","who":"you"},
-              {"what":"Bad who.","evidence":"","instead":"","who":"nobody"}]},
-             "partB":{"verdict":"Direct commits.","findings":[{"what":"Commits straight on main.","evidence":"a100000, o000000","instead":"Branch and PR.","who":"both"}]},
+              {"what":"Bad who.","evidence":"","instead":"","who":"nobody"}],
              "additions":[{"title":"## Restart long sessions","markdown":"- After 4 hours, commit, rewrite the handoff and start a new session.","why":"S1 ran six hours."},
                           {"title":"Empty","markdown":"","why":"dropped"}]}
             """;
         using var doc = JsonDocument.Parse(json);
 
-        var report = TimelineReview.Parse(doc.RootElement, facts);
+        var report = TimelineReview.Parse(doc.RootElement, facts, ReviewKind.Interaction);
 
+        Assert.Equal(ReviewKind.Interaction, report.Kind);
         Assert.Equal("Decent.", report.Summary);
-        Assert.Equal(7, report.PartA.Score);
-        Assert.Equal("Claude's judgement", report.PartA.ScoreSource);
-        Assert.Equal(2, report.PartA.Findings.Count);
-        Assert.Equal("both", report.PartA.Findings[1].Who);
-        Assert.Equal(facts.PartBScore, report.PartB.Score);
-        Assert.Equal("from 4 checks", report.PartB.ScoreSource);
-        Assert.Equal("Direct commits.", report.PartB.Verdict);
+        Assert.Equal(7, report.Part.Score);
+        Assert.Equal("Claude's judgement", report.Part.ScoreSource);
+        Assert.Equal(2, report.Part.Findings.Count);
+        Assert.Equal("both", report.Part.Findings[1].Who);
         var addition = Assert.Single(report.Additions);
         Assert.Equal("Restart long sessions", addition.Title);
+    }
+
+    [Fact]
+    public void GitHub_reply_is_scored_from_the_checks_not_the_model()
+    {
+        var (model, tips, _, _) = Project();
+        var facts = TimelineReview.Compute(Input(model, tips));
+        var json = """{"summary":"Direct.","score":9,"verdict":"Direct commits.","findings":[{"what":"Commits straight on main.","evidence":"a100000, o000000","instead":"Branch and PR.","who":"both"}],"additions":[]}""";
+        using var doc = JsonDocument.Parse(json);
+
+        var report = TimelineReview.Parse(doc.RootElement, facts, ReviewKind.GitHub);
+
+        Assert.Equal(ReviewKind.GitHub, report.Kind);
+        Assert.Equal(facts.GitHubScore, report.Part.Score);
+        Assert.NotEqual(9, report.Part.Score);
+        Assert.Equal("from 4 checks", report.Part.ScoreSource);
+        Assert.Equal("Direct commits.", report.Part.Verdict);
+        Assert.Empty(report.Additions);
+    }
+
+    [Fact]
+    public void GitHub_digest_has_branches_and_pull_requests_but_no_prompts()
+    {
+        var (model, tips, feature, _) = Project();
+        var transcripts = new Dictionary<string, TranscriptText>(StringComparer.OrdinalIgnoreCase) { [feature.Summary.FilePath] = new([Prompt("secret prompt", 2.1)], "last reply text") };
+        var prs = new List<PullRequestFact> { new(7, "Feature x", "feat/x", "main", "daniel", "daniel", At(3), Full("m000000"), 0, false, "MERGED") };
+        var input = Input(model, tips, prs: prs, transcripts: transcripts);
+        var facts = TimelineReview.Compute(input);
+
+        var github = TimelineReview.Build(input, facts, ReviewKind.GitHub).Text;
+        var sessions = TimelineReview.Build(input, facts, ReviewKind.Interaction).Text;
+
+        Assert.Contains("<branches>", github);
+        Assert.Contains("<pull-requests>", github);
+        Assert.Contains("#7 \"Feature x\"", github);
+        Assert.Contains("B5 Pull requests merged by their own author: 1 of 1", github);
+        Assert.DoesNotContain("A1 Sessions open", github);
+        Assert.DoesNotContain("secret prompt", github);
+        Assert.Contains("The GitHub cycle:", github);
+        Assert.DoesNotContain("The user and Claude:", github);
+
+        Assert.DoesNotContain("<branches>", sessions);
+        Assert.DoesNotContain("<pull-requests>", sessions);
+        Assert.Contains("secret prompt", sessions);
+        Assert.Contains("A1 Sessions open", sessions);
+        Assert.DoesNotContain("B5 Pull requests", sessions);
+        Assert.Contains("The user and Claude:", sessions);
     }
 
     [Fact]
     public void Additions_become_append_edits_that_skip_headings_the_file_already_has()
     {
         var facts = new TimelineFacts([], false, false, null, 0);
-        var report = new TimelineReport("", new ReviewPart(null, "", "", []), new ReviewPart(null, "", "", []),
+        var report = new TimelineReport(ReviewKind.Interaction, "", new ReviewPart(null, "", "", []),
             [new ReviewAddition("Verify before claiming", "- Run git status first.", "because"), new ReviewAddition("Rules", "- dup", "already there")], facts);
         const string file = "# Rules\r\n- be concise\r\n";
 
@@ -238,60 +286,42 @@ public class TimelineReviewTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void Markdown_report_lists_scores_findings_checks_and_additions()
+    public void Markdown_report_lists_score_findings_checks_and_additions()
     {
         var (model, tips, _, _) = Project();
         var facts = TimelineReview.Compute(Input(model, tips));
-        var report = new TimelineReport("Summary.", new ReviewPart(7, "Claude's judgement", "Verdict A.", [new ReviewFinding("What.", "S1", "Instead.", "you")]),
-            new ReviewPart(facts.PartBScore, "from 4 checks", "Verdict B.", []), [new ReviewAddition("Title", "- line", "why")], facts);
+        var report = new TimelineReport(ReviewKind.GitHub, "Summary.", new ReviewPart(facts.GitHubScore, "from 4 checks", "Verdict B.", [new ReviewFinding("What.", "S1", "Instead.", "you")]),
+            [new ReviewAddition("Title", "- line", "why")], facts);
 
         var md = TimelineReview.ToMarkdown(report, "repo", Now);
 
-        Assert.Contains("# Timeline review · repo", md);
-        Assert.Contains("## Part A · You and Claude · 7/10 (Claude's judgement)", md);
+        Assert.Contains("# Timeline review · GitHub cycle · repo", md);
+        Assert.Contains($"## GitHub cycle · {facts.GitHubScore}/10 (from 4 checks)", md);
         Assert.Contains("1. **What.** · for you", md);
         Assert.Contains("   Evidence: S1", md);
-        Assert.Contains($"## Part B · GitHub cycle · {facts.PartBScore}/10 (from 4 checks)", md);
         Assert.Contains("| B4 Branches still present after being merged | 1 | 1 | feat/x |", md);
         Assert.Contains("| B5 Pull requests merged by their own author | n/a | 0 |  |", md);
+        Assert.DoesNotContain("| A1 ", md);
         Assert.Contains("### Title\r\n_why_\r\n\r\n- line", md.Replace("\n", "\r\n").Replace("\r\r", "\r"));
-    }
-
-    [Fact]
-    public void Gh_pull_request_json_is_parsed()
-    {
-        const string json = """
-            [{"number":7,"title":"Feature x","headRefName":"feature/x","baseRefName":"main","author":{"login":"daniel"},"mergedBy":{"login":"someone"},
-              "mergedAt":"2026-11-03T03:00:00Z","mergeCommit":{"oid":"abc"},"reviews":[{"state":"APPROVED"}],"isDraft":false,"state":"MERGED"},
-             {"number":9,"title":"Open one","headRefName":"fix/y","baseRefName":"main","author":{"login":"daniel"},"mergedBy":null,"mergedAt":null,"mergeCommit":null,"reviews":[],"isDraft":true,"state":"OPEN"}]
-            """;
-        var prs = TimelineSource.ParsePullRequests(json)!;
-
-        Assert.Equal(2, prs.Count);
-        Assert.True(prs[0].IsMerged);
-        Assert.Equal("someone", prs[0].MergedBy);
-        Assert.Equal("abc", prs[0].MergeCommit);
-        Assert.Equal(1, prs[0].Reviews);
-        Assert.False(prs[1].IsMerged);
-        Assert.Null(prs[1].MergeCommit);
-        Assert.True(prs[1].IsDraft);
-        Assert.Null(TimelineSource.ParsePullRequests("not json"));
-        Assert.Null(TimelineSource.ParsePullRequests("{}"));
     }
 
     [Fact]
     public void Arguments_keep_the_same_lock_down_as_the_file_review()
     {
-        var args = ClaudePrint.Arguments(TimelineReview.SystemPrompt, TimelineReview.ReplySchema).ToList();
-        Assert.Equal("", args[args.IndexOf("--tools") + 1]);
-        Assert.Equal("", args[args.IndexOf("--setting-sources") + 1]);
-        Assert.Contains("--no-session-persistence", args);
-        Assert.Equal(TimelineReview.ReplySchema, args[args.IndexOf("--json-schema") + 1]);
-        using var schema = JsonDocument.Parse(TimelineReview.ReplySchema); // well-formed
+        foreach (var kind in new[] { ReviewKind.Interaction, ReviewKind.GitHub })
+        {
+            var args = ClaudePrint.Arguments(TimelineReview.PromptFor(kind), TimelineReview.SchemaFor(kind)).ToList();
+            Assert.Equal("", args[args.IndexOf("--tools") + 1]);
+            Assert.Equal("", args[args.IndexOf("--setting-sources") + 1]);
+            Assert.Contains("--no-session-persistence", args);
+            using var schema = JsonDocument.Parse(TimelineReview.SchemaFor(kind)); // well-formed
+            var required = schema.RootElement.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+            Assert.Equal(kind == ReviewKind.Interaction, required.Contains("score"));
+        }
     }
 
     [LiveFact("claude", optIn: "AGENTHUB_LIVE_REVIEW")]
-    public async Task Live_review_of_a_small_project_returns_both_parts()
+    public async Task Live_sessions_review_of_a_small_project_returns_a_score()
     {
         var (model, tips, feature, _) = Project();
         var transcripts = new Dictionary<string, TranscriptText>(StringComparer.OrdinalIgnoreCase)
@@ -300,15 +330,14 @@ public class TimelineReviewTests(ITestOutputHelper output)
         };
         var input = Input(model, tips, transcripts: transcripts);
         var facts = TimelineReview.Compute(input);
-        var digest = TimelineReview.Build(input, facts);
+        var digest = TimelineReview.Build(input, facts, ReviewKind.Interaction);
 
-        using var reply = await ClaudePrint.RunAsync(new ProcessRunner(), "claude", TimelineReview.SystemPrompt, TimelineReview.ReplySchema, digest.Text, CancellationToken.None);
-        var report = TimelineReview.Parse(reply.RootElement, facts);
+        using var reply = await ClaudePrint.RunAsync(new ProcessRunner(), "claude", TimelineReview.PromptFor(ReviewKind.Interaction), TimelineReview.SchemaFor(ReviewKind.Interaction), digest.Text, CancellationToken.None);
+        var report = TimelineReview.Parse(reply.RootElement, facts, ReviewKind.Interaction);
 
         output.WriteLine(TimelineReview.ToMarkdown(report, "repo", Now));
-        Assert.NotNull(report.PartA.Score);
-        Assert.NotEmpty(report.PartA.Verdict);
-        Assert.NotEmpty(report.PartB.Verdict);
+        Assert.NotNull(report.Part.Score);
+        Assert.NotEmpty(report.Part.Verdict);
     }
 }
 

@@ -14,13 +14,20 @@ namespace AgentHub.Services.Timeline;
 /// </summary>
 public sealed record TimelineCheck(string Id, string Name, int Failing, int Total, IReadOnlyList<string> Offenders)
 {
-    public bool IsPartB => Id.StartsWith('B');
+    /// <summary>A checks (Id "A…") describe the sessions, B checks the GitHub cycle.</summary>
+    public ReviewKind Kind => Id.StartsWith('B') ? ReviewKind.GitHub : ReviewKind.Interaction;
     public bool Applies => Total > 0;
     public double Compliance => Total == 0 ? 1 : 1 - (double)Failing / Total;
 }
 
-/// <summary>Everything AgentHub worked out itself before asking the model; <see cref="PartBScore"/> is null when no Part B check applies.</summary>
-public sealed record TimelineFacts(IReadOnlyList<TimelineCheck> Checks, bool HasPipeline, bool HasPullRequests, int? PartBScore, int PartBChecks);
+/// <summary>
+/// The two reviews, each with its own button, digest, prompt and panel: how the user and Claude worked across the
+/// sessions (scored by the model), and the GitHub cycle of branches, pull requests and merges (scored by AgentHub's checks).
+/// </summary>
+public enum ReviewKind { Interaction, GitHub }
+
+/// <summary>Everything AgentHub worked out itself before asking the model; <see cref="GitHubScore"/> is null when no GitHub check applies.</summary>
+public sealed record TimelineFacts(IReadOnlyList<TimelineCheck> Checks, bool HasPipeline, bool HasPullRequests, int? GitHubScore, int GitHubChecks);
 
 public sealed record ReviewFinding(string What, string Evidence, string Instead, string Who);
 
@@ -29,7 +36,7 @@ public sealed record ReviewPart(int? Score, string ScoreSource, string Verdict, 
 
 public sealed record ReviewAddition(string Title, string Markdown, string Why);
 
-public sealed record TimelineReport(string Summary, ReviewPart PartA, ReviewPart PartB, IReadOnlyList<ReviewAddition> Additions, TimelineFacts Facts);
+public sealed record TimelineReport(ReviewKind Kind, string Summary, ReviewPart Part, IReadOnlyList<ReviewAddition> Additions, TimelineFacts Facts);
 
 /// <summary>The text sent to the model, and which timeline row each session id (S1, S2, …) stands for.</summary>
 public sealed record TimelineDigest(string Text, IReadOnlyDictionary<string, string> SessionRowKeys);
@@ -276,7 +283,7 @@ public static partial class TimelineReview
         var longTitles = prs.Where(p => p.Title.Length > 70).ToList();
         checks.Add(new TimelineCheck("B8", "Pull request titles over 70 characters", longTitles.Count, prs.Count, longTitles.Select(p => $"#{p.Number}").ToList()));
 
-        var scored = checks.Where(c => c.IsPartB && c.Applies).ToList();
+        var scored = checks.Where(c => c.Kind == ReviewKind.GitHub && c.Applies).ToList();
         int? score = scored.Count == 0 ? null : (int)Math.Round(10 * scored.Average(c => c.Compliance), MidpointRounding.AwayFromZero);
         return new TimelineFacts(checks, input.HasPipeline, input.PullRequests is not null, score, scored.Count);
     }
@@ -298,10 +305,13 @@ public static partial class TimelineReview
     /// newest <see cref="DetailedSessions"/>, as far as the budget allows), commits outside sessions, branches, pull
     /// requests, the rules, and the user's CLAUDE.md. Kept under <see cref="DigestBudget"/> by thinning the older sessions.
     /// </summary>
-    public static TimelineDigest Build(TimelineReviewInput input, TimelineFacts facts)
+    public static string Title(ReviewKind kind) => kind == ReviewKind.GitHub ? "GitHub cycle" : "You and Claude";
+
+    public static TimelineDigest Build(TimelineReviewInput input, TimelineFacts facts, ReviewKind kind)
     {
         var model = input.Model;
         var ids = SessionIds(model);
+        var github = kind == ReviewKind.GitHub;
         var fixedPart = new StringBuilder();
 
         // Project
@@ -323,21 +333,21 @@ public static partial class TimelineReview
         // Facts
         fixedPart.AppendLine("<facts>");
         fixedPart.AppendLine("Checks AgentHub computed from git, the transcripts and GitHub. They are authoritative: reason about them, do not recount.");
-        foreach (var c in facts.Checks)
+        foreach (var c in facts.Checks.Where(c => c.Kind == kind))
         {
             if (!c.Applies) { fixedPart.AppendLine($"{c.Id} {c.Name}: not applicable (nothing to check)"); continue; }
             var who = c.Offenders.Count == 0 ? "" : " (" + string.Join(", ", c.Offenders.Take(12)) + (c.Offenders.Count > 12 ? $", +{c.Offenders.Count - 12} more" : "") + ")";
             fixedPart.AppendLine($"{c.Id} {c.Name}: {c.Failing} of {c.Total}{who}");
         }
-        fixedPart.AppendLine(facts.PartBScore is { } sc ? $"Part B score from these checks: {sc}/10 over {facts.PartBChecks} applicable checks" : "Part B score: no applicable check");
+        if (github) fixedPart.AppendLine(facts.GitHubScore is { } sc ? $"Score from these checks: {sc}/10 over {facts.GitHubChecks} applicable checks" : "Score: no applicable check");
         fixedPart.AppendLine("</facts>");
         fixedPart.AppendLine();
 
-        // Branches
+        // Branches: the GitHub review's subject; the sessions review only needs the lane named on each session.
         var byHash = model.Branches.SelectMany(b => b.Commits).GroupBy(c => c.Hash).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
         var prByHead = (input.PullRequests ?? []).GroupBy(p => p.Head).ToDictionary(g => g.Key, g => g.OrderByDescending(p => p.Number).First(), StringComparer.Ordinal);
-        fixedPart.AppendLine("<branches>");
-        foreach (var b in model.Branches)
+        if (github) fixedPart.AppendLine("<branches>");
+        foreach (var b in github ? model.Branches : [])
         {
             var commits = b.Commits.OrderBy(c => c.Time).ToList();
             var span = commits.Count > 0 ? $"{Date(commits[0].Time)} → {Date(commits[^1].Time)}" : "no commits";
@@ -349,11 +359,14 @@ public static partial class TimelineReview
                 : "not merged";
             fixedPart.AppendLine($"{b.Name}: {commits.Count} commits, {span}, {how}");
         }
-        fixedPart.AppendLine("</branches>");
-        fixedPart.AppendLine();
+        if (github)
+        {
+            fixedPart.AppendLine("</branches>");
+            fixedPart.AppendLine();
+        }
 
         // Pull requests
-        if (input.PullRequests is { Count: > 0 } all)
+        if (github && input.PullRequests is { Count: > 0 } all)
         {
             fixedPart.AppendLine("<pull-requests>");
             foreach (var p in all.OrderByDescending(p => p.Number))
@@ -385,7 +398,7 @@ public static partial class TimelineReview
         // Rules and the user's file
         var tail = new StringBuilder();
         tail.AppendLine("<rules>");
-        tail.AppendLine(RulesFor(input.HasPipeline));
+        tail.AppendLine(RulesFor(kind, input.HasPipeline));
         tail.AppendLine("</rules>");
         tail.AppendLine();
         tail.AppendLine("<user-claude-md>");
@@ -397,7 +410,8 @@ public static partial class TimelineReview
         else tail.AppendLine("(the user-wide CLAUDE.md does not exist yet)");
         tail.AppendLine("</user-claude-md>");
 
-        // Sessions, newest first, in full while the budget allows, then one line each.
+        // Sessions, newest first. The sessions review gets them in full (prompts, last reply) while the budget allows,
+        // then one line each; the GitHub review only needs the one-line form (when, which lane, which commits).
         var sessions = new StringBuilder();
         sessions.AppendLine("<sessions>");
         sessions.AppendLine("Newest first. A session's lane is the branch most of its commits went to. Times are local to the user.");
@@ -410,7 +424,7 @@ public static partial class TimelineReview
         for (var i = 0; i < rows.Count; i++)
         {
             olderBriefs -= briefs[i].Length;
-            var full = SessionBlock(rows[i], ids[rows[i].Key], input, model.TrunkName, detailed: true);
+            var full = github ? briefs[i] : SessionBlock(rows[i], ids[rows[i].Key], input, model.TrunkName, detailed: true);
             var block = full.Length + olderBriefs <= remaining ? full : briefs[i];
             sessions.Append(block);
             remaining -= block.Length;
@@ -456,12 +470,28 @@ public static partial class TimelineReview
     /// pull-requests, rollback-recovery) and the IGO D&amp;D build pipeline (commit gate, stage guides, lessons), as cached
     /// in the dev kit on 2026-11-04. The pipeline-stage rules go in only for projects that have docs/pipeline-status.md.
     /// </summary>
-    public static string RulesFor(bool hasPipeline)
+    public static string RulesFor(ReviewKind kind, bool hasPipeline)
     {
         var sb = new StringBuilder();
         sb.AppendLine("Source: IGO engineering standards and the IGO D&D build pipeline. Judge against these, not personal taste.");
         sb.AppendLine();
-        sb.AppendLine("Part A, the user and Claude:");
+        if (kind == ReviewKind.GitHub)
+        {
+            sb.AppendLine("The GitHub cycle:");
+            sb.AppendLine("- Never commit or push straight to the trunk: branch first, open a pull request, merge through it.");
+            sb.AppendLine("- Branch names: <type>/<short-description>, lowercase with hyphens, type in feat, fix, hotfix, chore, refactor (docs tolerated).");
+            sb.AppendLine("- Commit messages: Conventional Commits, extremely concise.");
+            sb.AppendLine("- Squash-merge only; delete the branch after the merge.");
+            sb.AppendLine("- Every pull request's base is the trunk, never a sibling branch (a stacked PR merged into its sibling has lost a stage before).");
+            sb.AppendLine("- At least one human reviewer; nobody merges their own PR; reply to every comment before merging. A bot review is additional, not a replacement.");
+            sb.AppendLine("- PR title verb-led and under 70 characters; one logical change per PR; every template section filled; Draft while in progress.");
+            sb.AppendLine("- Never rewrite pushed history: fix forward, and revert through GitHub when a bad commit reached the trunk.");
+            sb.AppendLine("- CI runs on pull_request; dev deploys on push to the trunk; prod is a manual workflow_dispatch that promotes one SHA.");
+            if (hasPipeline)
+                sb.AppendLine("- Pipeline projects (this one has docs/pipeline-status.md): branches chore/stage-N-slug for design stages and feat/stage-N-slug for builds; one PR per stage; the agent opens the PR and does not merge it; a stage is not finished until it is on the trunk.");
+            return sb.ToString().TrimEnd();
+        }
+        sb.AppendLine("The user and Claude:");
         sb.AppendLine("- One piece of work per session; start a fresh session for the next one. A session that runs long is restarted: commit, rewrite the handoff, start again. Long sessions pile up half-remembered decisions, superseded plans and troubleshooting noise.");
         sb.AppendLine("- Context lives in the repository, not the conversation: at the end of every session the handoff (CLAUDE.md \"Where things stand\" or .agenthub/handoff.md) is rewritten, newest work first: what is merged, what runs where, what is next.");
         sb.AppendLine("- Verify, never ask: before saying work is committed or pushed, the agent runs git status, git log @{u}..HEAD and the branch name itself and reads the output. \"I committed\" without evidence does not pass. A merged badge is not evidence that the work is on the trunk.");
@@ -473,91 +503,94 @@ public static partial class TimelineReview
         if (hasPipeline)
         {
             sb.AppendLine();
-            sb.AppendLine("Part A, pipeline projects (this project has docs/pipeline-status.md):");
+            sb.AppendLine("Pipeline projects (this one has docs/pipeline-status.md):");
             sb.AppendLine("- Stages run in fresh sessions: fake UI, architecture, build order, stakeholder releases, implementation contract, then build sessions. \"Not in this stage\" is binding; change docs/build-plan.md first (dated, with the reason) before building something else.");
             sb.AppendLine("- A stage is not finished until it is on the trunk; nothing of the next stage starts before that. pipeline-status.md gets a commit-gate row (branch, PR, merge SHA, date).");
             sb.AppendLine("- Branches: chore/stage-N-slug for design stages, feat/stage-N-slug for builds; one PR per stage; the agent opens the PR and does not merge it.");
             sb.AppendLine("- Read lessons/stage-N.md at the start of a stage; record a lesson at the gate.");
         }
-        sb.AppendLine();
-        sb.AppendLine("Part B, the GitHub cycle:");
-        sb.AppendLine("- Never commit or push straight to the trunk: branch first, open a pull request, merge through it.");
-        sb.AppendLine("- Branch names: <type>/<short-description>, lowercase with hyphens, type in feat, fix, hotfix, chore, refactor (docs tolerated).");
-        sb.AppendLine("- Commit messages: Conventional Commits, extremely concise.");
-        sb.AppendLine("- Squash-merge only; delete the branch after the merge.");
-        sb.AppendLine("- Every pull request's base is the trunk, never a sibling branch (a stacked PR merged into its sibling has lost a stage before).");
-        sb.AppendLine("- At least one human reviewer; nobody merges their own PR; reply to every comment before merging. A bot review is additional, not a replacement.");
-        sb.AppendLine("- PR title verb-led and under 70 characters; one logical change per PR; every template section filled; Draft while in progress.");
-        sb.AppendLine("- Never rewrite pushed history: fix forward, and revert through GitHub when a bad commit reached the trunk.");
-        sb.AppendLine("- CI runs on pull_request; dev deploys on push to the trunk; prod is a manual workflow_dispatch that promotes one SHA.");
         return sb.ToString().TrimEnd();
     }
 
     // ---- the model ----
 
-    public const string SystemPrompt = """
-        You review how a software project was built, from the story of its coding-agent sessions (Claude Code, Codex) and its
-        Git and GitHub history, and advise both the user and the agent on what to do differently next time. The request holds
-        the project's shape; the checks AgentHub computed (authoritative: reason about them, never recount); the sessions
-        newest first with the prompts the user typed and each session's last reply; commits made outside sessions; branches;
-        pull requests; the rules the project is judged against; and the user's user-wide CLAUDE.md.
+    private const string PromptCommon = """
+        The request holds the project's shape; the checks AgentHub computed (authoritative: reason about them, never recount);
+        the sessions newest first; commits made outside sessions; the rules the project is judged against; and the user's
+        user-wide CLAUDE.md.
 
-        Reply in two parts plus additions.
-        - partA, "You and Claude": how the sessions were run against the Part A rules: session length and scope, handoffs kept
-          up to date, verifying rather than asking, tests before commits, decisions re-asked, prompts that repeat a standing
-          instruction, parallel work in one folder, work left uncommitted. Give a score from 0 to 10: 10 means nothing worth
-          changing, and every point lost must be explained by a finding.
-        - partB, "GitHub cycle": branch, pull request and merge practice against the Part B rules. AgentHub scores this part
-          from its checks; you write the verdict and the findings, using the checks' evidence.
-        - additions: at most 5 standing rules for the user-wide CLAUDE.md that would have prevented a finding. Each has a short
-          title and a few Markdown lines an agent can follow in any project: never project facts, paths, names or dates, and
-          nothing the user's file already says. Return none when the file already covers what went wrong.
+        Also return additions: at most 5 standing rules for the user-wide CLAUDE.md that would have prevented a finding. Each
+        has a short title and a few Markdown lines an agent can follow in any project: never project facts, paths, names or
+        dates, and nothing the user's file already says. Return none when the file already covers what went wrong.
 
-        Findings: at most 8 per part, most valuable first. "what" is one sentence naming the pattern. "evidence" cites only
-        ids from the request: session ids such as S3, short commit hashes, branch names, PR numbers like #12, with dates where
-        useful. "instead" says concretely what to do next time. "who" is "you" when the user should change something, "claude"
-        when the agent should, "both" when both. Never invent events, people or files. If a part is already good, say so with
-        few or no findings. Plain, concise sentences; no Markdown headings inside strings.
+        Findings: at most 8, most valuable first. "what" is one sentence naming the pattern. "evidence" cites only ids from
+        the request: session ids such as S3, short commit hashes, branch names, PR numbers like #12, with dates where useful.
+        "instead" says concretely what to do next time. "who" is "you" when the user should change something, "claude" when
+        the agent should, "both" when both. Never invent events, people or files. If the practice is already good, say so
+        with few or no findings. Plain, concise sentences; no Markdown headings inside strings.
         """;
 
-    public const string ReplySchema = """
-        {"type":"object","additionalProperties":false,"required":["summary","partA","partB","additions"],"properties":{
-          "summary":{"type":"string","description":"Two or three sentences: the overall verdict on how the project was built."},
-          "partA":{"type":"object","additionalProperties":false,"required":["score","verdict","findings"],"properties":{
-            "score":{"type":"integer","minimum":0,"maximum":10},
-            "verdict":{"type":"string"},
-            "findings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["what","evidence","instead","who"],"properties":{
-              "what":{"type":"string"},"evidence":{"type":"string"},"instead":{"type":"string"},"who":{"type":"string","enum":["you","claude","both"]}}}}}},
-          "partB":{"type":"object","additionalProperties":false,"required":["verdict","findings"],"properties":{
-            "verdict":{"type":"string"},
-            "findings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["what","evidence","instead","who"],"properties":{
-              "what":{"type":"string"},"evidence":{"type":"string"},"instead":{"type":"string"},"who":{"type":"string","enum":["you","claude","both"]}}}}}},
-          "additions":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["title","markdown","why"],"properties":{
-            "title":{"type":"string"},"markdown":{"type":"string"},"why":{"type":"string"}}}}}}
+    public const string InteractionPrompt = """
+        You review how a user and their coding agent (Claude Code, Codex) worked together on a software project, from the
+        story of the sessions, and advise both of them on what to do differently next time. Each session comes with the
+        prompts the user typed and the session's last reply. Judge against the rules in the request: session length and
+        scope, handoffs kept up to date, verifying rather than asking, tests before commits, decisions re-asked, prompts
+        that repeat a standing instruction, parallel work in one folder, work left uncommitted. Give a score from 0 to 10:
+        10 means nothing worth changing, and every point lost must be explained by a finding.
+
+        """ + PromptCommon;
+
+    public const string GitHubPrompt = """
+        You review a software project's GitHub cycle, branches, pull requests and merges, from its Git history, its pull
+        requests and the sessions that made the commits, and advise both the user and their coding agent on what to do
+        differently next time. Judge against the rules in the request. AgentHub has already scored this cycle from its
+        checks; you write the verdict and the findings, using the checks' evidence, and say what to do instead.
+
+        """ + PromptCommon;
+
+    private const string FindingSchema = """
+        {"type":"array","items":{"type":"object","additionalProperties":false,"required":["what","evidence","instead","who"],"properties":{
+          "what":{"type":"string"},"evidence":{"type":"string"},"instead":{"type":"string"},"who":{"type":"string","enum":["you","claude","both"]}}}}
         """;
 
-    /// <summary>Reads the model's reply into a report, with Part B scored from <paramref name="facts"/>.</summary>
-    public static TimelineReport Parse(JsonElement root, TimelineFacts facts)
+    private const string AdditionsSchema = """
+        {"type":"array","items":{"type":"object","additionalProperties":false,"required":["title","markdown","why"],"properties":{
+          "title":{"type":"string"},"markdown":{"type":"string"},"why":{"type":"string"}}}}
+        """;
+
+    /// <summary>The reply shape: a score only for the sessions review (the GitHub score is AgentHub's).</summary>
+    public static string SchemaFor(ReviewKind kind)
+    {
+        var score = kind == ReviewKind.Interaction ? "\"score\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":10}," : "";
+        var required = kind == ReviewKind.Interaction ? "\"summary\",\"score\",\"verdict\",\"findings\",\"additions\"" : "\"summary\",\"verdict\",\"findings\",\"additions\"";
+        return "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[" + required + "],\"properties\":{" +
+               "\"summary\":{\"type\":\"string\",\"description\":\"Two or three sentences: the overall verdict.\"}," + score +
+               "\"verdict\":{\"type\":\"string\"},\"findings\":" + FindingSchema.Trim() + ",\"additions\":" + AdditionsSchema.Trim() + "}}";
+    }
+
+    public static string PromptFor(ReviewKind kind) => kind == ReviewKind.Interaction ? InteractionPrompt : GitHubPrompt;
+
+    /// <summary>Reads the model's reply into a report; a GitHub review is scored from <paramref name="facts"/>, not the reply.</summary>
+    public static TimelineReport Parse(JsonElement root, TimelineFacts facts, ReviewKind kind)
     {
         static string Str(JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? (v.GetString() ?? "").Trim() : "";
-        static List<ReviewFinding> Findings(JsonElement part)
-        {
-            var list = new List<ReviewFinding>();
-            if (part.TryGetProperty("findings", out var arr) && arr.ValueKind == JsonValueKind.Array)
-                foreach (var f in arr.EnumerateArray().Take(MaxFindings))
-                {
-                    var w = Str(f, "who"); var who = w is "you" or "claude" or "both" ? w : "both";
-                    if (Str(f, "what").Length > 0) list.Add(new ReviewFinding(Str(f, "what"), Str(f, "evidence"), Str(f, "instead"), who));
-                }
-            return list;
-        }
 
-        var a = root.TryGetProperty("partA", out var pa) && pa.ValueKind == JsonValueKind.Object ? pa : default;
-        var b = root.TryGetProperty("partB", out var pb) && pb.ValueKind == JsonValueKind.Object ? pb : default;
-        int? scoreA = a.ValueKind == JsonValueKind.Object && a.TryGetProperty("score", out var s) && s.ValueKind == JsonValueKind.Number ? Math.Clamp(s.GetInt32(), 0, 10) : null;
-        var partA = new ReviewPart(scoreA, "Claude's judgement", a.ValueKind == JsonValueKind.Object ? Str(a, "verdict") : "", a.ValueKind == JsonValueKind.Object ? Findings(a) : []);
-        var partB = new ReviewPart(facts.PartBScore, facts.PartBScore is null ? "no applicable check" : $"from {facts.PartBChecks} check{(facts.PartBChecks == 1 ? "" : "s")}",
-            b.ValueKind == JsonValueKind.Object ? Str(b, "verdict") : "", b.ValueKind == JsonValueKind.Object ? Findings(b) : []);
+        var findings = new List<ReviewFinding>();
+        if (root.TryGetProperty("findings", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            foreach (var f in arr.EnumerateArray().Take(MaxFindings))
+            {
+                var w = Str(f, "who"); var who = w is "you" or "claude" or "both" ? w : "both";
+                if (Str(f, "what").Length > 0) findings.Add(new ReviewFinding(Str(f, "what"), Str(f, "evidence"), Str(f, "instead"), who));
+            }
+
+        ReviewPart part;
+        if (kind == ReviewKind.Interaction)
+        {
+            int? score = root.TryGetProperty("score", out var s) && s.ValueKind == JsonValueKind.Number ? Math.Clamp(s.GetInt32(), 0, 10) : null;
+            part = new ReviewPart(score, "Claude's judgement", Str(root, "verdict"), findings);
+        }
+        else
+            part = new ReviewPart(facts.GitHubScore, facts.GitHubScore is null ? "no applicable check" : $"from {facts.GitHubChecks} check{(facts.GitHubChecks == 1 ? "" : "s")}", Str(root, "verdict"), findings);
 
         var additions = new List<ReviewAddition>();
         if (root.TryGetProperty("additions", out var adds) && adds.ValueKind == JsonValueKind.Array)
@@ -565,7 +598,7 @@ public static partial class TimelineReview
                 if (Str(add, "title").Length > 0 && Str(add, "markdown").Length > 0)
                     additions.Add(new ReviewAddition(Str(add, "title").TrimStart('#', ' '), Str(add, "markdown"), Str(add, "why")));
 
-        return new TimelineReport(Str(root, "summary"), partA, partB, additions, facts);
+        return new TimelineReport(kind, Str(root, "summary"), part, additions, facts);
     }
 
     /// <summary>
@@ -590,19 +623,19 @@ public static partial class TimelineReview
     public static string ToMarkdown(TimelineReport report, string name, DateTimeOffset when)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"# Timeline review · {name}");
+        sb.AppendLine($"# Timeline review · {Title(report.Kind)} · {name}");
         sb.AppendLine();
-        sb.AppendLine($"Reviewed {when.ToLocalTime():ddd d MMM yyyy HH:mm} by Claude Code from AgentHub's timeline (git, transcripts and GitHub). Scores: Part A is Claude's judgement; Part B is computed from AgentHub's checks.");
+        sb.AppendLine($"Reviewed {when.ToLocalTime():ddd d MMM yyyy HH:mm} by Claude Code from AgentHub's timeline (git, transcripts and GitHub). " +
+                      (report.Kind == ReviewKind.Interaction ? "The score is Claude's judgement." : "The score is computed from AgentHub's checks; the findings are Claude's."));
         sb.AppendLine();
         if (report.Summary.Length > 0) { sb.AppendLine(report.Summary); sb.AppendLine(); }
-        Part(sb, "Part A · You and Claude", report.PartA);
-        Part(sb, "Part B · GitHub cycle", report.PartB);
+        Part(sb, Title(report.Kind), report.Part);
 
         sb.AppendLine("## Checks");
         sb.AppendLine();
         sb.AppendLine("| Check | Failing | Of | Which |");
         sb.AppendLine("|---|---|---|---|");
-        foreach (var c in report.Facts.Checks)
+        foreach (var c in report.Facts.Checks.Where(c => c.Kind == report.Kind))
             sb.AppendLine($"| {c.Id} {c.Name} | {(c.Applies ? c.Failing.ToString(CultureInfo.InvariantCulture) : "n/a")} | {c.Total} | {string.Join(", ", c.Offenders.Take(12))}{(c.Offenders.Count > 12 ? $", +{c.Offenders.Count - 12} more" : "")} |");
         sb.AppendLine();
 
@@ -645,27 +678,28 @@ public static partial class TimelineReview
         var folder = Path.Combine(ReportRoot, safe.Length > 0 ? safe : "repo");
         Directory.CreateDirectory(folder);
         var stamp = when.ToLocalTime().ToString("yyyyMMdd-HHmm", CultureInfo.InvariantCulture);
-        var reportPath = Path.Combine(folder, $"review-{stamp}.md");
-        var digestPath = Path.Combine(folder, $"digest-{stamp}.txt");
+        var kind = report.Kind == ReviewKind.GitHub ? "github" : "sessions";
+        var reportPath = Path.Combine(folder, $"review-{kind}-{stamp}.md");
+        var digestPath = Path.Combine(folder, $"digest-{kind}-{stamp}.txt");
         File.WriteAllText(reportPath, ToMarkdown(report, name, when), new UTF8Encoding(false));
         File.WriteAllText(digestPath, digest.Text, new UTF8Encoding(false));
         return (reportPath, digestPath);
     }
 
     /// <summary>Gathers, asks Claude Code and saves. Throws <see cref="OperationCanceledException"/> when cancelled, <see cref="InvalidOperationException"/> on failure.</summary>
-    public static async Task<TimelineReviewResult> RunAsync(ProcessRunner runner, string claudeCommand, TimelineScope scope, TimelineModel model,
+    public static async Task<TimelineReviewResult> RunAsync(ProcessRunner runner, string claudeCommand, TimelineScope scope, TimelineModel model, ReviewKind kind,
         IProgress<ReviewProgress>? progress, CancellationToken cancellationToken)
     {
         var input = await GatherAsync(runner, scope, model, progress, cancellationToken);
         var facts = Compute(input);
-        var digest = Build(input, facts);
+        var digest = Build(input, facts, kind);
         var history = ReviewTimings.Load();
         progress?.Report(new ReviewProgress("Asking Claude Code…", digest.Text.Length, ReviewTimings.Estimate(history, digest.Text.Length), ReviewTimings.Basis(history)));
         var started = DateTime.UtcNow;
-        using var reply = await ClaudePrint.RunAsync(runner, claudeCommand, SystemPrompt, ReplySchema, digest.Text, cancellationToken);
+        using var reply = await ClaudePrint.RunAsync(runner, claudeCommand, PromptFor(kind), SchemaFor(kind), digest.Text, cancellationToken);
         var took = DateTime.UtcNow - started;
         ReviewTimings.Record(digest.Text.Length, took);
-        var report = Parse(reply.RootElement, facts);
+        var report = Parse(reply.RootElement, facts, kind);
         var (reportPath, digestPath) = Save(scope.Name, report, digest, input.Now);
         return new TimelineReviewResult(report, digest, reportPath, digestPath, took);
     }
