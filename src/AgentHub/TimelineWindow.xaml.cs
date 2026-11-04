@@ -494,19 +494,36 @@ public partial class TimelineWindow : Window
         _reviewCts = cts;
         ReviewBtn.Content = "■ Cancel review";
         var started = DateTime.Now;
-        var stage = "Starting…";
-        void Tick() => StatusText.Text = $"Review: {stage} {(int)(DateTime.Now - started).TotalSeconds} s. Reading the transcripts takes seconds; Claude Code a minute or a few.";
+        var progress = new ReviewProgress("Starting…");
+        var claudeFrom = (DateTime?)null;
+        // Elapsed time always; once the digest exists, its size and an estimate from earlier reviews, then how far past it we are.
+        void Tick()
+        {
+            var elapsed = (int)(DateTime.Now - started).TotalSeconds;
+            if (progress.Estimate is not { } estimate || claudeFrom is not { } from)
+            {
+                StatusText.Text = $"Review: {progress.Stage} {elapsed} s. Reading the transcripts takes seconds.";
+                return;
+            }
+            var inClaude = (int)(DateTime.Now - from).TotalSeconds;
+            var size = $"{progress.DigestChars / 1024.0:0} KB digest";
+            var about = ReviewTimings.Describe(estimate);
+            StatusText.Text = inClaude <= estimate.TotalSeconds
+                ? $"Review: {progress.Stage} {inClaude} s of {about} for a {size} (estimate from {progress.EstimateBasis}) · {elapsed} s in all"
+                : $"Review: {progress.Stage} {inClaude} s, past the {about} estimated for a {size}; still running · {elapsed} s in all";
+        }
         var ticker = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         ticker.Tick += (_, _) => Tick();
         Tick();
         ticker.Start();
-        var progress = new Progress<string>(s => { stage = s; Tick(); });
+        var reporter = new Progress<ReviewProgress>(p => { progress = p; if (p.Estimate is not null) claudeFrom ??= DateTime.Now; Tick(); });
         try
         {
-            var result = await TimelineReview.RunAsync(_runner, ReviewCommand, _scope, model, progress, cts.Token);
+            var result = await TimelineReview.RunAsync(_runner, ReviewCommand, _scope, model, reporter, cts.Token);
             _review = result;
             ShowReport(result);
-            StatusText.Text = $"Review done in {(int)(DateTime.Now - started).TotalSeconds} s. Report saved to {result.ReportPath}";
+            var estimate = progress.Estimate is { } est ? $" (estimated {ReviewTimings.Describe(est)})" : "";
+            StatusText.Text = $"Review done in {(int)(DateTime.Now - started).TotalSeconds} s, {(int)result.ClaudeTime.TotalSeconds} s of it Claude Code on a {progress.DigestChars / 1024.0:0} KB digest{estimate}. Report saved to {result.ReportPath}";
         }
         catch (OperationCanceledException)
         {

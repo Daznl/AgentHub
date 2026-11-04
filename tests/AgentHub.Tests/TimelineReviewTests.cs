@@ -311,3 +311,39 @@ public class TimelineReviewTests(ITestOutputHelper output)
         Assert.NotEmpty(report.PartB.Verdict);
     }
 }
+
+public class ReviewTimingsTests
+{
+    [Fact]
+    public void Estimate_uses_a_built_in_rate_until_there_is_history()
+    {
+        var estimate = ReviewTimings.Estimate([], 22 * 1024);
+        Assert.InRange(estimate.TotalSeconds, 110, 125); // 40 s + 3.5 s/KB × 22 KB
+        Assert.Equal("a built-in rate", ReviewTimings.Basis([]));
+    }
+
+    [Fact]
+    public void Estimate_takes_the_median_rate_of_earlier_runs()
+    {
+        List<ReviewTimings.Run> history =
+        [
+            new(22 * 1024, 118),  // 3.5 s/KB after the overhead
+            new(10 * 1024, 140),  // 10 s/KB: a slow one
+            new(40 * 1024, 200),  // 4 s/KB
+            new(5 * 1024, 30),    // under the overhead: ignored
+        ];
+        var estimate = ReviewTimings.Estimate(history, 30 * 1024);
+        Assert.InRange(estimate.TotalSeconds, 155, 165); // 40 + 4 × 30
+        Assert.Equal("4 earlier reviews on this machine", ReviewTimings.Basis(history));
+    }
+
+    [Fact]
+    public void Estimates_read_as_rounded_minutes()
+    {
+        Assert.Equal("about 45 s", ReviewTimings.Describe(TimeSpan.FromSeconds(44)));
+        Assert.Equal("about 1 min", ReviewTimings.Describe(TimeSpan.FromSeconds(65)));
+        Assert.Equal("about 1½ min", ReviewTimings.Describe(TimeSpan.FromSeconds(100)));
+        Assert.Equal("about 2 min", ReviewTimings.Describe(TimeSpan.FromSeconds(118)));
+        Assert.Equal("about 4 min", ReviewTimings.Describe(TimeSpan.FromSeconds(230)));
+    }
+}

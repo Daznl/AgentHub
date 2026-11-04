@@ -52,7 +52,75 @@ public sealed record TimelineReviewInput(
     public bool HasPipeline => RepoFiles.Any(f => f.Name == "docs/pipeline-status.md" && f.Exists);
 }
 
-public sealed record TimelineReviewResult(TimelineReport Report, TimelineDigest Digest, string ReportPath, string DigestPath);
+public sealed record TimelineReviewResult(TimelineReport Report, TimelineDigest Digest, string ReportPath, string DigestPath, TimeSpan ClaudeTime);
+
+/// <summary>
+/// Where the review is up to. Once the digest is built, <see cref="DigestChars"/> and <see cref="Estimate"/> say how big
+/// it is and how long Claude Code should take on it (see <see cref="ReviewTimings"/>).
+/// </summary>
+public sealed record ReviewProgress(string Stage, int? DigestChars = null, TimeSpan? Estimate = null, string? EstimateBasis = null);
+
+/// <summary>
+/// How long Claude Code took per size of digest in earlier reviews, kept in a small file so the estimate shown while a
+/// review runs comes from this machine's own history. Time is modelled as a fixed start-up cost plus a rate per KB; the
+/// rate is the median of the recorded runs, and a built-in rate (from the first real run: 22 KB in 118 s) stands in
+/// until there are any.
+/// </summary>
+public static class ReviewTimings
+{
+    public sealed record Run(int Chars, double Seconds);
+
+    public static readonly string Path = System.IO.Path.Combine(TimelineReview.ReportRoot, "timings.json");
+    public static readonly TimeSpan Overhead = TimeSpan.FromSeconds(40);
+    public const double DefaultSecondsPerKb = 3.5;
+    public const int Keep = 20;
+
+    public static TimeSpan Estimate(IReadOnlyList<Run> history, int chars)
+    {
+        var rates = history.Where(r => r.Chars > 0 && r.Seconds > Overhead.TotalSeconds).Select(r => (r.Seconds - Overhead.TotalSeconds) / (r.Chars / 1024.0)).OrderBy(r => r).ToList();
+        var rate = rates.Count == 0 ? DefaultSecondsPerKb : rates[rates.Count / 2];
+        return Overhead + TimeSpan.FromSeconds(rate * chars / 1024.0);
+    }
+
+    public static string Basis(IReadOnlyList<Run> history) =>
+        history.Count == 0 ? "a built-in rate" : $"{history.Count} earlier review{(history.Count == 1 ? "" : "s")} on this machine";
+
+    public static List<Run> Load()
+    {
+        try
+        {
+            if (!File.Exists(Path)) return [];
+            return JsonSerializer.Deserialize<List<Run>>(File.ReadAllText(Path)) ?? [];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>Appends a run, keeping the newest <see cref="Keep"/>. Never throws: a timing not saved only costs a less exact estimate.</summary>
+    public static void Record(int chars, TimeSpan took)
+    {
+        try
+        {
+            var runs = Load();
+            runs.Add(new Run(chars, took.TotalSeconds));
+            if (runs.Count > Keep) runs.RemoveRange(0, runs.Count - Keep);
+            Directory.CreateDirectory(TimelineReview.ReportRoot);
+            File.WriteAllText(Path, JsonSerializer.Serialize(runs));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>"about 2 min", "about 1½ min", "about 45 s".</summary>
+    public static string Describe(TimeSpan estimate)
+    {
+        var halves = Math.Max(1, (int)Math.Round(estimate.TotalMinutes * 2));
+        if (estimate.TotalSeconds < 50) return $"about {(int)Math.Round(estimate.TotalSeconds / 5.0) * 5} s";
+        var whole = halves / 2;
+        return halves % 2 == 0 ? $"about {whole} min" : whole == 0 ? "about ½ min" : $"about {whole}½ min";
+    }
+}
 
 /// <summary>
 /// Asks Claude Code, in print mode on the user's own login, how the project was built: the sessions, prompts, commits,
@@ -79,10 +147,10 @@ public static partial class TimelineReview
     // ---- gathering ----
 
     /// <summary>Reads what the review needs beyond the model: touched files, pull requests, the newest transcripts, the user's CLAUDE.md.</summary>
-    public static async Task<TimelineReviewInput> GatherAsync(ProcessRunner runner, TimelineScope scope, TimelineModel model, IProgress<string>? progress,
+    public static async Task<TimelineReviewInput> GatherAsync(ProcessRunner runner, TimelineScope scope, TimelineModel model, IProgress<ReviewProgress>? progress,
         CancellationToken cancellationToken)
     {
-        progress?.Report("Reading git and GitHub…");
+        progress?.Report(new ReviewProgress("Reading git and GitHub…"));
         var tips = await TimelineSource.ReadBranchTipsAsync(runner, scope, cancellationToken);
         var touching = await TimelineSource.ReadTouchingAsync(runner, scope, ContextPaths, cancellationToken);
         var prs = await TimelineSource.ReadPullRequestsAsync(runner, scope, cancellationToken);
@@ -96,7 +164,7 @@ public static partial class TimelineReview
             for (var i = 0; i < sessions.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                progress?.Report($"Reading transcript {i + 1} of {sessions.Count}…");
+                progress?.Report(new ReviewProgress($"Reading transcript {i + 1} of {sessions.Count}…"));
                 var s = sessions[i];
                 transcripts[s.Summary.FilePath] = TranscriptTexts.TryRead(s.Summary.FilePath, s.Summary.Agent);
             }
@@ -586,16 +654,20 @@ public static partial class TimelineReview
 
     /// <summary>Gathers, asks Claude Code and saves. Throws <see cref="OperationCanceledException"/> when cancelled, <see cref="InvalidOperationException"/> on failure.</summary>
     public static async Task<TimelineReviewResult> RunAsync(ProcessRunner runner, string claudeCommand, TimelineScope scope, TimelineModel model,
-        IProgress<string>? progress, CancellationToken cancellationToken)
+        IProgress<ReviewProgress>? progress, CancellationToken cancellationToken)
     {
         var input = await GatherAsync(runner, scope, model, progress, cancellationToken);
         var facts = Compute(input);
         var digest = Build(input, facts);
-        progress?.Report("Asking Claude Code…");
+        var history = ReviewTimings.Load();
+        progress?.Report(new ReviewProgress("Asking Claude Code…", digest.Text.Length, ReviewTimings.Estimate(history, digest.Text.Length), ReviewTimings.Basis(history)));
+        var started = DateTime.UtcNow;
         using var reply = await ClaudePrint.RunAsync(runner, claudeCommand, SystemPrompt, ReplySchema, digest.Text, cancellationToken);
+        var took = DateTime.UtcNow - started;
+        ReviewTimings.Record(digest.Text.Length, took);
         var report = Parse(reply.RootElement, facts);
         var (reportPath, digestPath) = Save(scope.Name, report, digest, input.Now);
-        return new TimelineReviewResult(report, digest, reportPath, digestPath);
+        return new TimelineReviewResult(report, digest, reportPath, digestPath, took);
     }
 
     // ---- text helpers ----
