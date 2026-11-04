@@ -1,7 +1,7 @@
 # AgentHub Handoff Context
 
 **Updated:** 2026-11-04 (Timeline review session, afternoon)
-**Branch with the newest work:** `feature/timeline-review` (local, **not pushed**, built on `main` `4ee8905`): ✨ Review on the Timeline window (section 3a). Daniel has a test copy running from `C:\data\agenthub\build-test17` (pid 17648) opened on this repo's timeline; **he has not yet clicked Review in the app**, only seen the live run's report.
+**Branch with the newest work:** `feature/timeline-review` (local, **not pushed**, built on `main` `4ee8905`): ✨ Review on the Timeline window (section 3a). The taskbar build now runs this branch (pid 9440, opened on this repo's timeline); **Daniel has not yet clicked Review in the app**, only seen the live run's report.
 **Next task:** Daniel's verdict on the review (report at `C:\data\agenthub\timeline\diag-report.md`, digest beside it); then push and merge `feature/timeline-review` when he asks. Queued after that: republish the taskbar build (section 1), Timeline phase 2 (section 3), the follow-ups (section 4).
 
 Read `README.md`, `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` first; `AGENTS.md` has the engineering rules.
