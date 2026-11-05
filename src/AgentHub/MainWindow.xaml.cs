@@ -249,14 +249,21 @@ public partial class MainWindow : Window
         if (_orchestrator == null)
         {
             var archive = OrchestratorEngine.DefaultArchive(_runner);
-            _orchestrator = new OrchestratorEngine(_ideaService, _git, _runner) { Archive = archive, Workflows = new WorkflowCatalogue(archive) };
+            _orchestrator = new OrchestratorEngine(_ideaService, _git, _runner)
+            {
+                Archive = archive,
+                Workflows = new WorkflowCatalogue(archive),
+                RepositoryInUse = path => Dispatcher.InvokeAsync(() => EnsureRepositoryAsync(path)).Task.Unwrap()
+            };
         }
         var window = new IdeasWindow(
             _ideaService,
             _orchestrator,
             _usageService,
             paneProvider: PaneForOrchestrator,
-            openContextAction: folder => ShowContext(folder, null))
+            openContextAction: folder => ShowContext(folder, null),
+            repositories: () => _settings.Repositories.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+            addRepository: EnsureRepositoryAsync)
         {
             Owner = this
         };
@@ -815,6 +822,31 @@ public partial class MainWindow : Window
         RefreshRepoList();
         RepoList.SelectedItem = repo;
         StatusText.Text = $"Added {repo.Name}";
+    }
+
+    /// <summary>
+    /// The repository entry for a folder, added to AgentHub's list when it is not there yet. A missing folder is created and a folder
+    /// without Git is initialised, so an idea's new project shows up beside the others (Orchestration window, builds).
+    /// </summary>
+    private async Task<RepositoryDefinition> EnsureRepositoryAsync(string path)
+    {
+        var full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar);
+        if (_settings.Repositories.FirstOrDefault(r => string.Equals(Path.GetFullPath(r.LocalPath).TrimEnd(Path.DirectorySeparatorChar), full, StringComparison.OrdinalIgnoreCase)) is { } known)
+            return known;
+
+        Directory.CreateDirectory(full);
+        if (!await _git.IsRepositoryAsync(full)) await _runner.RunAsync("git", ["init"], full);
+        var repo = new RepositoryDefinition
+        {
+            Name = Path.GetFileName(full),
+            LocalPath = full,
+            RemoteUrl = await _git.GetRemoteUrlAsync(full)
+        };
+        _settings.Repositories.Add(repo);
+        await _settingsService.SaveAsync(_settings);
+        RefreshRepoList();
+        StatusText.Text = $"Added {repo.Name}";
+        return repo;
     }
 
     private async void CloneRepo_Click(object sender, RoutedEventArgs e)

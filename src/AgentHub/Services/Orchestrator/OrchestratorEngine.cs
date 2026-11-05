@@ -68,6 +68,9 @@ public sealed class OrchestratorEngine : IDisposable
     private bool _loopRunning;
     private bool _recovered;
     private bool _staleStatusesFixed;
+
+    /// <summary>Called with the folder a build is about to use (created and git-initialised if needed), so AgentHub can list it among its repositories.</summary>
+    public Func<string, Task>? RepositoryInUse { get; set; }
     private OrchestratorWorkflow? _workflow;
     private bool _turnEndedWhileThinking;
     private bool _sentSinceLastTurn;
@@ -643,6 +646,12 @@ public sealed class OrchestratorEngine : IDisposable
             {
                 await _runner.RunAsync("git", ["init"], idea.TargetDirectory);
                 Log($"Initialised a Git repository in {idea.TargetDirectory}.");
+            }
+
+            if (RepositoryInUse is { } inUse)
+            {
+                try { await inUse(idea.TargetDirectory); }
+                catch (Exception ex) { Log($"Could not add {idea.TargetDirectory} to AgentHub's repositories: {ex.Message}", "Warn"); }
             }
 
             var agenthubDir = Path.Combine(idea.TargetDirectory, ".agenthub");

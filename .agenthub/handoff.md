@@ -175,6 +175,7 @@ It also has three loop tests:
 
 **Follow-ups the same day:**
 - Daniel: "In the build queue of that panel how come two of them say building and one queued?" Code Review Assistant and AI Stock Bot had been left as Building (Session #1) by the 2026-11-04 runs, because nothing reset the status. Now Stop sets the idea to Paused, and suspending a run (closing AgentHub, switching ideas) sets it back to Queued. `RecoverAfterRestartAsync`, called the first time the window opens, moves any leftover Building or WaitingForReset idea to Queued.
+- Daniel: "For the target directory this should really be refering to the repos in the app, it makes it more clear and encorages cleaning up". The free-text Target Directory is now a **Repository** picker over `_settings.Repositories`. A folder that is not in the list shows with ⚠ and a ➕ Add to AgentHub button. Add folder… registers the folder it picks, running git init if needed. ➕ New project creates DesktopClaudeCProjects<name>, runs git init and registers it (`MainWindow.EnsureRepositoryAsync`). New ideas start with no folder, and Build Now asks for one. `OrchestratorEngine.RepositoryInUse` registers any folder a build uses. None of the three existing ideas' folders were in the list on 2026-11-05.
 - Daniel asked for the "💡 Ideas & Build" button and the window to be called **🧭 Orchestration**.
 
 **Not done / for Daniel:**

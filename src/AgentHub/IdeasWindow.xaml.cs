@@ -23,6 +23,8 @@ public partial class IdeasWindow : Window
     private readonly UsageService _usageService;
     private readonly Func<TerminalPaneControl?> _paneProvider;
     private readonly Action<string>? _openContextAction;
+    private readonly Func<IReadOnlyList<RepositoryDefinition>> _repositories;
+    private readonly Func<string, Task<RepositoryDefinition>>? _addRepository;
 
     private readonly ObservableCollection<ProjectIdea> _ideas = [];
     private ProjectIdea? _selectedIdea;
@@ -34,7 +36,9 @@ public partial class IdeasWindow : Window
         OrchestratorEngine orchestrator,
         UsageService usageService,
         Func<TerminalPaneControl?> paneProvider,
-        Action<string>? openContextAction = null)
+        Action<string>? openContextAction = null,
+        Func<IReadOnlyList<RepositoryDefinition>>? repositories = null,
+        Func<string, Task<RepositoryDefinition>>? addRepository = null)
     {
         InitializeComponent();
         Controls.DarkTitleBar.Apply(this);
@@ -45,6 +49,9 @@ public partial class IdeasWindow : Window
         _usageService = usageService;
         _paneProvider = paneProvider;
         _openContextAction = openContextAction;
+        _repositories = repositories ?? (() => []);
+        _addRepository = addRepository;
+        EditRepoCombo.SelectionChanged += (_, _) => UpdateRepoWarning();
 
         IdeasList.ItemsSource = _ideas;
         LogListBox.ItemsSource = _orchestrator.Logs;
@@ -100,7 +107,7 @@ public partial class IdeasWindow : Window
         if (_selectedIdea == null)
         {
             EditTitleBox.Text = string.Empty;
-            EditDirBox.Text = string.Empty;
+            ShowRepositories(null);
             EditDescriptionBox.Text = string.Empty;
             HandoffPreviewBox.Text = string.Empty;
             SteerNotesList.ItemsSource = null;
@@ -108,7 +115,7 @@ public partial class IdeasWindow : Window
         }
 
         EditTitleBox.Text = _selectedIdea.Title;
-        EditDirBox.Text = _selectedIdea.TargetDirectory;
+        ShowRepositories(_selectedIdea.TargetDirectory);
         EditDescriptionBox.Text = _selectedIdea.Description;
         EditThresholdBox.Text = $"{_selectedIdea.ContextHandoffThreshold * 100:0}%";
 
@@ -253,7 +260,7 @@ public partial class IdeasWindow : Window
         if (_selectedIdea == null) return;
 
         _selectedIdea.Title = EditTitleBox.Text.Trim();
-        _selectedIdea.TargetDirectory = EditDirBox.Text.Trim();
+        _selectedIdea.TargetDirectory = SelectedRepositoryPath() ?? _selectedIdea.TargetDirectory;
         _selectedIdea.Description = EditDescriptionBox.Text.Trim();
 
         if (EditAgentCombo.SelectedItem is ComboBoxItem item)
@@ -276,14 +283,11 @@ public partial class IdeasWindow : Window
 
     private async void AddIdea_Click(object sender, RoutedEventArgs e)
     {
-        var defaultProjectsDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Desktop", "ClaudeCProjects");
-
         var newIdea = new ProjectIdea
         {
             Title = $"New App #{_ideas.Count + 1}",
             Description = "Describe the goal, architecture, features, and requirements for this application.",
-            TargetDirectory = Path.Combine(defaultProjectsDir, $"App{_ideas.Count + 1}"),
+            TargetDirectory = "",
             AgentCommand = "claude",
             ContextHandoffThreshold = 0.75,
             Status = IdeaStatus.Queued
@@ -344,6 +348,11 @@ public partial class IdeasWindow : Window
             MessageBox.Show(this, problem, "Workflow", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
+        if (string.IsNullOrWhiteSpace(idea.TargetDirectory))
+        {
+            MessageBox.Show(this, "Pick the repository this idea is built in (or ➕ New project), then Save.", "Repository", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
 
         var pane = _paneProvider();
         if (pane == null)
@@ -402,19 +411,113 @@ public partial class IdeasWindow : Window
         OrchestratorSubtext.Text = "Maintain your app ideas, orchestrate background building while away, auto-wait on Claude usage resets & handoff.";
     }
 
-    private void BrowseTargetDir_Click(object sender, RoutedEventArgs e)
+    // ---- Repository ----
+
+    /// <summary>Marks the idea's folder when it is not one of AgentHub's repositories (shown in the list, flagged, with a one-click add).</summary>
+    private sealed class UnlistedFolder
     {
+        public required string LocalPath { get; init; }
+        public string Name => "⚠ " + (Path.GetFileName(LocalPath.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } n ? n : LocalPath);
+    }
+
+    private static bool SamePath(string a, string b)
+    {
+        try { return string.Equals(Path.GetFullPath(a).TrimEnd(Path.DirectorySeparatorChar), Path.GetFullPath(b).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase); }
+        catch { return string.Equals(a, b, StringComparison.OrdinalIgnoreCase); }
+    }
+
+    private void ShowRepositories(string? selectPath)
+    {
+        var items = new List<object>(_repositories());
+        object? selected = null;
+        if (!string.IsNullOrWhiteSpace(selectPath))
+        {
+            selected = items.OfType<RepositoryDefinition>().FirstOrDefault(r => SamePath(r.LocalPath, selectPath));
+            if (selected == null)
+            {
+                selected = new UnlistedFolder { LocalPath = selectPath };
+                items.Insert(0, selected);
+            }
+        }
+        EditRepoCombo.ItemsSource = items;
+        EditRepoCombo.SelectedItem = selected;
+        UpdateRepoWarning();
+    }
+
+    private string? SelectedRepositoryPath() => EditRepoCombo.SelectedItem switch
+    {
+        RepositoryDefinition r => r.LocalPath,
+        UnlistedFolder u => u.LocalPath,
+        _ => null
+    };
+
+    private void UpdateRepoWarning()
+    {
+        string? warning = EditRepoCombo.SelectedItem switch
+        {
+            UnlistedFolder u => $"{u.LocalPath} is not one of AgentHub's repositories.",
+            RepositoryDefinition { ExistsOnDisk: false } r => $"{r.LocalPath} is missing on disk.",
+            null when _selectedIdea != null => "No repository picked yet.",
+            _ => null
+        };
+        RepoWarningText.Text = warning ?? "";
+        RepoWarningPanel.Visibility = warning == null ? Visibility.Collapsed : Visibility.Visible;
+        var addButton = (Button)RepoWarningPanel.Children[0];
+        addButton.Visibility = EditRepoCombo.SelectedItem is UnlistedFolder ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Adds a folder to AgentHub's repositories, selects it, and saves it on the idea.</summary>
+    private async Task UseFolderAsync(string path)
+    {
+        if (_addRepository == null) return;
+        try
+        {
+            var repo = await _addRepository(path);
+            ShowRepositories(repo.LocalPath);
+            if (_selectedIdea != null)
+            {
+                _selectedIdea.TargetDirectory = repo.LocalPath;
+                await _ideaService.UpdateIdeaAsync(_selectedIdea);
+                LoadHandoffPreview(repo.LocalPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Repository", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private async void AddCurrentFolderAsRepo_Click(object sender, RoutedEventArgs e)
+    {
+        if (EditRepoCombo.SelectedItem is UnlistedFolder u) await UseFolderAsync(u.LocalPath);
+    }
+
+    private async void BrowseTargetDir_Click(object sender, RoutedEventArgs e)
+    {
+        var current = SelectedRepositoryPath();
         using var dialog = new System.Windows.Forms.FolderBrowserDialog
         {
-            Description = "Select target folder where the application will be built",
+            Description = "Pick the folder this idea is built in; it is added to AgentHub's repositories",
             UseDescriptionForTitle = true,
-            InitialDirectory = Directory.Exists(EditDirBox.Text) ? EditDirBox.Text : Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+            InitialDirectory = current != null && Directory.Exists(current) ? current : Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
         };
+        if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK) await UseFolderAsync(dialog.SelectedPath);
+    }
 
-        if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-        {
-            EditDirBox.Text = dialog.SelectedPath;
-        }
+    private async void NewProjectRepo_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedIdea == null) return;
+        var suggested = string.Join("", (EditTitleBox.Text.Trim() is { Length: > 0 } t ? t : _selectedIdea.Title).Split(Path.GetInvalidFileNameChars())).Trim();
+        var name = Microsoft.VisualBasic.Interaction.InputBox(
+            "Name of the new project folder (created under Desktop\\ClaudeCProjects, git init, added to AgentHub's repositories):",
+            "New project", suggested);
+        name = string.Join("", name.Split(Path.GetInvalidFileNameChars())).Trim();
+        if (name.Length == 0) return;
+        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Desktop", "ClaudeCProjects", name);
+        if (Directory.Exists(path) && Directory.EnumerateFileSystemEntries(path).Any() &&
+            MessageBox.Show(this, $"{path} already exists and is not empty. Use it anyway?", "New project", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+        await UseFolderAsync(path);
     }
 
     private void OpenHandoffInContext_Click(object sender, RoutedEventArgs e)
