@@ -2,6 +2,7 @@
 
 **Updated:** 2026-11-05 13:30 (Claude orchestrator + run archive, section 3d, on `feature/claude-orchestrator`; not merged, not tried by Daniel in the app yet)
 **Branch with the newest work:** `feature/claude-orchestrator`, stacked on `feature/ideas-autobuilder` (section 3c, also unmerged). `main` = `origin/main` is still the 2026-11-04 17:25 state below.
+**Taskbar build (2026-11-05 13:36):** Daniel's pin targets `Desktop\AgentHub-App-SSH\AgentHub.exe` (framework-dependent win-x64 publish). Updated at his request to `ab8e530` (`dotnet publish -r win-x64 --self-contained false` to `C:\data\agenthub\publish-orch`, copied over the top, nothing was running); previous folder backed up to `C:\data\agenthub\AgentHub-App-SSH.backup-20261105`.
 **Next task (2026-11-05):** Daniel tries the Claude orchestrator in a test build on a small idea (section 3d), then decides on merging both Ideas branches.
 **Before that (2026-11-04):** nothing queued by Daniel. His next start of the taskbar build picks up the one-colour stream (at 18:11 he was using Claude's test instance from `C:\data\agenthub\build-test26`, the same code, with a Claude Code session on De Beers; leave that instance alone). Candidates: Timeline phase 2 (section 3), the follow-ups (section 4), the session host limits (section 3b). Daniel's running AgentHub (started 16:40) predates the Timeline squash-merge change; his next restart picks it up.
 
