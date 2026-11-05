@@ -194,6 +194,7 @@ It also has three loop tests:
   - The model combo was IsEditable, which the app's ComboBox template cannot show, so it was blank. It is now a plain list, and a model named in a file but missing from the list is added.
   - The Inputs, Orchestrator instructions and Worker rules labels explain what each is for and who reads it.
   - UI test: tests/ui/workflow-editor.ps1, 18 checks. Both UI scripts have a UTF-8 BOM, because PowerShell 5.1 misreads the emoji without it.
+- Daniel: the handoff box "gets cut off" when the window is not full size. The editor column is now a ScrollViewer. `FitEditor` gives `EditorGrid` a definite height, the larger of the visible height and the fixed rows plus 180px for the handoff box, so the star row does not grow to the whole handoff text. UI test `tests/ui/orchestration-scroll.ps1`: at 960x600 it scrolls and the box keeps 180px; at full screen height (1392px here) it fits and the box reaches the panel bottom. The UI helpers now wait for dropdown items to draw (one flaky run of workflow-editor without that).
 - Daniel asked for the "💡 Ideas & Build" button and the window to be called **🧭 Orchestration**.
 
 **Not done / for Daniel:**

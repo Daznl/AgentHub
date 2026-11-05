@@ -51,6 +51,10 @@ public partial class IdeasWindow : Window
         _openContextAction = openContextAction;
         _repositories = repositories ?? (() => []);
         _addRepository = addRepository;
+        // Inside a ScrollViewer the star row would grow to the whole handoff text. Give the editor a definite height instead: the visible
+        // height, or what its fixed parts need plus a 180px handoff box when the window is shorter (then it scrolls).
+        EditorScroll.SizeChanged += (_, _) => FitEditor();
+        EditorGrid.SizeChanged += (_, e) => { if (e.WidthChanged) FitEditor(); };
         EditRepoCombo.SelectionChanged += (_, _) =>
         {
             UpdateRepoWarning();
@@ -103,6 +107,24 @@ public partial class IdeasWindow : Window
         var keep = _ideas.FirstOrDefault(i => i.Id == keepId) ?? _ideas.FirstOrDefault();
         if (keep != null) IdeasList.SelectedItem = keep;
         else ShowEditor(false);
+    }
+
+    private void FitEditor()
+    {
+        var handoffRow = EditorGrid.RowDefinitions[5];
+        double fixedParts = 0;
+        foreach (UIElement child in EditorGrid.Children)
+        {
+            if (Grid.GetRow(child) == 5) continue;
+            child.Measure(new System.Windows.Size(Math.Max(0, EditorGrid.ActualWidth), double.PositiveInfinity));
+        }
+        for (var r = 0; r < 5; r++)
+            fixedParts += EditorGrid.RowDefinitions[r].Height.IsAbsolute
+                ? EditorGrid.RowDefinitions[r].Height.Value
+                : EditorGrid.Children.Cast<UIElement>().Where(c => Grid.GetRow(c) == r).Select(c => c.DesiredSize.Height).DefaultIfEmpty(0).Max();
+        var needed = fixedParts + handoffRow.MinHeight + EditorGrid.Margin.Top + EditorGrid.Margin.Bottom;
+        var height = Math.Max(EditorScroll.ActualHeight, needed);
+        if (Math.Abs(EditorGrid.Height - height) > 0.5 || double.IsNaN(EditorGrid.Height)) EditorGrid.Height = height;
     }
 
     /// <summary>The editor works on the selected idea; with none (an empty queue) it says so instead of doing nothing.</summary>

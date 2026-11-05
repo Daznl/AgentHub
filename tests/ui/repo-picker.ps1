@@ -32,8 +32,12 @@ function Shot($el, $file) {
 function Click($el) { $el.GetCurrentPattern($Invoke).Invoke() }
 function Selected($combo) { ($combo.GetCurrentPattern($Sel).Current.GetSelection() | ForEach-Object { $_.Current.Name }) -join ',' }
 function Items($combo) {
-  $combo.GetCurrentPattern($Exp).Expand(); Start-Sleep -Milliseconds 700
-  $all = $combo.FindAll($TS::Children, (Cond $A::ControlTypeProperty ([System.Windows.Automation.ControlType]::ListItem))); return ,$all }
+  $combo.GetCurrentPattern($Exp).Expand()
+  for ($i = 0; $i -lt 20; $i++) {   # the dropdown draws its items a moment after it opens
+    Start-Sleep -Milliseconds 250
+    $all = $combo.FindAll($TS::Children, (Cond $A::ControlTypeProperty ([System.Windows.Automation.ControlType]::ListItem)))
+    if ($all.Count -gt 0) { break } }
+  return ,$all }
 function Pick($combo, $like) {
   $item = (Items $combo) | Where-Object { $_.Current.Name -like $like } | Select-Object -First 1
   if (-not $item) { throw "no item $like" }

@@ -137,15 +137,17 @@
             <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="Transparent" />
 
             <!-- RIGHT: IDEA EDITOR & HANDOFF PREVIEW -->
-            <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
-                <Grid>
+            <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,12,4,12">
+                <!-- Scrolls when the window is too short for the editor; the handoff box keeps a usable height instead of being cut off. -->
+                <ScrollViewer x:Name="EditorScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <Grid x:Name="EditorGrid" Margin="0,0,8,0">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="110" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
+                        <RowDefinition Height="*" MinHeight="180" />
                     </Grid.RowDefinitions>
 
                     <!-- Idea Title & Target Directory -->
@@ -274,6 +276,7 @@
                     <!-- Handoff Viewer Content -->
                     <TextBox x:Name="HandoffPreviewBox" Grid.Row="5" Style="{StaticResource Editor}" IsReadOnly="True" />
                 </Grid>
+                </ScrollViewer>
             </Border>
         </Grid>
 
