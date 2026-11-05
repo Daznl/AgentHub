@@ -188,6 +188,12 @@ It also has three loop tests:
   - The selection is kept across reloads, and the handoff preview follows the picker.
   - `AGENTHUB_PROJECTS_DIR` lets test copies keep new projects out of the Desktop.
   **UI test:** `tests/ui/repo-picker.ps1`, 18 checks, all passing. It drives a test copy (its own settings, ideas, archive repo and projects folder) through UI Automation patterns only (no mouse or focus), checks ideas.json, settings.json and the disk, and saves screenshots in C:\data\agenthub\uitest. Run it after changing this window. Add folder… (a FolderBrowserDialog) is not driven; it shares UseFolderAsync with Add to AgentHub, which is.
+- Daniel: "There is a bunch of stuff in the template that I cannot modify. I cannot select the model. I cannot type into the input (i don't even know what this means". Templates were read-only until Duplicate, and nothing said so.
+  - Every field of a template is now editable. Save becomes "💾 Save as my workflow", which saves the edited copy ("<name> (my copy)" if not renamed, based-on the template). The template file is never changed.
+  - Use for this idea saves an edited template first.
+  - The model combo was IsEditable, which the app's ComboBox template cannot show, so it was blank. It is now a plain list, and a model named in a file but missing from the list is added.
+  - The Inputs, Orchestrator instructions and Worker rules labels explain what each is for and who reads it.
+  - UI test: tests/ui/workflow-editor.ps1, 18 checks. Both UI scripts have a UTF-8 BOM, because PowerShell 5.1 misreads the emoji without it.
 - Daniel asked for the "💡 Ideas & Build" button and the window to be called **🧭 Orchestration**.
 
 **Not done / for Daniel:**

@@ -47,7 +47,7 @@
             <DockPanel>
                 <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
                     <TextBlock Text="📚 Workflow catalogue" FontSize="15" FontWeight="Bold" />
-                    <TextBlock Text="📋 templates are read-only: Duplicate one to make your own." Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0" />
+                    <TextBlock Text="📋 templates: edit one and Save to make your own; the template stays as it is." Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0" />
                 </StackPanel>
                 <TextBlock x:Name="StorageText" DockPanel.Dock="Bottom" Foreground="{StaticResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0" />
                 <ListBox x:Name="WorkflowList" SelectionChanged="WorkflowList_SelectionChanged" Background="#0A111B" BorderBrush="{StaticResource BorderBrush}" Foreground="{StaticResource TextBrush}">
@@ -101,7 +101,7 @@
                     </StackPanel>
                     <StackPanel Grid.Column="1" Margin="0,0,8,0">
                         <TextBlock Text="Orchestrator model" Style="{StaticResource Label}" />
-                        <ComboBox x:Name="ModelCombo" Height="28" IsEditable="True" Background="#0E1624" Foreground="{StaticResource TextBrush}">
+                        <ComboBox x:Name="ModelCombo" Height="28" Margin="0" Background="#0E1624" Foreground="{StaticResource TextBrush}" ToolTip="The Claude model the orchestrator runs on">
                             <ComboBoxItem Content="sonnet" />
                             <ComboBoxItem Content="opus" />
                             <ComboBoxItem Content="haiku" />
@@ -109,7 +109,7 @@
                     </StackPanel>
                     <StackPanel Grid.Column="2" Margin="0,0,8,0">
                         <TextBlock Text="Fresh worker" Style="{StaticResource Label}" />
-                        <ComboBox x:Name="HandoffCombo" Height="28" Background="#0E1624" Foreground="{StaticResource TextBrush}">
+                        <ComboBox x:Name="HandoffCombo" Height="28" Margin="0" Background="#0E1624" Foreground="{StaticResource TextBrush}">
                             <ComboBoxItem Content="when context fills" Tag="on-context" />
                             <ComboBoxItem Content="after each stage" Tag="after-each-stage" />
                         </ComboBox>
@@ -140,16 +140,19 @@
                 </Grid>
 
                 <StackPanel Grid.Row="3" Margin="0,0,0,8">
-                    <TextBlock Text="Inputs: one per line, name: value. The instructions use them as {{name}}. Paste paths here, e.g. pipeline_location: C:\work\pipeline.xlsx" Style="{StaticResource Label}" TextWrapping="Wrap" />
+                    <TextBlock Style="{StaticResource Label}" TextWrapping="Wrap"
+                               Text="Inputs: the details this workflow needs from you, such as where your pipeline is. Replace each &lt;…&gt; placeholder after the colon with your own value (e.g. pipeline_location: C:\work\pipeline.xlsx). Wherever the instructions say {{pipeline_location}}, your value is filled in. Builder needs none." />
                     <TextBox x:Name="InputsBox" Style="{StaticResource Editor}" Height="58" />
                 </StackPanel>
 
                 <DockPanel Grid.Row="4" Margin="0,0,0,8">
-                    <TextBlock DockPanel.Dock="Top" Text="Orchestrator instructions (added after AgentHub's fixed core: decision JSON, message format, limits)" Style="{StaticResource Label}" />
+                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource Label}" TextWrapping="Wrap"
+                                   Text="Orchestrator instructions: what the orchestrator (the Sonnet session directing the build) should make the worker do, check, and count as done. Add your own steps at the end. AgentHub adds the decision format and limits itself." />
                     <TextBox x:Name="InstructionsBox" Style="{StaticResource Editor}" />
                 </DockPanel>
 
-                <TextBlock Grid.Row="5" Text="Worker rules (added to every worker session's first message, after AgentHub's own)" Style="{StaticResource Label}" />
+                <TextBlock Grid.Row="5" Style="{StaticResource Label}" TextWrapping="Wrap"
+                           Text="Worker rules: standing rules for the worker (the Claude Code session doing the building), sent at the start of every worker session. E.g. never overwrite the raw input files." />
                 <TextBox Grid.Row="6" x:Name="WorkerRulesBox" Style="{StaticResource Editor}" Margin="0,0,0,8" />
 
                 <DockPanel Grid.Row="7">

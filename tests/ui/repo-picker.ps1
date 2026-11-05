@@ -1,4 +1,4 @@
-# UI test for the Orchestration window's Repository picker and New project, on a TEST AgentHub with its own settings,
+﻿# UI test for the Orchestration window's Repository picker and New project, on a TEST AgentHub with its own settings,
 # ideas, archive repo and projects folder. UI Automation patterns only: no mouse, no keyboard, no focus stealing.
 param([string]$Exe = 'C:\data\agenthub\build-repo\AgentHub.exe')
 $ErrorActionPreference = 'Stop'

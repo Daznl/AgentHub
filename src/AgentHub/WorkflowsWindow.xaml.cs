@@ -59,11 +59,12 @@ public partial class WorkflowsWindow : Window
     private void Show(OrchestratorWorkflow? w)
     {
         _current = w;
-        var editable = w is { IsTemplate: false };
+        // Templates are editable too: Save stores the edited version as Daniel's own workflow and leaves the template as it is.
+        var editable = w != null;
         NameBox.Text = w?.Name ?? "";
         DescriptionBox.Text = w?.Description ?? "";
         UseWhenBox.Text = w?.UseWhen ?? "";
-        ModelCombo.Text = w?.Model ?? "sonnet";
+        SelectModel(w?.Model ?? "sonnet");
         HandoffCombo.SelectedIndex = w?.Handoff == WorkflowHandoff.AfterEachStage ? 1 : 0;
         ThresholdBox.Text = w?.ContextThreshold is { } t ? $"{t * 100:0}%" : "";
         WorkerCommandBox.Text = w?.WorkerCommand ?? "";
@@ -75,16 +76,26 @@ public partial class WorkflowsWindow : Window
             box.IsReadOnly = !editable;
         ModelCombo.IsEnabled = HandoffCombo.IsEnabled = editable;
         SaveBtn.IsEnabled = editable;
-        DeleteBtn.IsEnabled = editable && !string.IsNullOrEmpty(w!.Id);
+        SaveBtn.Content = w is { IsTemplate: true } ? "💾 Save as my workflow" : "💾 Save";
+        DeleteBtn.IsEnabled = w is { IsTemplate: false, Id.Length: > 0 };
         DuplicateBtn.IsEnabled = w != null;
 
         ModeText.Text = w switch
         {
             null => "No workflow selected.",
-            { IsTemplate: true } => $"📋 Template{(w.MissingInputs().Count > 0 ? $" with inputs to fill in ({string.Join(", ", w.MissingInputs())})" : "")}: Duplicate it to make your own.",
+            { IsTemplate: true } => "📋 Template: change anything you like, then 💾 Save as my workflow. The template itself stays as it is." +
+                (w.MissingInputs().Count > 0 ? $" Fill in: {string.Join(", ", w.MissingInputs())} (Inputs box)." : ""),
             { Id: "" } => "New workflow, not saved yet.",
             _ => w.MissingInputs() is { Count: > 0 } missing ? $"Fill in: {string.Join(", ", missing)}" : (w.BasedOn is { } b ? $"Based on {b}." : "")
         };
+    }
+
+    /// <summary>Selects the model in the list, adding it when a workflow file names one the list does not have.</summary>
+    private void SelectModel(string model)
+    {
+        var item = ModelCombo.Items.OfType<ComboBoxItem>().FirstOrDefault(i => string.Equals(i.Content?.ToString(), model, StringComparison.OrdinalIgnoreCase));
+        if (item == null) { item = new ComboBoxItem { Content = model }; ModelCombo.Items.Add(item); }
+        ModelCombo.SelectedItem = item;
     }
 
     /// <summary>The editor's fields onto the workflow being edited.</summary>
@@ -93,7 +104,7 @@ public partial class WorkflowsWindow : Window
         w.Name = NameBox.Text.Trim();
         w.Description = DescriptionBox.Text.Trim();
         w.UseWhen = UseWhenBox.Text.Trim();
-        w.Model = string.IsNullOrWhiteSpace(ModelCombo.Text) ? "sonnet" : ModelCombo.Text.Trim();
+        w.Model = (ModelCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() is { Length: > 0 } m ? m : "sonnet";
         w.Handoff = (HandoffCombo.SelectedItem as ComboBoxItem)?.Tag as string == "after-each-stage" ? WorkflowHandoff.AfterEachStage : WorkflowHandoff.OnContext;
         var t = ThresholdBox.Text.Replace("%", "").Trim();
         w.ContextThreshold = double.TryParse(t, out var v) ? Math.Clamp(v > 1 ? v / 100 : v, 0.40, 0.95) : null;
@@ -133,10 +144,31 @@ public partial class WorkflowsWindow : Window
 
     private async void Save_Click(object sender, RoutedEventArgs e) => await SaveAsync();
 
+    /// <summary>The template with the editor's fields applied, as a new workflow of Daniel's (not saved yet).</summary>
+    private OrchestratorWorkflow EditedCopyOf(OrchestratorWorkflow template)
+    {
+        var copy = template.Duplicate(template.Name);
+        ReadFields(copy);
+        if (copy.Name == template.Name || copy.Name.Length == 0) copy.Name = $"{template.Name} (my copy)";
+        copy.BasedOn = template.Name;
+        return copy;
+    }
+
+    /// <summary>True when the editor shows something other than the template as shipped.</summary>
+    private bool TemplateEdited(OrchestratorWorkflow template)
+    {
+        var probe = template.Duplicate(template.Name);
+        ReadFields(probe);
+        probe.BasedOn = template.BasedOn;
+        return probe.Serialize() != template.Duplicate(template.Name).Also(c => c.BasedOn = template.BasedOn).Serialize();
+    }
+
     private async Task<bool> SaveAsync()
     {
-        if (_current is not { IsTemplate: false } w) return false;
-        ReadFields(w);
+        if (_current == null) return false;
+        var w = _current.IsTemplate ? EditedCopyOf(_current) : _current;
+        if (!_current.IsTemplate) ReadFields(w);
+        _current = w;
         SaveBtn.IsEnabled = false;
         try
         {
@@ -149,7 +181,7 @@ public partial class WorkflowsWindow : Window
             MessageBox.Show(this, ex.Message, "Save workflow", MessageBoxButton.OK, MessageBoxImage.Warning);
             return false;
         }
-        finally { SaveBtn.IsEnabled = _current is { IsTemplate: false }; }
+        finally { SaveBtn.IsEnabled = _current != null; }
     }
 
     private async void Delete_Click(object sender, RoutedEventArgs e)
@@ -171,14 +203,14 @@ public partial class WorkflowsWindow : Window
     private async void Use_Click(object sender, RoutedEventArgs e)
     {
         if (!_canUse || _current == null) return;
-        // Unsaved edits of an own workflow are saved first, so the idea points at what is on screen.
-        if (!_current.IsTemplate && !await SaveAsync()) return;
+        // Edits are saved first (a changed template becomes Daniel's own workflow), so the idea points at what is on screen.
+        if ((!_current.IsTemplate || TemplateEdited(_current)) && !await SaveAsync()) return;
         var chosen = _current;
         if (chosen.MissingInputs() is { Count: > 0 } missing)
         {
             MessageBox.Show(this,
                 chosen.IsTemplate
-                    ? $"\"{chosen.Name}\" needs {string.Join(", ", missing)} filled in. Duplicate it, fill those in, save, and use your copy."
+                    ? $"\"{chosen.Name}\" needs {string.Join(", ", missing)} filled in: replace the <…> in the Inputs box with your value, then Use for this idea again."
                     : $"Fill in {string.Join(", ", missing)} first.",
                 "Workflow inputs", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
@@ -186,4 +218,9 @@ public partial class WorkflowsWindow : Window
         ChosenWorkflowId = chosen.Id;
         DialogResult = true;
     }
+}
+
+internal static class ObjectExtensions
+{
+    public static T Also<T>(this T value, Action<T> action) { action(value); return value; }
 }
