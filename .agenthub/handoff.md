@@ -1,6 +1,6 @@
 # AgentHub Handoff Context
 
-**Updated:** 2026-11-05 15:50 (session handoff). Newest work is on branch `feature/workflow-catalogue` (head `9b35272`), stacked on `feature/claude-orchestrator` and `feature/ideas-autobuilder`. Nothing is merged and nothing is pushed: `main` = `origin/main` is still the 2026-11-04 17:25 state. Merge or push only when Daniel asks.
+**Updated:** 2026-11-05 15:50 (session handoff). Newest work is on branch `feature/workflow-catalogue` (head `9b35272`), stacked on `feature/claude-orchestrator` and `feature/ideas-autobuilder`. Daniel asked to merge and push at 15:55: main was fast-forwarded to it and pushed to origin (Daznl/AgentHub). The archive branch agenthub-workflows is still local only. Merge or push only when Daniel asks.
 
 **Where things stand:**
 - **The three stacked branches** hold the Ideas window (now **🧭 Orchestration**, section 3c), the Claude orchestrator with its run archive (3d), and the workflow catalogue plus everything Daniel asked for after it (3e and its follow-ups).
@@ -27,7 +27,7 @@ Never kill his instance. Check that the published dll contains the change (metho
 
 **Next (nothing queued by Daniel):**
 - Watch his first real build of New App #1.
-- Then ask whether to merge the three branches to main and push `agenthub-workflows`.
+- Then ask whether to push `agenthub-workflows` (his saved workflows) to GitHub.
 
 **Open items:**
 - "Review this run" button (section 3d).
