@@ -72,6 +72,10 @@
   - Quota cap monitor: checks live Anthropic OAuth usage, pauses when cap is approached, displays countdown timer until `ResetsAt`, and resumes automatically when quota resets
   - Context window handoff loop: monitors transcript token consumption via `ContextWindowTracker`, prompts clean handoff documentation to `.agenthub/handoff.md` when reaching threshold (e.g. 75%), terminates bloated session cleanly, and launches a fresh session continuing from handoff notes
   - GitHub synchronization: 1-click fetch/pull/compile for AgentHub directly from GitHub
+- [x] **Claude orchestrator** (`ClaudeOrchestratorBrain`, `OrchestratorMessages`, `OrchestratorDecision`): a headless Sonnet Claude Code session directs the worker turn by turn with JSON decisions; steers go to it, not the worker; hard limits (usage cap, context handoff, decision cap) stay in code
+- [x] **Run archive** (`RunRecorder`, `RunReview`, `RunArchivePublisher`): every run recorded live, REVIEW.md + INDEX.md, committed to the `orchestrator-runs` branch through a dedicated worktree
+- [ ] "Review this run" button: hand a REVIEW.md to Claude and ask what the orchestrator prompt should do differently
+- [ ] Orchestrator model and decision cap as settings (now `sonnet` / 400 in code)
 
 ## Multi-Session Cockpit Stages (Active)
 

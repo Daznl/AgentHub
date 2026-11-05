@@ -27,10 +27,10 @@ public class PromptSubmitTests
         Assert.Equal(expected, AgentHub.Services.Orchestrator.OrchestratorEngine.IsMarkedCompleted(handoff));
 
     [Fact]
-    public void Session_and_continue_prompts_tell_the_agent_how_to_finish()
+    public void Worker_rules_tell_the_agent_how_to_finish_and_what_the_orchestrator_sees()
     {
-        Assert.Contains("[COMPLETED]", AgentHub.Services.Orchestrator.OrchestratorEngine.AutonomyRules);
-        Assert.Contains("[COMPLETED]", AgentHub.Services.Orchestrator.OrchestratorEngine.ContinuePrompt);
+        Assert.Contains("[COMPLETED]", AgentHub.Services.Orchestrator.OrchestratorMessages.AutonomyRules);
+        Assert.Contains("summary", AgentHub.Services.Orchestrator.OrchestratorMessages.AutonomyRules);
     }
 
     [Theory]

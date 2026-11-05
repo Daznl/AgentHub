@@ -52,6 +52,8 @@ public partial class IdeasWindow : Window
         _orchestrator.CurrentIdeaChanged += OnOrchestratorCurrentIdeaChanged;
         _orchestrator.LogAdded += _ => ScrollLogToBottom();
         _orchestrator.Steering.Changed += OnSteeringChanged;
+        _orchestrator.ProgressChanged += OnOrchestratorProgress;
+        _orchestrator.ThinkingChanged += OnOrchestratorThinking;
 
         _uiRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _uiRefreshTimer.Tick += (_, _) => RefreshStatusMetrics();
@@ -70,6 +72,8 @@ public partial class IdeasWindow : Window
             _orchestrator.StateChanged -= OnOrchestratorStateChanged;
             _orchestrator.CurrentIdeaChanged -= OnOrchestratorCurrentIdeaChanged;
             _orchestrator.Steering.Changed -= OnSteeringChanged;
+            _orchestrator.ProgressChanged -= OnOrchestratorProgress;
+            _orchestrator.ThinkingChanged -= OnOrchestratorThinking;
         };
     }
 
@@ -162,7 +166,7 @@ public partial class IdeasWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"Could not record the note: {ex.Message}", "Steer", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, $"Could not send the steer: {ex.Message}", "Steer", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
         {
@@ -294,7 +298,7 @@ public partial class IdeasWindow : Window
         var pane = _paneProvider();
         if (pane == null)
         {
-            MessageBox.Show(this, "No Cockpit pane available to launch build.", "Cockpit", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, "Every Cockpit pane has a running session. Close one (or end its session) so the builder gets a pane of its own.", "Cockpit", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -317,7 +321,7 @@ public partial class IdeasWindow : Window
             var pane = _paneProvider();
             if (pane == null)
             {
-                MessageBox.Show(this, "Please open at least one terminal in the Cockpit to run the orchestrator.", "Cockpit", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, "Every Cockpit pane has a running session. Close one (or end its session) so the builder gets a pane of its own.", "Cockpit", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
@@ -370,6 +374,30 @@ public partial class IdeasWindow : Window
     }
 
     private void ClearLog_Click(object sender, RoutedEventArgs e) => _orchestrator.Logs.Clear();
+
+    private void OnOrchestratorProgress(string progress) =>
+        Dispatcher.InvokeAsync(() => { if (!_orchestrator.IsThinking) OrchestratorProgressLabel.Text = progress; });
+
+    private void OnOrchestratorThinking(bool thinking) =>
+        Dispatcher.InvokeAsync(() => OrchestratorProgressLabel.Text = thinking
+            ? "thinking…" + (_orchestrator.LatestProgress is { } p ? "  (last: " + p + ")" : "")
+            : _orchestrator.LatestProgress ?? "Waiting for the builder");
+
+    /// <summary>Opens the run archive: the repository branch's INDEX.md when it exists, else the local runs folder.</summary>
+    private void OpenRuns_Click(object sender, RoutedEventArgs e)
+    {
+        var index = _orchestrator.Publisher is { } p ? Path.Combine(p.RunsPath, "INDEX.md") : null;
+        var target = index != null && File.Exists(index) ? index : _orchestrator.RunsRoot;
+        try
+        {
+            Directory.CreateDirectory(_orchestrator.RunsRoot);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(target) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Could not open {target}: {ex.Message}", "Runs", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
 
     private void OnOrchestratorStateChanged(OrchestratorState state) =>
         Dispatcher.Invoke(() =>

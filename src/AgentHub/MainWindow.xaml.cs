@@ -222,6 +222,21 @@ public partial class MainWindow : Window
 
     private void OpenIdeas_Click(object sender, RoutedEventArgs e) => ShowIdeas();
 
+    /// <summary>
+    /// The pane the build worker runs in: the one it already has, else an idle pane, else a new one. Never a pane with a
+    /// running session of Daniel's (AGENTS.md: never replace a running session). Null when every pane is busy.
+    /// </summary>
+    private TerminalPaneControl? PaneForOrchestrator()
+    {
+        if (_orchestrator?.ActivePane is { } current && _panes.Contains(current)) return current;
+        if (_panes.FirstOrDefault(p => !p.IsRunning) is { } idle) return idle;
+        if (_panes.Count >= MaxPanes) return null;
+        var pane = CreateTerminalPane();
+        _panes.Add(pane);
+        RebuildTerminalLayout();
+        return pane;
+    }
+
     private void ShowIdeas()
     {
         if (_ideasWindow is not null)
@@ -231,12 +246,12 @@ public partial class MainWindow : Window
             return;
         }
 
-        _orchestrator ??= new OrchestratorEngine(_ideaService, _git, _runner);
+        _orchestrator ??= new OrchestratorEngine(_ideaService, _git, _runner) { Publisher = OrchestratorEngine.DefaultPublisher(_runner) };
         var window = new IdeasWindow(
             _ideaService,
             _orchestrator,
             _usageService,
-            paneProvider: () => _panes.FirstOrDefault(p => p.IsRunning) ?? _panes.FirstOrDefault() ?? CreateTerminalPane(),
+            paneProvider: PaneForOrchestrator,
             openContextAction: folder => ShowContext(folder, null))
         {
             Owner = this

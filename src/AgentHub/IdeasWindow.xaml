@@ -191,20 +191,20 @@
                         <TextBox x:Name="EditDescriptionBox" Style="{StaticResource Editor}" />
                     </DockPanel>
 
-                    <!-- Steer the build: direction delivered at the agent's next turn end (or now) -->
+                    <!-- Message the orchestrator: steers go to the orchestrator, never straight to the worker -->
                     <Border Grid.Row="3" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,0,10">
                         <StackPanel>
                             <DockPanel Margin="0,0,0,4">
-                                <TextBlock Text="🧭 Steer this build" FontWeight="SemiBold" FontSize="12" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" />
-                                <TextBlock Text="Queued notes go in when the agent next finishes a turn; also saved under Steering notes in handoff.md" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="10,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="🧭 Message the orchestrator" FontWeight="SemiBold" FontSize="12" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" />
+                                <TextBlock Text="A steer for the orchestrator: it decides how to pass it to the builder, by default when the builder's turn ends" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="10,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                             </DockPanel>
                             <DockPanel>
                                 <StackPanel DockPanel.Dock="Right" Margin="8,0,0,0" VerticalAlignment="Top">
-                                    <Button x:Name="QueueSteerBtn" Content="🕒 Queue for next turn" Click="QueueSteer_Click" Background="#2563EB" FontWeight="SemiBold" FontSize="11" Padding="10,4" Margin="0,0,0,4" ToolTip="Deliver when the agent next finishes a turn (straight away if it is idle). Ctrl+Enter" />
-                                    <Button x:Name="SendSteerNowBtn" Content="⚡ Send now" Click="SendSteerNow_Click" FontSize="11" Padding="10,4" ToolTip="Type it into the running session now; Claude Code reads it at its next step" />
+                                    <Button x:Name="QueueSteerBtn" Content="🧭 Send to orchestrator" Click="QueueSteer_Click" Background="#2563EB" FontWeight="SemiBold" FontSize="11" Padding="10,4" Margin="0,0,0,4" ToolTip="The orchestrator gets it when the builder next finishes a turn (straight away if the builder is idle). Ctrl+Enter" />
+                                    <Button x:Name="SendSteerNowBtn" Content="⚡ Urgent" Click="SendSteerNow_Click" FontSize="11" Padding="10,4" ToolTip="The orchestrator gets it now and relays it to the builder straight away, even mid-turn" />
                                 </StackPanel>
                                 <TextBox x:Name="SteerBox" Style="{StaticResource Editor}" Height="54" FontFamily="Segoe UI" PreviewKeyDown="SteerBox_PreviewKeyDown"
-                                         ToolTip="e.g. Focus on a backtest report before more training runs" />
+                                         ToolTip="e.g. Focus on a backtest report before more training runs. This goes to the orchestrator, not the builder." />
                             </DockPanel>
                             <ItemsControl x:Name="SteerNotesList" Margin="0,6,0,0">
                                 <ItemsControl.ItemTemplate>
@@ -221,7 +221,7 @@
                                                     </Style>
                                                 </Button.Style>
                                             </Button>
-                                            <TextBlock DockPanel.Dock="Left" Text="{Binding StatusText}" Width="92" FontSize="11" Foreground="#FBBF24">
+                                            <TextBlock DockPanel.Dock="Left" Text="{Binding StatusText}" Width="118" FontSize="11" Foreground="#FBBF24">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
                                                         <Style.Triggers>
@@ -277,7 +277,14 @@
 
                     <!-- Next Reset Timer -->
                     <TextBlock Text="Next Quota Reset:" Foreground="{StaticResource MutedBrush}" FontSize="11" />
-                    <TextBlock x:Name="ResetCountdownLabel" Text="None active" FontSize="11" FontWeight="SemiBold" Foreground="#F59E0B" />
+                    <TextBlock x:Name="ResetCountdownLabel" Text="None active" FontSize="11" FontWeight="SemiBold" Foreground="#F59E0B" Margin="0,1,0,8" />
+
+                    <!-- The orchestrator's own one-line progress -->
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="📂 Runs" Click="OpenRuns_Click" FontSize="10" Padding="6,1" ToolTip="Open the recorded orchestrator runs (INDEX.md and one REVIEW.md per run)" />
+                        <TextBlock Text="🧠 Orchestrator (Sonnet):" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" />
+                    </DockPanel>
+                    <TextBlock x:Name="OrchestratorProgressLabel" Text="Not running" FontSize="11" Foreground="#A78BFA" TextWrapping="Wrap" MaxHeight="44" TextTrimming="CharacterEllipsis" Margin="0,1,0,0" />
                 </StackPanel>
 
                 <!-- SPLITTER -->

@@ -11,7 +11,8 @@ public sealed class ProcessRunner
         string? workingDirectory = null,
         CancellationToken cancellationToken = default,
         TimeSpan? timeout = null,
-        string? standardInput = null)
+        string? standardInput = null,
+        IEnumerable<string>? removeEnvironment = null)
     {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         linkedCts.CancelAfter(timeout ?? TimeSpan.FromSeconds(30));
@@ -34,6 +35,10 @@ public sealed class ProcessRunner
 
         foreach (var arg in arguments)
             psi.ArgumentList.Add(arg);
+
+        // Variables the child must not inherit (e.g. an API key that would override the user's own CLI login).
+        foreach (var name in removeEnvironment ?? [])
+            psi.Environment.Remove(name);
 
         using var process = new Process { StartInfo = psi };
         var stdout = new StringBuilder();
