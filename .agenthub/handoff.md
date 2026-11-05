@@ -1,11 +1,41 @@
 # AgentHub Handoff Context
 
-**Updated:** 2026-11-05 13:30 (Claude orchestrator + run archive, section 3d, on `feature/claude-orchestrator`; not merged, not tried by Daniel in the app yet)
-**Branch with the newest work:** `feature/claude-orchestrator`, stacked on `feature/ideas-autobuilder` (section 3c, also unmerged). `main` = `origin/main` is still the 2026-11-04 17:25 state below.
-**Standing rule (Daniel, 2026-11-05):** "always load it into the app I open on the taskbar". After every change that builds and passes its tests, publish to `C:dataagenthubpublish-wf` and run `C:dataagenthubswap-taskbar-wf.ps1` in the background with a new backup name. The script waits for him to close his instance, then backs up and copies. Never kill his instance. Merging to main still waits for him.
-**Taskbar build (2026-11-05, workflow catalogue):** Daniel asked to update it to `564d607` (feature/workflow-catalogue). Published to `C:dataagenthubpublish-wf`; `C:dataagenthubswap-taskbar-wf.ps1` waits for his running instance to close, backs the folder up to `C:dataagenthubAgentHub-App-SSH.backup-20261105-wf` and copies the build over.
-**Taskbar build (2026-11-05 13:36):** Daniel's pin targets `Desktop\AgentHub-App-SSH\AgentHub.exe` (framework-dependent win-x64 publish). Updated at his request to `ab8e530` (`dotnet publish -r win-x64 --self-contained false` to `C:\data\agenthub\publish-orch`, copied over the top, nothing was running); previous folder backed up to `C:\data\agenthub\AgentHub-App-SSH.backup-20261105`.
-**Next task (2026-11-05):** Daniel tries the Claude orchestrator in a test build on a small idea (section 3d), then decides on merging both Ideas branches.
+**Updated:** 2026-11-05 15:50 (session handoff). Newest work is on branch `feature/workflow-catalogue` (head `9b35272`), stacked on `feature/claude-orchestrator` and `feature/ideas-autobuilder`. Nothing is merged and nothing is pushed: `main` = `origin/main` is still the 2026-11-04 17:25 state. Merge or push only when Daniel asks.
+
+**Where things stand:**
+- **The three stacked branches** hold the Ideas window (now **🧭 Orchestration**, section 3c), the Claude orchestrator with its run archive (3d), and the workflow catalogue plus everything Daniel asked for after it (3e and its follow-ups).
+- **Daniel uses it from the taskbar build,** which now runs `9b35272`. He has seen it working: the repository picker, editable templates, the scrolling editor, and the orchestrator correctly pausing on an empty spec.
+- **His ideas file:** `ideas.json` holds one idea, "New App #1" (Paused, waiting for him). Its repository is `Desktop\ClaudeCProjects\New App #1`, with no commits yet and a stale starter handoff that the next build rewrites. He is about to paste his spec and press Build Now. The run so far is `C:\data\agenthub\orchestrator-runs\2026-11-05_1539_new-app-1_6fd9b0`.
+- **His three older ideas** (Code Review Assistant, Autonomous Retail app, AI Stock Bot) were deleted at 14:45. Only the confirmed 🗑 Delete can do that, so it was most likely him. When asked, he did not say otherwise.
+- **The archive branch:** `agenthub-workflows` exists locally only, worktree `C:\data\agenthub\workflows-archive`. Pushing it is what makes his workflows available on his work computer. Ask him first.
+
+**Standing rule (Daniel, 2026-11-05): "always load it into the app I open on the taskbar".** After every change that builds and passes its tests:
+1. Run `dotnet publish src/AgentHub/AgentHub.csproj -c Release -r win-x64 --self-contained false -o C:\data\agenthub\publish-wf`.
+2. Set a new backup name in `C:\data\agenthub\swap-taskbar-wf.ps1` (`$backup`; `-wf7` is taken).
+3. Run the script in the background. It waits for Daniel to close his instance (`Desktop\AgentHub-App-SSH\AgentHub.exe`), backs the folder up and copies the build in.
+4. Tell him to close and reopen AgentHub, and confirm when the swap is done.
+
+Never kill his instance. Check that the published dll contains the change (method names are ASCII; UI strings are UTF-16). If the swap script is started on a stale `publish-wf`, stop it.
+
+**Testing rule (Daniel: "make sure to test these"):** UI changes to the Orchestration or Workflows windows get a UI test in `tests/ui/*.ps1`.
+- **How they run:** each script drives a test copy (`C:\data\agenthub\build-repo`; its own settings, ideas, archive repo and projects folder under `C:\data\agenthub\test-settings-repo`) through UI Automation patterns only, with no mouse or focus. They check files on disk, and screenshots go to `C:\data\agenthub\uitest`.
+- **The four scripts:** `repo-picker`, `workflow-editor`, `orchestration-scroll` and `unsaved-spec`, all passing.
+- **To run them:** first `dotnet build src/AgentHub/AgentHub.csproj -c Release -o C:\data\agenthub\build-repo`, then `powershell -File tests/ui/<name>.ps1`.
+- **Script files keep a UTF-8 BOM,** because PowerShell 5.1 misreads the emoji without it.
+- **Owned windows appear under their owner** in the UI Automation tree, and MessageBox OK buttons are Panes, so close those dialogs with WindowPattern.
+- **The unit tests:** `dotnet test tests/AgentHub.Tests/AgentHub.Tests.csproj -c Release`, 278 pass and 3 live tests are skipped.
+
+**Next (nothing queued by Daniel):**
+- Watch his first real build of New App #1.
+- Then ask whether to merge the three branches to main and push `agenthub-workflows`.
+
+**Open items:**
+- "Review this run" button (section 3d).
+- The orchestrator model and decision cap as settings.
+- Add folder… is not driven by a UI test (it opens a FolderBrowserDialog).
+- The Build Queue cards have uneven widths.
+- His repository list has duplicates worth cleaning up: two AgentHub, two OverlordHQ, Mech-Game-Recovery twice, and the `_review_20261004` copies.
+
 **Before that (2026-11-04):** nothing queued by Daniel. His next start of the taskbar build picks up the one-colour stream (at 18:11 he was using Claude's test instance from `C:\data\agenthub\build-test26`, the same code, with a Claude Code session on De Beers; leave that instance alone). Candidates: Timeline phase 2 (section 3), the follow-ups (section 4), the session host limits (section 3b). Daniel's running AgentHub (started 16:40) predates the Timeline squash-merge change; his next restart picks it up.
 
 Read `README.md`, `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` first; `AGENTS.md` has the engineering rules.
