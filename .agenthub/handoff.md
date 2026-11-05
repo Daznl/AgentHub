@@ -195,6 +195,11 @@ It also has three loop tests:
   - The Inputs, Orchestrator instructions and Worker rules labels explain what each is for and who reads it.
   - UI test: tests/ui/workflow-editor.ps1, 18 checks. Both UI scripts have a UTF-8 BOM, because PowerShell 5.1 misreads the emoji without it.
 - Daniel: the handoff box "gets cut off" when the window is not full size. The editor column is now a ScrollViewer. `FitEditor` gives `EditorGrid` a definite height, the larger of the visible height and the fixed rows plus 180px for the handoff box, so the star row does not grow to the whole handoff text. UI test `tests/ui/orchestration-scroll.ps1`: at 960x600 it scrolls and the box keeps 180px; at full screen height (1392px here) it fits and the box reaches the panel bottom. The UI helpers now wait for dropdown items to draw (one flaky run of workflow-editor without that).
+- Daniel (15:39): "I typed in a big paragraph and hit the play button but it says this: What should New APP #1 be... did it not use my paragraph?" It did not. Build Now builds the *saved* idea. The paragraph was never saved with 💾, and the state-change reload then reset the editor, so the text is gone. The orchestrator correctly paused and asked (run 2026-11-05_1539_new-app-1_6fd9b0). Fixed:
+  - `SaveEditorAsync` saves typed edits before Build Now, Start/Resume, every reload, and when switching ideas. It writes only the editor fields onto the latest record from disk, so engine status changes are kept.
+  - Resuming a run with a live worker sends the current [SPEC].
+  - The starter `.agenthub/handoff.md` (still "Status: Not started.") is rewritten from the current spec on each build. Before, it kept the placeholder Goal, which a unit test caught. New App #1's folder still has that stale starter; the next build rewrites it.
+  - Tests: unit `Writing_the_spec_after_a_question_and_pressing_Build_Now_hands_the_new_spec_to_the_orchestrator`; UI `tests/ui/unsaved-spec.ps1` (6 checks). Build Now in the UI test is stopped by an unfilled workflow, so it never really builds.
 - Daniel asked for the "💡 Ideas & Build" button and the window to be called **🧭 Orchestration**.
 
 **Not done / for Daniel:**

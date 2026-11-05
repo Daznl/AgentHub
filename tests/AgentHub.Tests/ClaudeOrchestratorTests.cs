@@ -493,4 +493,35 @@ public class OrchestratorLoopTests : IDisposable
             await UntilReviewed();
         }
     }
+
+    [Fact]
+    public async Task Writing_the_spec_after_a_question_and_pressing_Build_Now_hands_the_new_spec_to_the_orchestrator()
+    {
+        // Daniel 2026-11-05: Build Now on the placeholder spec, the orchestrator asked "What should New App #1 be?", he wrote it.
+        var brain = new ScriptedBrain(
+            new OrchestratorDecision(OrchestratorAction.PauseForDaniel, null, "none", "Spec is only the placeholder", "What should New App #1 be?"),
+            Send("Build the habit tracker: start with the data model."));
+        var (engine, ideas, idea) = Setup(brain);
+        idea.Description = "Describe the goal, architecture, features, and requirements for this application.";
+        await ideas.AddIdeaAsync(idea);
+        await OrchestratorLoopTests.OnlyThisIdea(ideas, idea);
+        var worker = new ScriptedWorker();
+        using (engine)
+        {
+            await engine.BuildIdeaImmediatelyAsync(idea, worker);
+            await Until(() => engine.State == OrchestratorState.Paused, "question for Daniel");
+
+            var updated = (await ideas.LoadAsync()).Single(i => i.Id == idea.Id);
+            updated.Description = "A habit tracker: daily habits, streaks, a weekly chart.";
+            await ideas.UpdateIdeaAsync(updated);
+            await engine.BuildIdeaImmediatelyAsync(updated, worker);
+            await Until(() => worker.Received.Count == 1, "instruction after the spec was written");
+
+            // The question came before any worker started, so this is a fresh worker session; either way the new spec is in the message.
+            Assert.DoesNotContain("Describe the goal", brain.Messages[1]);
+            Assert.Contains("[SPEC]\nA habit tracker: daily habits, streaks, a weekly chart.", brain.Messages[1]);
+            engine.Stop();
+            await UntilReviewed();
+        }
+    }
 }

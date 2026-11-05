@@ -256,7 +256,7 @@ public sealed class OrchestratorEngine : IDisposable
         if (_run != null && _run.Record.IdeaId == idea.Id && _worker is { IsRunning: true })
         {
             if (idea.Status == IdeaStatus.Paused) { idea.Status = IdeaStatus.Building; idea.StatusNote = "Building"; await _ideaService.UpdateIdeaAsync(idea); }
-            await AskAsync(OrchestratorEvent.Resumed);
+            await AskAsync(new OrchestratorInput(OrchestratorEvent.Resumed) { Spec = idea.Description, EventDetail = "Daniel pressed Build Now; [SPEC] is the idea's spec as it is now, possibly just updated by him" });
             return;
         }
         await LaunchWorkerSessionAsync(idea);
@@ -287,7 +287,8 @@ public sealed class OrchestratorEngine : IDisposable
 
         if (_run != null && _worker is { IsRunning: true })
         {
-            await AskAsync(OrchestratorEvent.Resumed);
+            var spec = _currentIdea?.Id is { } id ? (await _ideaService.LoadAsync()).FirstOrDefault(i => i.Id == id)?.Description : null;
+            await AskAsync(new OrchestratorInput(OrchestratorEvent.Resumed) { Spec = spec, EventDetail = spec != null ? "[SPEC] is the idea's spec as it is now" : null });
             return;
         }
         await AdvanceQueueAsync();
@@ -658,7 +659,13 @@ public sealed class OrchestratorEngine : IDisposable
             var agenthubDir = Path.Combine(idea.TargetDirectory, ".agenthub");
             Directory.CreateDirectory(agenthubDir);
             var handoffFile = Path.Combine(agenthubDir, "handoff.md");
-            if (!File.Exists(handoffFile))
+            // The starter handoff copies the spec. While nobody has worked on it yet ("Not started"), rewrite it from the spec as it is
+            // now, so a spec written after the first try (Daniel 2026-11-05: Build Now on the placeholder) does not sit beside a stale Goal.
+            var untouchedStarter = File.Exists(handoffFile)
+                && await File.ReadAllTextAsync(handoffFile) is var existing
+                && existing.StartsWith("# Autonomous Project:", StringComparison.Ordinal)
+                && existing.Contains("**Status:** Not started.", StringComparison.Ordinal);
+            if (!File.Exists(handoffFile) || untouchedStarter)
             {
                 await File.WriteAllTextAsync(handoffFile,
                     $"# Autonomous Project: {idea.Title}\n\n**Goal:** {idea.Description}\n\n**Initialized:** {DateTimeOffset.Now:yyyy-MM-dd HH:mm}\n" +

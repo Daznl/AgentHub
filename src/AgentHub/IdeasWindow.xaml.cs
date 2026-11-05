@@ -98,10 +98,16 @@ public partial class IdeasWindow : Window
 
     private async Task ReloadIdeasAsync()
     {
+        await SaveEditorAsync();
         var keepId = _selectedIdea?.Id;
         var list = await _ideaService.LoadAsync();
-        _ideas.Clear();
-        foreach (var item in list) _ideas.Add(item);
+        _reloading = true;
+        try
+        {
+            _ideas.Clear();
+            foreach (var item in list) _ideas.Add(item);
+        }
+        finally { _reloading = false; }
 
         QueueCountText.Text = $"{_ideas.Count} idea{(_ideas.Count == 1 ? "" : "s")}";
         var keep = _ideas.FirstOrDefault(i => i.Id == keepId) ?? _ideas.FirstOrDefault();
@@ -143,6 +149,12 @@ public partial class IdeasWindow : Window
 
     private void IdeasList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        // Switching to another idea keeps what was typed for the one being left.
+        if (!_reloading && _selectedIdea is { } leaving && e.RemovedItems.Contains(leaving) && EditTitleBox.IsEnabled && EditorDiffersFrom(leaving))
+        {
+            ApplyEditorTo(leaving);
+            _ = SaveFieldsAsync(leaving);
+        }
         _selectedIdea = IdeasList.SelectedItem as ProjectIdea;
         ShowEditor(_selectedIdea != null);
         if (_selectedIdea == null)
@@ -298,28 +310,68 @@ public partial class IdeasWindow : Window
     private async void SaveIdea_Click(object sender, RoutedEventArgs e)
     {
         if (_selectedIdea == null) return;
+        await SaveEditorAsync(force: true);
+        await ReloadIdeasAsync();
+        MessageBox.Show(this, "Idea updated successfully.", "Saved", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
 
-        _selectedIdea.Title = EditTitleBox.Text.Trim();
-        _selectedIdea.TargetDirectory = SelectedRepositoryPath() ?? _selectedIdea.TargetDirectory;
-        _selectedIdea.Description = EditDescriptionBox.Text.Trim();
-
-        if (EditAgentCombo.SelectedItem is ComboBoxItem item)
-        {
-            _selectedIdea.AgentCommand = item.Content?.ToString() ?? "claude";
-        }
-        if (EditWorkflowCombo.SelectedItem is OrchestratorWorkflow workflow) _selectedIdea.WorkflowId = workflow.Id;
-
+    /// <summary>The editor's fields onto an idea.</summary>
+    private void ApplyEditorTo(ProjectIdea idea)
+    {
+        idea.Title = EditTitleBox.Text.Trim();
+        idea.TargetDirectory = SelectedRepositoryPath() ?? idea.TargetDirectory;
+        idea.Description = EditDescriptionBox.Text.Trim();
+        if (EditAgentCombo.SelectedItem is ComboBoxItem item) idea.AgentCommand = item.Content?.ToString() ?? "claude";
+        if (EditWorkflowCombo.SelectedItem is OrchestratorWorkflow workflow) idea.WorkflowId = workflow.Id;
         var threshText = EditThresholdBox.Text.Replace("%", "").Trim();
         if (double.TryParse(threshText, out var val))
         {
             if (val > 1) val /= 100.0;
-            _selectedIdea.ContextHandoffThreshold = Math.Clamp(val, 0.40, 0.95);
+            idea.ContextHandoffThreshold = Math.Clamp(val, 0.40, 0.95);
         }
-
-        await _ideaService.UpdateIdeaAsync(_selectedIdea);
-        await ReloadIdeasAsync();
-        MessageBox.Show(this, "Idea updated successfully.", "Saved", MessageBoxButton.OK, MessageBoxImage.Information);
     }
+
+    /// <summary>True when the editor shows something other than what is saved for the idea (typed, not yet saved).</summary>
+    private bool EditorDiffersFrom(ProjectIdea idea)
+    {
+        var probe = new ProjectIdea
+        {
+            Title = idea.Title, TargetDirectory = idea.TargetDirectory, Description = idea.Description, AgentCommand = idea.AgentCommand,
+            WorkflowId = idea.WorkflowId, ContextHandoffThreshold = idea.ContextHandoffThreshold
+        };
+        ApplyEditorTo(probe);
+        return probe.Title != idea.Title || probe.TargetDirectory != idea.TargetDirectory || probe.Description != idea.Description.Trim()
+            || probe.AgentCommand != idea.AgentCommand || probe.WorkflowId != idea.WorkflowId || Math.Abs(probe.ContextHandoffThreshold - idea.ContextHandoffThreshold) > 0.001;
+    }
+
+    /// <summary>
+    /// Saves what is typed in the editor for the selected idea. Build Now, Start, switching ideas and every reload call this, so
+    /// a spec typed but not saved with 💾 is never lost or skipped (Daniel 2026-11-05: a paragraph typed, then Build Now built the placeholder).
+    /// </summary>
+    private async Task<bool> SaveEditorAsync(bool force = false)
+    {
+        if (_selectedIdea is not { } idea || !EditTitleBox.IsEnabled) return false;
+        if (!force && !EditorDiffersFrom(idea)) return false;
+        ApplyEditorTo(idea);
+        await SaveFieldsAsync(idea);
+        return true;
+    }
+
+    /// <summary>Writes the editor's fields onto the idea as saved now, so a status the engine just set is not overwritten by an older copy.</summary>
+    private async Task SaveFieldsAsync(ProjectIdea edited)
+    {
+        var current = (await _ideaService.LoadAsync()).FirstOrDefault(i => i.Id == edited.Id);
+        if (current == null) return;
+        current.Title = edited.Title;
+        current.TargetDirectory = edited.TargetDirectory;
+        current.Description = edited.Description;
+        current.AgentCommand = edited.AgentCommand;
+        current.WorkflowId = edited.WorkflowId;
+        current.ContextHandoffThreshold = edited.ContextHandoffThreshold;
+        await _ideaService.UpdateIdeaAsync(current);
+    }
+
+    private bool _reloading;
 
     private async void AddIdea_Click(object sender, RoutedEventArgs e)
     {
@@ -383,6 +435,9 @@ public partial class IdeasWindow : Window
     {
         if ((sender as Button)?.Tag is not ProjectIdea idea) return;
 
+        if (_selectedIdea?.Id == idea.Id && await SaveEditorAsync())
+            idea = (await _ideaService.LoadAsync()).FirstOrDefault(i => i.Id == idea.Id) ?? idea;
+
         if (WorkflowProblem(idea) is { } problem)
         {
             MessageBox.Show(this, problem, "Workflow", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -413,6 +468,7 @@ public partial class IdeasWindow : Window
         }
         else if (_orchestrator.State == OrchestratorState.Paused)
         {
+            await SaveEditorAsync();
             await _orchestrator.ResumeAsync();
         }
         else
@@ -424,6 +480,7 @@ public partial class IdeasWindow : Window
                 return;
             }
 
+            await SaveEditorAsync();
             await _orchestrator.StartAsync(pane);
         }
 
