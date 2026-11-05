@@ -635,6 +635,7 @@ public sealed class OrchestratorEngine : IDisposable
         if (_worker == null || _run == null) return;
         _workerSession++;
         _workerStartedAt = DateTimeOffset.Now;
+        _contextBaseline = null;
         _expectWorkerExit = false;
         _lastReplyHandled = null;
         var command = WorkerCommandFor(idea, _workflow);
@@ -698,14 +699,18 @@ public sealed class OrchestratorEngine : IDisposable
 
     private void OnWorkerTurnEnded() => _ = HandleTurnEndAsync();
 
-    private async Task HandleTurnEndAsync()
+    private async Task HandleTurnEndAsync(bool seenInTranscript = false)
     {
         var worker = _worker;
         if (worker == null || _currentIdea == null || _run == null) return;
         if (_state is not (OrchestratorState.Building or OrchestratorState.HandoffPending)) return;
         if (_thinking) { _turnEndedWhileThinking = true; return; } // handled once the decision in flight is done
 
-        if (!await SettleAsync(worker)) return;
+        if (!seenInTranscript)
+        {
+            if (!await SettleAsync(worker)) return;
+            _transcriptTurnHandled = worker.ReadTurnEndedAt(); // this turn end is handled here; the loop must not handle it again
+        }
 
         if (_state == OrchestratorState.HandoffPending && _handoffRequested)
         {
@@ -842,6 +847,7 @@ public sealed class OrchestratorEngine : IDisposable
 
                     if (_worker is { IsRunning: true } w)
                     {
+                        _lastSubmitAt = DateTimeOffset.Now;
                         await w.SubmitAsync(sent);
                         _ = CheckDeliveryAsync(w, run, sent);
                         run.Record.MessagesToWorker++;
@@ -1000,6 +1006,7 @@ public sealed class OrchestratorEngine : IDisposable
         SetState(OrchestratorState.HandoffPending);
         Log($"Handoff: {reason}", forced ? "Warn" : "Info");
         await AddEventAsync(new RunEvent { Kind = forced ? "forced_handoff" : "handoff", Detail = reason, Flag = forced });
+        _lastSubmitAt = DateTimeOffset.Now;
         await w.SubmitAsync(OrchestratorMessages.HandoffPrompt);
         if (_run != null) _run.Record.MessagesToWorker++;
     }
@@ -1046,9 +1053,31 @@ public sealed class OrchestratorEngine : IDisposable
         // A reading from an earlier session in the same pane is not this worker's.
         if (reading.RecordedAt < _workerStartedAt) return;
         var threshold = HandoffThreshold(idea);
+        // The session's first reading is what a fresh CLI already uses (system prompt, tools, CLAUDE.md: about 46k tokens for
+        // Claude Code). Over the limit already, a handoff would only start another session over it, in a loop: give this
+        // session half the room it has left instead, and say so once.
+        if (_contextBaseline is not { } baseline)
+        {
+            _contextBaseline = baseline = reading.UsedFraction;
+            if (baseline >= threshold)
+            {
+                Log($"A fresh worker already uses {baseline:P0} of its context window ({reading.UsedTokens:N0} of {reading.WindowTokens:N0} tokens), over the {threshold:P0} handoff limit. " +
+                    "Handing off now would loop, so this session hands off at " + $"{(baseline + 1) / 2:P0}. Raise claudeContextWindowTokens or the limit.", "Warn");
+                _ = AddEventAsync(new RunEvent { Kind = "note", Detail = $"Context window too small: a fresh worker starts at {baseline:P0}, over the {threshold:P0} limit.", Flag = true });
+            }
+            return;
+        }
+        if (baseline >= threshold) threshold = (baseline + 1) / 2;
         if (reading.UsedFraction >= threshold)
             _ = RequestHandoffAsync($"worker context window at {reading.UsedFraction:P0} (limit {threshold:P0}, {reading.UsedTokens:N0} tokens)", forced: true);
     }
+
+    /// <summary>When AgentHub last typed a message to the worker, and the transcript turn end already acted on.</summary>
+    private DateTimeOffset _lastSubmitAt;
+    private DateTimeOffset? _transcriptTurnHandled;
+
+    /// <summary>The current worker session's first context reading (its starting size); null until it arrives.</summary>
+    private double? _contextBaseline;
 
     /// <summary>The workflow's context threshold when it sets one, else the idea's.</summary>
     private double HandoffThreshold(ProjectIdea idea) =>
@@ -1259,6 +1288,18 @@ public sealed class OrchestratorEngine : IDisposable
 
         if (_state is OrchestratorState.Building && now - _lastUsageCheck >= TimeSpan.FromSeconds(60))
             await CheckUsageAsync();
+
+        // The terminal can miss a turn end (a message queued during a busy turn runs as the next one without the CLI ever going
+        // quiet in between). The transcript records every turn end: one after our last message, settled, counts as the signal.
+        if (_state is OrchestratorState.Building or OrchestratorState.HandoffPending && !_thinking && (_sentSinceLastTurn || _handoffRequested)
+            && _worker is { IsRunning: true } tw && tw.ReadTurnEndedAt() is { } ended && ended > _lastSubmitAt && now - ended >= TurnSettle
+            && ended != _transcriptTurnHandled)
+        {
+            _transcriptTurnHandled = ended;
+            Log("The worker's transcript shows its turn ended (the terminal did not signal it); carrying on.");
+            await HandleTurnEndAsync(seenInTranscript: true);
+            return;
+        }
 
         if (_state == OrchestratorState.HandoffPending && _handoffRequested && now - _handoffRequestedAt > HandoffTimeout)
         {

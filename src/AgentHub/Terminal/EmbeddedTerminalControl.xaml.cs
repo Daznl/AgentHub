@@ -188,6 +188,8 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         _title = title;
         SessionName = subtitle;
         IsAgentSession = isAgentSession;
+        _answerTrust = AnswerFolderTrust;
+        AnswerFolderTrust = false;
         SetHeader(title, subtitle);
         Launch(SpawnSession);
     }
@@ -200,6 +202,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         _title = record.Title;
         SessionName = record.SessionName;
         IsAgentSession = record.IsAgent;
+        _answerTrust = false;
         SetHeader(record.Title, record.SessionName);
         Launch(() => AttachAsync(record));
     }
@@ -478,6 +481,13 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     }
 
     private readonly BracketedPaste _paste = new();
+    private readonly FolderTrustPrompt _trust = new();
+    private bool _answerTrust;
+    private bool _promptSent;
+
+    /// <summary>Set just before <see cref="StartSession"/> for an orchestrator worker: that session answers Claude Code's
+    /// folder trust check with yes (Daniel chose the folder for the build). Applies to the next session only.</summary>
+    public bool AnswerFolderTrust { get; set; }
 
     /// <summary>Whether the program in this terminal accepts bracketed pastes (agent prompts are sent as one).</summary>
     public bool BracketedPasteEnabled => _paste.Enabled;
@@ -486,6 +496,8 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     {
         _session = session;
         _paste.Reset();
+        _trust.Reset();
+        _promptSent = false;
         if (!string.IsNullOrEmpty(replay)) _paste.Observe(replay);
         _attention.OnSessionStarted(DateTimeOffset.Now);
         _attentionTimer.IsEnabled = IsAgentSession && AttentionEnabled;
@@ -501,6 +513,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
                 if (offset >= 0) _postedOffset = offset;
                 if (text.Length == 0) return;
                 _paste.Observe(text);
+                if (_answerTrust && _trust.Observe(text, DateTimeOffset.Now) is { } keys) _ = AnswerTrustAsync(session, keys);
                 _attention.OnOutput(text, DateTimeOffset.Now);
                 Post(text);
             });
@@ -572,9 +585,38 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     {
         var oneLine = FlattenPrompt(prompt);
         if (oneLine.Length == 0) return;
+        if (_answerTrust && !_promptSent) await WaitUntilReadyAsync();
+        _promptSent = true;
         SendInput(_paste.Wrap(oneLine));
         await Task.Delay(enterDelayMs);
         SendInput("\r");
+    }
+
+    private async Task AnswerTrustAsync(ITerminalSession session, string before)
+    {
+        await Task.Delay(400);
+        if (!ReferenceEquals(_session, session)) return;
+        if (before.Length > 0) { session.Write(before); await Task.Delay(500); }
+        if (!ReferenceEquals(_session, session)) return;
+        session.Write("\r");
+        _trust.Answered();
+    }
+
+    /// <summary>
+    /// A worker's first prompt waits until the CLI can take it: past the folder trust check (typed at it, Enter means
+    /// "No, exit") and settled after it, with bracketed paste on. Gives up after 30 seconds and sends anyway.
+    /// </summary>
+    private async Task WaitUntilReadyAsync()
+    {
+        var deadline = DateTimeOffset.Now.AddSeconds(30);
+        while (DateTimeOffset.Now < deadline)
+        {
+            var now = DateTimeOffset.Now;
+            var settled = _trust.AnsweredAt is not { } at || (!_trust.Pending && now - at > TimeSpan.FromSeconds(3) && OutputSilentFor > TimeSpan.FromSeconds(1));
+            var started = _paste.Enabled || now - StartedAt > TimeSpan.FromSeconds(20);
+            if (settled && started) return;
+            await Task.Delay(250);
+        }
     }
 
     /// <summary>Collapses line breaks and runs of whitespace into single spaces.</summary>

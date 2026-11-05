@@ -41,6 +41,55 @@ public interface IBuildWorker
 
     /// <summary>The last prompt the worker received, as its transcript recorded it; null when unknown.</summary>
     string? ReadLastPrompt();
+
+    /// <summary>When the transcript says the latest turn ended (nothing sent since); null while a turn runs or when unknown.</summary>
+    DateTimeOffset? ReadTurnEndedAt() => null;
+}
+
+/// <summary>
+/// Claude Code ends every turn in its transcript with a <c>{"type":"system","subtype":"turn_duration"}</c> line. A second
+/// turn-end signal beside the terminal going quiet (2026-11-05 live test: a handoff request queued during a busy turn ran
+/// as the next turn, its end never registered, and the build sat waiting for the 10-minute timeout).
+/// </summary>
+public static class TranscriptTurns
+{
+    /// <summary>The end time of the transcript's latest turn when no prompt (typed or queued) follows it; else null.</summary>
+    public static DateTimeOffset? LastTurnEnd(string path)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var take = (int)Math.Min(fs.Length, 256 * 1024);
+            fs.Seek(-take, SeekOrigin.End);
+            var buffer = new byte[take];
+            fs.ReadExactly(buffer);
+            return LastTurnEnd(System.Text.Encoding.UTF8.GetString(buffer).Split('\n'));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    public static DateTimeOffset? LastTurnEnd(IEnumerable<string> lines)
+    {
+        foreach (var line in lines.Reverse())
+        {
+            if (line.Length == 0 || line[0] != '{') continue;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(line);
+                var root = doc.RootElement;
+                var type = root.TryGetProperty("type", out var t) ? t.GetString() : null;
+                if (type == "system" && root.TryGetProperty("subtype", out var st) && st.GetString() == "turn_duration")
+                    return root.TryGetProperty("timestamp", out var ts) && ts.TryGetDateTimeOffset(out var at) ? at : null;
+                if (type == "queue-operation") return null; // a prompt waiting for the next turn
+                if (type == "user" && root.TryGetProperty("message", out var m) && m.TryGetProperty("content", out var c) &&
+                    (c.ValueKind == System.Text.Json.JsonValueKind.String ||
+                     c.EnumerateArray().Any(x => x.TryGetProperty("type", out var xt) && xt.GetString() == "text")))
+                    return null; // a prompt after the last turn end: a turn is running
+            }
+            catch (System.Text.Json.JsonException) { } // the first line of the tail is usually cut
+        }
+        return null;
+    }
 }
 
 /// <summary>A Cockpit terminal pane as the worker.</summary>
@@ -67,8 +116,11 @@ public sealed class PaneBuildWorker : IBuildWorker, IDisposable
     public event Action? Exited;
     public event Action<ContextReading?>? ContextChanged;
 
-    public void Start(string commandLine, string workingDirectory, string title, string sessionName) =>
+    public void Start(string commandLine, string workingDirectory, string title, string sessionName)
+    {
+        Pane.TerminalControl.AnswerFolderTrust = true;
         Pane.StartSession(commandLine, workingDirectory, title, sessionName, isAgentSession: true);
+    }
 
     public void Stop() => Pane.TerminalControl.StopSession();
 
@@ -88,6 +140,13 @@ public sealed class PaneBuildWorker : IBuildWorker, IDisposable
         if (string.IsNullOrEmpty(path)) return null;
         var source = path.Contains(".codex", StringComparison.OrdinalIgnoreCase) ? ContextSource.Codex : ContextSource.ClaudeCode;
         return TranscriptTexts.TryRead(path, source).Prompts.LastOrDefault()?.Text;
+    }
+
+    public DateTimeOffset? ReadTurnEndedAt()
+    {
+        var path = TranscriptPath;
+        if (string.IsNullOrEmpty(path) || path.Contains(".codex", StringComparison.OrdinalIgnoreCase)) return null;
+        return TranscriptTurns.LastTurnEnd(path);
     }
 
     private void RaiseTurnEnded() => TurnEnded?.Invoke();

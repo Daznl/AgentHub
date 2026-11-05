@@ -109,3 +109,42 @@ public class DeliveryLoopTests : IDisposable
         engine.Stop();
     }
 }
+
+/// <summary>2026-11-05: every orchestrated build in a new project folder stopped at Claude Code's folder trust check, whose
+/// default is "No, exit"; the first prompt and its Enter answered it and the worker exited.</summary>
+public class FolderTrustPromptTests
+{
+    // As Claude Code 2.1.318 drew it, with its colours and cursor moves.
+    private const string Screen =
+        "\x1b[?2004h\x1b[1mAccessing workspace:\x1b[0m C:\\data\\agenthub\\pastetest\r\n Quick safety check: Is this a project you created or one you trust?" +
+        " \x1b]8;id=u;https://code.claude.com/docs/en/security\x1b\\Security guide\x1b]8;;\x1b\\\r\n\x1b[36m❯\x1b[39m 1. No, exit\r\n  2. Yes, I trust this folder\r\n\r\n Enter to confirm · Esc to cancel";
+
+    [Fact]
+    public void On_the_default_No_it_presses_Down_before_Enter_and_answers_only_once()
+    {
+        var t = new FolderTrustPrompt();
+        var now = DateTimeOffset.Now;
+        Assert.Null(t.Observe(Screen[..120], now));
+        Assert.Equal("\x1b[B", t.Observe(Screen[120..], now));
+        Assert.True(t.Pending);
+        t.Answered();
+        Assert.False(t.Pending);
+        Assert.Equal(now, t.AnsweredAt);
+        Assert.Null(t.Observe(Screen, now));
+    }
+
+    [Fact]
+    public void Already_on_Yes_it_presses_Enter_alone()
+    {
+        var onYes = Screen.Replace("\x1b[36m❯\x1b[39m 1. No, exit\r\n  2.", "  1. No, exit\r\n\x1b[36m❯\x1b[39m 2.");
+        Assert.Equal("", new FolderTrustPrompt().Observe(onYes, DateTimeOffset.Now));
+    }
+
+    [Fact]
+    public void An_ordinary_screen_is_not_the_trust_check()
+    {
+        var t = new FolderTrustPrompt();
+        Assert.Null(t.Observe("Claude Code v2.1.318 ❯ Try \"create a util logging.py that...\" Yes, I trust my tests", DateTimeOffset.Now));
+        Assert.Null(t.AnsweredAt);
+    }
+}

@@ -292,6 +292,11 @@ internal sealed class ScriptedWorker : IBuildWorker
 
     public string? ReadLastPrompt() { lock (Received) return Received.Count == 0 ? null : (Arrives ?? (p => p))(Received[^1]); }
 
+    /// <summary>The turn end the transcript shows; set without <see cref="FinishTurn"/> to simulate one the terminal missed.</summary>
+    public DateTimeOffset? TurnEndedAt { get; set; }
+
+    public DateTimeOffset? ReadTurnEndedAt() => TurnEndedAt;
+
     public void FinishTurn(string reply)
     {
         Reply = reply;
@@ -445,6 +450,7 @@ public class OrchestratorLoopTests : IDisposable
             await engine.BuildIdeaImmediatelyAsync(idea, worker);
             await Until(() => worker.Received.Count == 1, "first instruction");
 
+            worker.ReportContext(new ContextReading(50_000, 1_000_000, false, "opus", DateTimeOffset.Now.AddSeconds(1), "test", "x")); // a fresh session
             worker.ReportContext(new ContextReading(800_000, 1_000_000, false, "opus", DateTimeOffset.Now.AddSeconds(1), "test", "x"));
             await Until(() => worker.Received.Count == 2, "handoff prompt");
             Assert.Equal(OrchestratorMessages.HandoffPrompt, worker.Received[1]);
@@ -467,6 +473,80 @@ public class OrchestratorLoopTests : IDisposable
         Assert.Equal(2, record.WorkerSessions.Count);
         Assert.Equal("handoff", record.WorkerSessions[0].EndReason);
         Assert.Contains(RunRecorder.ReadEvents(Path.Combine(runFolder, "events.jsonl")), e => e.Kind == "forced_handoff" && e.Flag);
+    }
+
+    /// <summary>2026-11-05 live test with a 60k window: a fresh Claude Code session starts at 77% (46k tokens), over the 75%
+    /// limit, so handing off on that reading would start session after session.</summary>
+    [Fact]
+    public async Task A_worker_that_starts_over_the_context_limit_is_not_handed_off_in_a_loop()
+    {
+        var brain = new ScriptedBrain(Send("Build it."));
+        var (engine, ideas, idea) = Setup(brain);
+        await ideas.AddIdeaAsync(idea);
+        await OrchestratorLoopTests.OnlyThisIdea(ideas, idea);
+        var worker = new ScriptedWorker();
+        using (engine)
+        {
+            await engine.BuildIdeaImmediatelyAsync(idea, worker);
+            await Until(() => worker.Received.Count == 1, "first instruction");
+
+            worker.ReportContext(new ContextReading(46_286, 60_000, true, "opus", DateTimeOffset.Now.AddSeconds(1), "test", "x"));
+            worker.ReportContext(new ContextReading(50_000, 60_000, true, "opus", DateTimeOffset.Now.AddSeconds(1), "test", "x"));
+            await Task.Delay(300);
+            Assert.Single(worker.Received);
+            Assert.Equal(OrchestratorState.Building, engine.State);
+
+            worker.ReportContext(new ContextReading(54_000, 60_000, true, "opus", DateTimeOffset.Now.AddSeconds(1), "test", "x")); // 90%: past halfway to full
+            await Until(() => worker.Received.Count == 2, "handoff prompt");
+            Assert.Equal(OrchestratorMessages.HandoffPrompt, worker.Received[1]);
+            engine.Stop();
+            await UntilReviewed();
+        }
+    }
+
+    /// <summary>2026-11-05 live test: the handoff request was queued during a busy turn and ran as the next one; the terminal
+    /// never signalled its end, so the build sat waiting. The transcript's turn end now counts.</summary>
+    [Fact]
+    public async Task A_turn_end_only_the_transcript_shows_still_completes_the_handoff()
+    {
+        var brain = new ScriptedBrain(Send("Build it."), Send("Read the handoff and carry on."));
+        var (engine, ideas, idea) = Setup(brain);
+        await ideas.AddIdeaAsync(idea);
+        await OrchestratorLoopTests.OnlyThisIdea(ideas, idea);
+        var worker = new ScriptedWorker();
+        using (engine)
+        {
+            await engine.BuildIdeaImmediatelyAsync(idea, worker);
+            await Until(() => worker.Received.Count == 1, "first instruction");
+            worker.TurnEndedAt = DateTimeOffset.Now.AddMinutes(-5); // the start-up turn, before anything was sent: not ours
+            worker.ReportContext(new ContextReading(50_000, 1_000_000, false, "opus", DateTimeOffset.Now.AddSeconds(1), "test", "x"));
+            worker.ReportContext(new ContextReading(800_000, 1_000_000, false, "opus", DateTimeOffset.Now.AddSeconds(1), "test", "x"));
+            await Until(() => worker.Received.Count == 2, "handoff prompt");
+            await Task.Delay(300);
+            Assert.Equal(1, worker.Starts); // an old turn end is not the handoff turn's
+
+            worker.TurnEndedAt = DateTimeOffset.Now; // the handoff turn ends; the terminal says nothing
+            await Until(() => worker.Received.Count == 3, "fresh session's first instruction");
+            Assert.Equal(2, worker.Starts);
+            Assert.StartsWith("Read the handoff and carry on. ", worker.Received[2]);
+            engine.Stop();
+            await UntilReviewed();
+        }
+    }
+
+    [Fact]
+    public void The_transcripts_last_turn_end_counts_only_when_no_prompt_follows_it()
+    {
+        const string end = """{"type":"system","subtype":"turn_duration","durationMs":93000,"timestamp":"2026-11-05T08:44:16.000Z"}""";
+        const string prompt = """{"type":"user","message":{"role":"user","content":"[AGENTHUB] Time to hand off"},"timestamp":"2026-11-05T08:42:43.500Z"}""";
+        const string toolResult = """{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":"ok"}]}}""";
+        const string queued = """{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-05T08:42:43.009Z","content":"[AGENTHUB] Time to hand off"}""";
+        const string reply = """{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}""";
+
+        Assert.Equal(DateTimeOffset.Parse("2026-11-05T08:44:16Z"), TranscriptTurns.LastTurnEnd(["{\"cut", prompt, toolResult, reply, end, """{"type":"last-prompt"}"""]));
+        Assert.Null(TranscriptTurns.LastTurnEnd([end, queued, toolResult]));   // queued during the turn: another turn follows
+        Assert.Null(TranscriptTurns.LastTurnEnd([end, prompt, toolResult, reply])); // running
+        Assert.Null(TranscriptTurns.LastTurnEnd([prompt]));
     }
 
     [Fact]

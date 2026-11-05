@@ -239,6 +239,12 @@ It also has three loop tests:
     - The probe sources are in the session scratchpad, not the repo. Claude Code inherits CLAUDECODE, AI_AGENT and the other CLAUDE_* variables from a Claude Code shell and then runs in print mode, so a ConPTY probe must clear them and must be a WinExe, or the console handles leak.
   - **"It keeps running sessions."** When the worker exited without AgentHub ending it (a closed pane), the engine started a fresh worker, three in a minute. Now any such exit pauses the build, and Resume or Build Now starts one fresh worker.
   - Tests: 283 unit (DeliveryTests, Closing_the_builders_pane…), and all four UI scripts pass.
+- Live conversation test (`tests/ui/live-build.ps1`): a real orchestrator drives a real worker in a test copy's pane, with a 90k context window so a handoff is forced. It spends Claude usage, so run it only on purpose, and launch it from a clean environment (the script clears CLAUDE*/ANTHROPIC*/AI_AGENT itself).
+  - Final run, 2026-11-05 16:53–17:02, passed: 4 messages, each one checked whole against the transcripts (up to 1,304 characters); a forced handoff, then worker session 2 briefed from the handoff; all four slices committed; 26 tests; run completed.
+  - It found three bugs, all fixed:
+    1. **New folders.** Claude Code's "trust this folder?" check defaults to "No, exit", and the first prompt plus Enter answered it, so the worker exited. Worker sessions (`AnswerFolderTrust`, `FolderTrustPrompt`) now answer yes, and the first prompt waits until the CLI is ready. Panes Daniel starts still ask him.
+    2. **Handoff loop.** A fresh Claude Code session already uses about 46k tokens. With a small window, that starting size is over the limit, so every session was handed off at once. The session's first reading is now its baseline; if the baseline is already over the limit, the limit becomes halfway between the baseline and full, and the run gets a flagged note.
+    3. **Missed turn end.** A handoff request typed during a busy turn is queued by Claude Code and runs as the next turn with no quiet gap, so the terminal never signalled its end, and the build waited for the 10-minute handoff timeout. The loop now also reads the transcript's `turn_duration` line (`TranscriptTurns`, `IBuildWorker.ReadTurnEndedAt`).
 - Daniel asked for the "💡 Ideas & Build" button and the window to be called **🧭 Orchestration**.
 
 **Not done / for Daniel:**
