@@ -287,6 +287,11 @@ internal sealed class ScriptedWorker : IBuildWorker
 
     public string? ReadLastReply() => Reply;
 
+    /// <summary>What the transcript shows for a received prompt; set to simulate a message cut on the way in.</summary>
+    public Func<string, string>? Arrives { get; set; }
+
+    public string? ReadLastPrompt() { lock (Received) return Received.Count == 0 ? null : (Arrives ?? (p => p))(Received[^1]); }
+
     public void FinishTurn(string reply)
     {
         Reply = reply;
@@ -489,6 +494,35 @@ public class OrchestratorLoopTests : IDisposable
             await Until(() => worker.Received.Count == 2, "instruction after resume");
             Assert.StartsWith("[EVENT] resumed", brain.Messages[2]);
             Assert.Contains("No paid services.", brain.Messages[2]);
+            engine.Stop();
+            await UntilReviewed();
+        }
+    }
+
+    [Fact]
+    public async Task Closing_the_builders_pane_pauses_the_build_and_starts_nothing_until_Daniel_resumes()
+    {
+        // Daniel 2026-11-05: closing the builder's pane got three fresh workers in a minute ("it keeps running sessions").
+        var brain = new ScriptedBrain(Send("Build slice 1."), Send("Carry on from the handoff."));
+        var (engine, ideas, idea) = Setup(brain);
+        await ideas.AddIdeaAsync(idea);
+        await OrchestratorLoopTests.OnlyThisIdea(ideas, idea);
+        var worker = new ScriptedWorker();
+        using (engine)
+        {
+            await engine.BuildIdeaImmediatelyAsync(idea, worker);
+            await Until(() => worker.Received.Count == 1, "first instruction");
+
+            worker.Stop(); // the pane closed under it, not by AgentHub
+            await Until(() => engine.State == OrchestratorState.Paused, "paused");
+            await Task.Delay(500);
+            Assert.Equal(1, worker.Starts);
+            Assert.Single(brain.Messages);
+            Assert.Equal(IdeaStatus.Paused, (await ideas.LoadAsync()).Single(i => i.Id == idea.Id).Status);
+
+            await engine.ResumeAsync();
+            await Until(() => worker.Received.Count == 2, "fresh worker after Resume");
+            Assert.Equal(2, worker.Starts);
             engine.Stop();
             await UntilReviewed();
         }

@@ -82,6 +82,7 @@ internal sealed class PrintModeWorker(string model) : IBuildWorker
     }
 
     public string? ReadLastReply() => LastReply;
+    public string? ReadLastPrompt() => null; // print mode: every prompt is passed whole as an argument
 }
 
 public class LiveOrchestratorTests(ITestOutputHelper output)

@@ -230,6 +230,15 @@ It also has three loop tests:
   - Resuming a run with a live worker sends the current [SPEC].
   - The starter `.agenthub/handoff.md` (still "Status: Not started.") is rewritten from the current spec on each build. Before, it kept the placeholder Goal, which a unit test caught. New App #1's folder still has that stale starter; the next build rewrites it.
   - Tests: unit `Writing_the_spec_after_a_question_and_pressing_Build_Now_hands_the_new_spec_to_the_orchestrator`; UI `tests/ui/unsaved-spec.ps1` (6 checks). Build Now in the UI test is stopped by an unfilled workflow, so it never really builds.
+- Daniel's first real run (AI Stock Bot, run 2026-11-05_1551) found two faults, both now fixed on branch fix/delivery-and-pane-close.
+  - **Cut-off messages.** The orchestrator's second message (1,100 characters) reached Claude Code as its last 76; the cut was at exactly byte 1024.
+    - Reproduced with a probe that types into an interactive Claude Code without submitting: a raw burst loses its first 1024-byte piece, while a bracketed paste (ESC[200~…ESC[201~, which Claude Code enables with ESC[?2004h) arrives as one "[Pasted text]".
+    - Fix: `BracketedPaste` tracks the mode from the terminal output, including replays, and `SubmitPromptAsync` wraps prompts when it is on.
+    - Verified end to end: a 1,221-character prompt was submitted for real in C:\data\agenthub\pastetest and Claude Code's transcript had all of it.
+    - Safety net: `CheckDeliveryAsync` compares each sent message with `IBuildWorker.ReadLastPrompt` from the transcript. If only the end arrived, it flags a `delivery_cut` event and puts `[DELIVERY]` in the orchestrator's next message so it can resend.
+    - The probe sources are in the session scratchpad, not the repo. Claude Code inherits CLAUDECODE, AI_AGENT and the other CLAUDE_* variables from a Claude Code shell and then runs in print mode, so a ConPTY probe must clear them and must be a WinExe, or the console handles leak.
+  - **"It keeps running sessions."** When the worker exited without AgentHub ending it (a closed pane), the engine started a fresh worker, three in a minute. Now any such exit pauses the build, and Resume or Build Now starts one fresh worker.
+  - Tests: 283 unit (DeliveryTests, Closing_the_builders_pane…), and all four UI scripts pass.
 - Daniel asked for the "💡 Ideas & Build" button and the window to be called **🧭 Orchestration**.
 
 **Not done / for Daniel:**

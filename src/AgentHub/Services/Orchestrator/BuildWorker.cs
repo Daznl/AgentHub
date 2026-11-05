@@ -38,6 +38,9 @@ public interface IBuildWorker
 
     /// <summary>The worker's final reply of its latest turn, read from its transcript; null when unknown.</summary>
     string? ReadLastReply();
+
+    /// <summary>The last prompt the worker received, as its transcript recorded it; null when unknown.</summary>
+    string? ReadLastPrompt();
 }
 
 /// <summary>A Cockpit terminal pane as the worker.</summary>
@@ -77,6 +80,14 @@ public sealed class PaneBuildWorker : IBuildWorker, IDisposable
         if (string.IsNullOrEmpty(path)) return null;
         var source = path.Contains(".codex", StringComparison.OrdinalIgnoreCase) ? ContextSource.Codex : ContextSource.ClaudeCode;
         return TranscriptTexts.TryRead(path, source).LastReply;
+    }
+
+    public string? ReadLastPrompt()
+    {
+        var path = TranscriptPath;
+        if (string.IsNullOrEmpty(path)) return null;
+        var source = path.Contains(".codex", StringComparison.OrdinalIgnoreCase) ? ContextSource.Codex : ContextSource.ClaudeCode;
+        return TranscriptTexts.TryRead(path, source).Prompts.LastOrDefault()?.Text;
     }
 
     private void RaiseTurnEnded() => TurnEnded?.Invoke();

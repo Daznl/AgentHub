@@ -477,9 +477,16 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
         }
     }
 
+    private readonly BracketedPaste _paste = new();
+
+    /// <summary>Whether the program in this terminal accepts bracketed pastes (agent prompts are sent as one).</summary>
+    public bool BracketedPasteEnabled => _paste.Enabled;
+
     private void Hook(ITerminalSession session, string? replay)
     {
         _session = session;
+        _paste.Reset();
+        if (!string.IsNullOrEmpty(replay)) _paste.Observe(replay);
         _attention.OnSessionStarted(DateTimeOffset.Now);
         _attentionTimer.IsEnabled = IsAgentSession && AttentionEnabled;
         if (!string.IsNullOrEmpty(replay)) Post(replay);
@@ -493,6 +500,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
                 if (!ReferenceEquals(_session, session)) return;
                 if (offset >= 0) _postedOffset = offset;
                 if (text.Length == 0) return;
+                _paste.Observe(text);
                 _attention.OnOutput(text, DateTimeOffset.Now);
                 Post(text);
             });
@@ -557,13 +565,14 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     /// Types a prompt into an agent CLI and submits it. Agent TUIs (Claude Code, Codex, Gemini) treat a
     /// burst of input as a paste, so a newline or carriage return inside the burst lands in the input box
     /// instead of submitting it. The prompt is therefore flattened to one line and Enter is sent on its
-    /// own after a pause, the way a person would press it.
+    /// own after a pause, the way a person would press it. When the CLI has turned bracketed paste on, the
+    /// text goes as one bracketed paste: a raw burst of more than 1024 bytes could lose its first part.
     /// </summary>
     public async Task SubmitPromptAsync(string prompt, int enterDelayMs = 600)
     {
         var oneLine = FlattenPrompt(prompt);
         if (oneLine.Length == 0) return;
-        SendInput(oneLine);
+        SendInput(_paste.Wrap(oneLine));
         await Task.Delay(enterDelayMs);
         SendInput("\r");
     }

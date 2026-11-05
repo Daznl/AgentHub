@@ -63,7 +63,6 @@ public sealed class OrchestratorEngine : IDisposable
     private int _idleAsks;
     private bool _expectWorkerExit;
     private DateTimeOffset _workerStartedAt;
-    private int _quickExits;
     private bool _thinking;
     private bool _loopRunning;
     private bool _recovered;
@@ -71,6 +70,12 @@ public sealed class OrchestratorEngine : IDisposable
 
     /// <summary>Called with the folder a build is about to use (created and git-initialised if needed), so AgentHub can list it among its repositories.</summary>
     public Func<string, Task>? RepositoryInUse { get; set; }
+
+    /// <summary>How long to look for a sent message in the worker's transcript before giving up on checking it.</summary>
+    public TimeSpan DeliveryCheckTimeout { get; set; } = TimeSpan.FromSeconds(45);
+
+    /// <summary>Told to the orchestrator in its next message: its previous message reached the worker cut off.</summary>
+    private string? _deliveryProblem;
     private OrchestratorWorkflow? _workflow;
     private bool _turnEndedWhileThinking;
     private bool _sentSinceLastTurn;
@@ -285,9 +290,15 @@ public sealed class OrchestratorEngine : IDisposable
             await _ideaService.UpdateIdeaAsync(idea);
         }
 
+        if (_run != null && _worker is { IsRunning: false } && _currentIdea is { } current)
+        {
+            // The builder's session ended while paused (closed pane): Resume is Daniel asking for a fresh one.
+            await LaunchWorkerSessionAsync(current, "Daniel resumed after the builder's session ended");
+            return;
+        }
         if (_run != null && _worker is { IsRunning: true })
         {
-            var spec = _currentIdea?.Id is { } id ? (await _ideaService.LoadAsync()).FirstOrDefault(i => i.Id == id)?.Description : null;
+            var spec =_currentIdea?.Id is { } id ? (await _ideaService.LoadAsync()).FirstOrDefault(i => i.Id == id)?.Description : null;
             await AskAsync(new OrchestratorInput(OrchestratorEvent.Resumed) { Spec = spec, EventDetail = spec != null ? "[SPEC] is the idea's spec as it is now" : null });
             return;
         }
@@ -751,8 +762,10 @@ public sealed class OrchestratorEngine : IDisposable
             }
 
             var steers = await Steering.GetPendingAsync(idea.Id);
+            var deliveryProblem = Interlocked.Exchange(ref _deliveryProblem, null);
             input = input with
             {
+                DeliveryProblem = deliveryProblem,
                 Steers = steers,
                 Status = StatusLine(idea),
                 Workflow = WorkflowLine(),
@@ -830,6 +843,7 @@ public sealed class OrchestratorEngine : IDisposable
                     if (_worker is { IsRunning: true } w)
                     {
                         await w.SubmitAsync(sent);
+                        _ = CheckDeliveryAsync(w, run, sent);
                         run.Record.MessagesToWorker++;
                         _sentSinceLastTurn = true;
                         _turnEndedWhileThinking = false;
@@ -1053,18 +1067,60 @@ public sealed class OrchestratorEngine : IDisposable
         }
         if (_state != OrchestratorState.Building) return;
 
+        // A session AgentHub did not end: Daniel closed its pane (or typed /exit), or the CLI died. Never start another one on
+        // our own (Daniel 2026-11-05: "can you cancel everything it keeps running sessions" after closing panes got three
+        // fresh workers in a minute). Pause; Build Now / Resume starts a fresh worker that picks up from the handoff.
         var quick = DateTimeOffset.Now - _workerStartedAt < TimeSpan.FromMinutes(1);
-        _quickExits = quick ? _quickExits + 1 : 0;
-        await AddEventAsync(new RunEvent { Kind = "error", Detail = $"The worker exited on its own{(quick ? " within a minute of starting" : "")}.", Flag = true });
+        await AddEventAsync(new RunEvent { Kind = "error", Detail = $"The worker session ended without AgentHub ending it{(quick ? " (within a minute of starting)" : "")}.", Flag = true });
         if (_run.Record.WorkerSessions.LastOrDefault() is { EndedAt: null } s) { s.EndedAt = DateTimeOffset.Now; s.EndReason = "exited"; s.TranscriptPath ??= _worker?.TranscriptPath; }
+        Log("The builder's session ended (its pane was closed or the CLI exited). Build paused: nothing new is started until you press Build Now or Resume.", "Warn");
+        await PauseForDanielAsync(quick
+            ? "The builder's session ended straight after it started. Check that the CLI runs in that folder, then press Build Now."
+            : "The builder's session ended (pane closed or CLI exited). Press Build Now to carry on with a fresh builder.");
+    }
 
-        if (_quickExits >= 2)
+    // ---- Delivery ----
+
+    private static string Squash(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+
+    /// <summary>
+    /// What the transcript shows of a sent message: "whole", "cut" (its end arrived without its start), or null (not seen yet).
+    /// Claude Code wraps a pasted message in &lt;pasted_content&gt;, so the check looks for the start and end inside it.
+    /// </summary>
+    public static string? DeliveryOf(string sent, string? received)
+    {
+        if (string.IsNullOrWhiteSpace(received)) return null;
+        var want = Squash(sent);
+        var got = Squash(received);
+        var head = want[..Math.Min(60, want.Length)];
+        var tail = want[^Math.Min(40, want.Length)..];
+        if (got.Contains(head, StringComparison.Ordinal)) return "whole";
+        if (got.Contains(tail, StringComparison.Ordinal)) return "cut";
+        return null;
+    }
+
+    /// <summary>Looks for a sent message in the worker's transcript; when only its end arrived, records it and tells the orchestrator.</summary>
+    private async Task CheckDeliveryAsync(IBuildWorker worker, RunRecorder run, string sent)
+    {
+        var until = DateTimeOffset.Now + DeliveryCheckTimeout;
+        while (DateTimeOffset.Now < until && !_disposeCts.IsCancellationRequested)
         {
-            await PauseForDanielAsync("The worker CLI keeps exiting straight after it starts. Check that it runs in that folder, then resume.");
-            return;
+            try { await Task.Delay(TimeSpan.FromSeconds(DeliveryCheckTimeout < TimeSpan.FromSeconds(5) ? 0.1 : 2), _disposeCts.Token); }
+            catch (OperationCanceledException) { return; }
+            string? received;
+            try { received = worker.ReadLastPrompt(); } catch { return; }
+            switch (DeliveryOf(sent, received))
+            {
+                case "whole": return;
+                case "cut":
+                    var got = Squash(received!);
+                    var shown = got.Length > 200 ? got[..200] + "…" : got;
+                    _deliveryProblem = $"Your previous message reached the worker cut off. It received only: \"{shown}\". Send again what was missing.";
+                    Log($"⚠ The worker received the orchestrator's message cut off ({got.Length} of {Squash(sent).Length} characters). The orchestrator is told at its next turn.", "Warn");
+                    if (_run == run) await AddEventAsync(new RunEvent { Kind = "delivery_cut", Detail = $"Worker received {got.Length} of {Squash(sent).Length} characters: {shown}", Flag = true });
+                    return;
+            }
         }
-        Log("The worker exited unexpectedly; starting a fresh worker session.", "Warn");
-        await LaunchWorkerSessionAsync(idea, "the previous worker exited unexpectedly");
     }
 
     // ---- Steering ----

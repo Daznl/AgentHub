@@ -26,6 +26,9 @@ public enum OrchestratorEvent
 public sealed record OrchestratorInput(OrchestratorEvent Event)
 {
     public string? EventDetail { get; init; }
+
+    /// <summary>Set when AgentHub saw that the orchestrator's previous message reached the worker cut off.</summary>
+    public string? DeliveryProblem { get; init; }
     public string? Spec { get; init; }
     public string? Handoff { get; init; }
     public string? WorkerReply { get; init; }
@@ -129,6 +132,9 @@ public static class OrchestratorMessages
     {
         var sb = new StringBuilder();
         sb.Append("[EVENT] ").Append(EventText(input)).Append("\n\n");
+
+        if (!string.IsNullOrWhiteSpace(input.DeliveryProblem))
+            sb.Append("[DELIVERY] ").Append(input.DeliveryProblem.Trim()).Append("\n\n");
 
         if (!string.IsNullOrWhiteSpace(input.Workflow))
             sb.Append("[WORKFLOW] ").Append(input.Workflow.Trim()).Append("\n\n");
