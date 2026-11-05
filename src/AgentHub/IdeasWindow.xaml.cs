@@ -51,7 +51,11 @@ public partial class IdeasWindow : Window
         _openContextAction = openContextAction;
         _repositories = repositories ?? (() => []);
         _addRepository = addRepository;
-        EditRepoCombo.SelectionChanged += (_, _) => UpdateRepoWarning();
+        EditRepoCombo.SelectionChanged += (_, _) =>
+        {
+            UpdateRepoWarning();
+            if (_selectedIdea != null) LoadHandoffPreview(SelectedRepositoryPath());
+        };
 
         IdeasList.ItemsSource = _ideas;
         LogListBox.ItemsSource = _orchestrator.Logs;
@@ -90,24 +94,38 @@ public partial class IdeasWindow : Window
 
     private async Task ReloadIdeasAsync()
     {
+        var keepId = _selectedIdea?.Id;
         var list = await _ideaService.LoadAsync();
         _ideas.Clear();
         foreach (var item in list) _ideas.Add(item);
 
         QueueCountText.Text = $"{_ideas.Count} idea{(_ideas.Count == 1 ? "" : "s")}";
-        if (_selectedIdea == null && _ideas.Count > 0)
+        var keep = _ideas.FirstOrDefault(i => i.Id == keepId) ?? _ideas.FirstOrDefault();
+        if (keep != null) IdeasList.SelectedItem = keep;
+        else ShowEditor(false);
+    }
+
+    /// <summary>The editor works on the selected idea; with none (an empty queue) it says so instead of doing nothing.</summary>
+    private void ShowEditor(bool hasIdea)
+    {
+        foreach (var c in new System.Windows.Controls.Control[] { EditTitleBox, EditAgentCombo, EditThresholdBox, EditRepoCombo, AddFolderBtn, NewProjectBtn, EditWorkflowCombo, WorkflowsBtn, EditDescriptionBox })
+            c.IsEnabled = hasIdea;
+        if (!hasIdea)
         {
-            IdeasList.SelectedIndex = 0;
+            ShowRepositories(null);
+            RepoWarningText.Text = "No idea selected: ➕ Add Idea first, then pick its repository.";
+            RepoWarningPanel.Visibility = Visibility.Visible;
+            AddUnlistedBtn.Visibility = Visibility.Collapsed;
         }
     }
 
     private void IdeasList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         _selectedIdea = IdeasList.SelectedItem as ProjectIdea;
+        ShowEditor(_selectedIdea != null);
         if (_selectedIdea == null)
         {
             EditTitleBox.Text = string.Empty;
-            ShowRepositories(null);
             EditDescriptionBox.Text = string.Empty;
             HandoffPreviewBox.Text = string.Empty;
             SteerNotesList.ItemsSource = null;
@@ -414,10 +432,11 @@ public partial class IdeasWindow : Window
     // ---- Repository ----
 
     /// <summary>Marks the idea's folder when it is not one of AgentHub's repositories (shown in the list, flagged, with a one-click add).</summary>
-    private sealed class UnlistedFolder
+    public sealed class UnlistedFolder
     {
         public required string LocalPath { get; init; }
         public string Name => "⚠ " + (Path.GetFileName(LocalPath.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } n ? n : LocalPath);
+        public override string ToString() => Name;
     }
 
     private static bool SamePath(string a, string b)
@@ -462,8 +481,7 @@ public partial class IdeasWindow : Window
         };
         RepoWarningText.Text = warning ?? "";
         RepoWarningPanel.Visibility = warning == null ? Visibility.Collapsed : Visibility.Visible;
-        var addButton = (Button)RepoWarningPanel.Children[0];
-        addButton.Visibility = EditRepoCombo.SelectedItem is UnlistedFolder ? Visibility.Visible : Visibility.Collapsed;
+        AddUnlistedBtn.Visibility = EditRepoCombo.SelectedItem is UnlistedFolder ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>Adds a folder to AgentHub's repositories, selects it, and saves it on the idea.</summary>
@@ -479,6 +497,7 @@ public partial class IdeasWindow : Window
                 _selectedIdea.TargetDirectory = repo.LocalPath;
                 await _ideaService.UpdateIdeaAsync(_selectedIdea);
                 LoadHandoffPreview(repo.LocalPath);
+                OrchestratorSubtext.Text = $"\"{_selectedIdea.Title}\" is built in {repo.Name} ({repo.LocalPath}).";
             }
         }
         catch (Exception ex)
@@ -504,16 +523,25 @@ public partial class IdeasWindow : Window
         if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK) await UseFolderAsync(dialog.SelectedPath);
     }
 
+    /// <summary>Where ➕ New project creates folders (AGENTHUB_PROJECTS_DIR for test copies).</summary>
+    public static string ProjectsFolder =>
+        Environment.GetEnvironmentVariable("AGENTHUB_PROJECTS_DIR") is { Length: > 0 } d ? d
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Desktop", "ClaudeCProjects");
+
     private async void NewProjectRepo_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedIdea == null) return;
+        if (_selectedIdea == null)
+        {
+            MessageBox.Show(this, "Add an idea first (➕ Add Idea), then make its new project.", "New project", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
         var suggested = string.Join("", (EditTitleBox.Text.Trim() is { Length: > 0 } t ? t : _selectedIdea.Title).Split(Path.GetInvalidFileNameChars())).Trim();
         var name = Microsoft.VisualBasic.Interaction.InputBox(
-            "Name of the new project folder (created under Desktop\\ClaudeCProjects, git init, added to AgentHub's repositories):",
+            $"Name of the new project folder (created in {ProjectsFolder}, git init, added to AgentHub's repositories):",
             "New project", suggested);
         name = string.Join("", name.Split(Path.GetInvalidFileNameChars())).Trim();
         if (name.Length == 0) return;
-        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Desktop", "ClaudeCProjects", name);
+        var path = Path.Combine(ProjectsFolder, name);
         if (Directory.Exists(path) && Directory.EnumerateFileSystemEntries(path).Any() &&
             MessageBox.Show(this, $"{path} already exists and is not empty. Use it anyway?", "New project", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;

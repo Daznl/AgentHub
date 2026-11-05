@@ -173,38 +173,39 @@
                         </StackPanel>
                     </Grid>
 
-                    <!-- Target Directory -->
-                    <DockPanel Grid.Row="1" Margin="0,0,0,10">
-                        <StackPanel DockPanel.Dock="Left" Width="270" Margin="0,0,10,0">
-                            <TextBlock Text="Orchestrator workflow" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,3" />
-                            <DockPanel>
-                                <Button DockPanel.Dock="Right" Content="📚" Click="ManageWorkflows_Click" Width="34" Height="30" Margin="6,0,0,0" ToolTip="Workflow catalogue: duplicate a template, fill in its inputs, save it, pick it" />
-                                <ComboBox x:Name="EditWorkflowCombo" Height="30" Background="#0E1624" Foreground="{StaticResource TextBrush}" DisplayMemberPath="DisplayName"
-                                          ToolTip="How the orchestrator runs this idea (Builder, Data Processing, Demo Builder or one of your own)" />
-                            </DockPanel>
-                        </StackPanel>
-                        <Button DockPanel.Dock="Right" Content="➕ New project" Click="NewProjectRepo_Click" Padding="10,5" Margin="6,17,0,0" Height="30"
-                                ToolTip="Create a new folder under Desktop\ClaudeCProjects (named after the idea), git init it and add it to AgentHub's repositories" />
-                        <Button DockPanel.Dock="Right" Content="Add folder…" Click="BrowseTargetDir_Click" Padding="10,5" Margin="6,17,0,0" Height="30"
-                                ToolTip="Pick a folder on disk; it is added to AgentHub's repositories (git init if it has no Git yet)" />
-                        <StackPanel>
-                            <TextBlock Text="Repository (where the code is built: one of AgentHub's repositories)" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,3" />
-                            <ComboBox x:Name="EditRepoCombo" Height="30" Background="#0E1624" Foreground="{StaticResource TextBrush}" IsTextSearchEnabled="True" TextSearch.TextPath="Name">
+                    <!-- Repository and workflow -->
+                    <StackPanel Grid.Row="1" Margin="0,0,0,10">
+                        <TextBlock Text="Repository (where the code is built: one of AgentHub's repositories)" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,3" />
+                        <DockPanel>
+                            <Button x:Name="NewProjectBtn" DockPanel.Dock="Right" Content="➕ New project" Click="NewProjectRepo_Click" Padding="10,5" Margin="6,0,0,0" Height="30"
+                                    ToolTip="Create a new folder under Desktop\ClaudeCProjects (named after the idea), git init it and add it to AgentHub's repositories" />
+                            <Button x:Name="AddFolderBtn" DockPanel.Dock="Right" Content="Add folder…" Click="BrowseTargetDir_Click" Padding="10,5" Margin="6,0,0,0" Height="30"
+                                    ToolTip="Pick a folder on disk; it is added to AgentHub's repositories (git init if it has no Git yet)" />
+                            <ComboBox x:Name="EditRepoCombo" Height="30" Margin="0" Background="#0E1624" Foreground="{StaticResource TextBrush}" MaxDropDownHeight="420"
+                                      IsTextSearchEnabled="True" TextSearch.TextPath="Name" ToolTip="AgentHub's repositories (the list on the main window)">
                                 <ComboBox.ItemTemplate>
                                     <DataTemplate>
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                            <TextBlock Text="{Binding LocalPath}" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="8,1,0,0" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding LocalPath}" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="10,1,0,0" TextTrimming="CharacterEllipsis" />
                                         </StackPanel>
                                     </DataTemplate>
                                 </ComboBox.ItemTemplate>
                             </ComboBox>
-                            <DockPanel x:Name="RepoWarningPanel" Visibility="Collapsed" Margin="0,4,0,0">
-                                <Button DockPanel.Dock="Right" Content="➕ Add to AgentHub" Click="AddCurrentFolderAsRepo_Click" Padding="8,2" FontSize="11" />
-                                <TextBlock x:Name="RepoWarningText" Foreground="#FBBF24" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" />
-                            </DockPanel>
-                        </StackPanel>
-                    </DockPanel>
+                        </DockPanel>
+                        <DockPanel x:Name="RepoWarningPanel" Visibility="Collapsed" Margin="0,4,0,0">
+                            <Button x:Name="AddUnlistedBtn" DockPanel.Dock="Right" Content="➕ Add to AgentHub" Click="AddCurrentFolderAsRepo_Click" Padding="8,2" FontSize="11" />
+                            <TextBlock x:Name="RepoWarningText" Foreground="#FBBF24" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </DockPanel>
+
+                        <TextBlock Text="Orchestrator workflow" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,10,0,3" />
+                        <DockPanel>
+                            <Button x:Name="WorkflowsBtn" DockPanel.Dock="Right" Content="Workflows…" Click="ManageWorkflows_Click" Padding="10,5" Margin="6,0,0,0" Height="30"
+                                    ToolTip="Workflow catalogue: duplicate a template, fill in its inputs, save it, pick it" />
+                            <ComboBox x:Name="EditWorkflowCombo" Height="30" Margin="0" Background="#0E1624" Foreground="{StaticResource TextBrush}" DisplayMemberPath="DisplayName"
+                                      ToolTip="How the orchestrator runs this idea (Builder, Data Processing, Demo Builder or one of your own)" />
+                        </DockPanel>
+                    </StackPanel>
 
                     <!-- Description / Specifications -->
                     <DockPanel Grid.Row="2" Margin="0,0,0,10">

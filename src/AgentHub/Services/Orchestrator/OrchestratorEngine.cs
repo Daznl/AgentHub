@@ -637,7 +637,8 @@ public sealed class OrchestratorEngine : IDisposable
         {
             if (string.IsNullOrWhiteSpace(idea.TargetDirectory))
             {
-                var baseDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Desktop", "ClaudeCProjects");
+                var baseDir = Environment.GetEnvironmentVariable("AGENTHUB_PROJECTS_DIR") is { Length: > 0 } d ? d
+                    : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Desktop", "ClaudeCProjects");
                 idea.TargetDirectory = Path.Combine(baseDir, SanitizeFolderName(idea.Title));
             }
             Directory.CreateDirectory(idea.TargetDirectory);
