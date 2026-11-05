@@ -80,7 +80,38 @@
             </Button>
         </DataTemplate>
     </UserControl.Resources>
-    <Border x:Name="PaneBorder" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" ClipToBounds="True">
+    <Grid>
+    <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <!-- The orchestrator driving this pane's session, in a small box above it. Only on the pane an orchestration run
+         controls; every other pane (Daniel's own terminals) never shows it. -->
+    <Border x:Name="OrchestratorBox" Grid.Row="0" Visibility="Collapsed" Background="#151129" BorderBrush="#4C3A8C" BorderThickness="1"
+            CornerRadius="8" Padding="10,6" Margin="0,0,0,6">
+        <DockPanel LastChildFill="True">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                <Button x:Name="OrchestratorPauseBtn" Click="OrchestratorPause_Click" Content="⏸ Pause" ToolTip="Pause the orchestrator: the worker is left as it is and gets nothing new"
+                        Background="#221A3D" Foreground="#C4B5FD" Padding="8,2" Margin="0,0,4,0" FontSize="11" FontWeight="SemiBold" />
+                <Button x:Name="OrchestratorOpenBtn" Click="OrchestratorOpen_Click" Content="Orchestration…" ToolTip="Open the Orchestration window"
+                        Background="#221A3D" Foreground="#C4B5FD" Padding="8,2" FontSize="11" FontWeight="SemiBold" />
+            </StackPanel>
+            <StackPanel>
+                <DockPanel LastChildFill="True">
+                    <TextBlock DockPanel.Dock="Left" Text="🧠 ORCHESTRATOR" Foreground="#A78BFA" FontSize="10" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <Border DockPanel.Dock="Left" x:Name="OrchestratorStateChip" Background="#2E2357" CornerRadius="4" Padding="6,1" Margin="0,0,8,0" VerticalAlignment="Center">
+                        <TextBlock x:Name="OrchestratorStateText" Foreground="#DDD6FE" FontSize="10" FontWeight="Bold" />
+                    </Border>
+                    <TextBlock x:Name="OrchestratorTitle" Foreground="{StaticResource TextBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+                <TextBlock x:Name="OrchestratorProgress" Foreground="#B6C2D6" FontSize="11" Margin="0,3,0,0" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="OrchestratorLastSent" Foreground="#7E8CA6" FontSize="10" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+        </DockPanel>
+    </Border>
+
+    <Border x:Name="PaneBorder" Grid.Row="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" ClipToBounds="True">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -233,4 +264,5 @@
             </Border>
         </Grid>
     </Border>
+    </Grid>
 </UserControl>

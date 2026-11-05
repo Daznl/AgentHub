@@ -9,6 +9,7 @@ using AgentHub.Models;
 using AgentHub.Services.Context;
 using AgentHub.Services.History;
 using AgentHub.Services.Instructions;
+using AgentHub.Services.Orchestrator;
 using Button = System.Windows.Controls.Button;
 using Color = System.Windows.Media.Color;
 using UserControl = System.Windows.Controls.UserControl;
@@ -154,6 +155,39 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     /// <summary>Window size assumed for Claude Code sessions, which do not record it. Applies from the next launch.</summary>
     public void ConfigureContext(long claudeContextWindowTokens) => _claudeContextWindowTokens = claudeContextWindowTokens;
+
+    // ---- The orchestrator driving this pane ----
+
+    /// <summary>Pause or Resume pressed in the orchestrator box above this pane.</summary>
+    public event Action<TerminalPaneControl>? OrchestratorPauseRequested;
+    public event Action<TerminalPaneControl>? OrchestratorOpenRequested;
+
+    /// <summary>What the orchestrator box shows; null hides it. Only the pane an orchestration run controls gets one.</summary>
+    public OrchestratorBoxView? OrchestratorView { get; private set; }
+
+    public void ShowOrchestrator(OrchestratorBoxView? view)
+    {
+        OrchestratorView = view;
+        if (view is null)
+        {
+            OrchestratorBox.Visibility = Visibility.Collapsed;
+            return;
+        }
+        OrchestratorStateText.Text = view.State;
+        OrchestratorTitle.Text = view.Title;
+        OrchestratorProgress.Text = view.Progress;
+        OrchestratorProgress.ToolTip = string.IsNullOrEmpty(view.Progress) ? null : view.Progress;
+        OrchestratorProgress.Visibility = string.IsNullOrEmpty(view.Progress) ? Visibility.Collapsed : Visibility.Visible;
+        OrchestratorLastSent.Text = string.IsNullOrEmpty(view.LastSent) ? "" : "Last sent: " + view.LastSent;
+        OrchestratorLastSent.ToolTip = string.IsNullOrEmpty(view.LastSent) ? null : view.LastSent;
+        OrchestratorLastSent.Visibility = string.IsNullOrEmpty(view.LastSent) ? Visibility.Collapsed : Visibility.Visible;
+        OrchestratorPauseBtn.Content = view.Paused ? "▶ Resume" : "⏸ Pause";
+        OrchestratorPauseBtn.ToolTip = view.Paused ? "Resume the orchestrator" : "Pause the orchestrator: the worker is left as it is and gets nothing new";
+        OrchestratorBox.Visibility = Visibility.Visible;
+    }
+
+    private void OrchestratorPause_Click(object sender, RoutedEventArgs e) => OrchestratorPauseRequested?.Invoke(this);
+    private void OrchestratorOpen_Click(object sender, RoutedEventArgs e) => OrchestratorOpenRequested?.Invoke(this);
 
     public ContextReading? LatestContextReading { get; private set; }
     public event Action<ContextReading?>? ContextReadingChanged;

@@ -171,15 +171,21 @@ public partial class IdeasWindow : Window
         EditDescriptionBox.Text = _selectedIdea.Description;
         EditThresholdBox.Text = $"{_selectedIdea.ContextHandoffThreshold * 100:0}%";
 
+        var agentFound = false;
         for (int i = 0; i < EditAgentCombo.Items.Count; i++)
         {
             if (EditAgentCombo.Items[i] is ComboBoxItem item &&
                 string.Equals(item.Content?.ToString(), _selectedIdea.AgentCommand, StringComparison.OrdinalIgnoreCase))
             {
                 EditAgentCombo.SelectedIndex = i;
+                agentFound = true;
                 break;
             }
         }
+        // A command not in the list (set in ideas.json) is shown and kept; picking the first item would silently replace it
+        // with claude on the next save.
+        if (!agentFound && !string.IsNullOrWhiteSpace(_selectedIdea.AgentCommand))
+            EditAgentCombo.SelectedIndex = EditAgentCombo.Items.Add(new ComboBoxItem { Content = _selectedIdea.AgentCommand });
 
         SelectWorkflow(_selectedIdea.WorkflowId);
         LoadHandoffPreview(_selectedIdea.TargetDirectory);

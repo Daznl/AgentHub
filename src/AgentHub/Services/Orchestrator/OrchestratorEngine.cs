@@ -85,7 +85,9 @@ public sealed class OrchestratorEngine : IDisposable
 
     /// <summary>Model of the orchestrator when the workflow names none. Sonnet: it reads short replies and writes short instructions.</summary>
     public string OrchestratorModel { get; set; } = "sonnet";
-    public string OrchestratorCommand { get; set; } = "claude";
+    /// <summary>The orchestrator CLI. AGENTHUB_ORCHESTRATOR_COMMAND replaces it, for UI tests that use a scripted orchestrator.</summary>
+    public string OrchestratorCommand { get; set; } =
+        Environment.GetEnvironmentVariable("AGENTHUB_ORCHESTRATOR_COMMAND") is { Length: > 0 } c ? c : "claude";
 
     /// <summary>Where runs are written live, one folder each.</summary>
     public string RunsRoot { get; set; } = Environment.GetEnvironmentVariable("AGENTHUB_RUNS_DIR") is { Length: > 0 } d ? d : @"C:\data\agenthub\orchestrator-runs";
@@ -138,6 +140,10 @@ public sealed class OrchestratorEngine : IDisposable
     public TerminalPaneControl? ActivePane => _paneWorker?.Pane;
     public string? LatestProgress { get; private set; }
     public bool IsThinking => _thinking;
+    /// <summary>The current worker session's number (1 for the first).</summary>
+    public int WorkerSession => _workerSession;
+    /// <summary>The orchestrator's latest message to the worker (without AgentHub's rules).</summary>
+    public string? LastSentToWorker { get; private set; }
     public string? CurrentRunFolder => _run?.Folder;
     public RunRecord? CurrentRun => _run?.Record;
     public SteeringService Steering { get; }
@@ -855,6 +861,7 @@ public sealed class OrchestratorEngine : IDisposable
                         _turnEndedWhileThinking = false;
                         _waitingSince = null;
                         _idleAsks = 0;
+                        LastSentToWorker = d.ToWorker;
                         Log($"🧠 → worker: {OneLine(d.ToWorker!, 160)}");
                     }
                     else
@@ -1007,6 +1014,7 @@ public sealed class OrchestratorEngine : IDisposable
         Log($"Handoff: {reason}", forced ? "Warn" : "Info");
         await AddEventAsync(new RunEvent { Kind = forced ? "forced_handoff" : "handoff", Detail = reason, Flag = forced });
         _lastSubmitAt = DateTimeOffset.Now;
+        LastSentToWorker = "[AgentHub] Time to hand off: write .agenthub/handoff.md and commit.";
         await w.SubmitAsync(OrchestratorMessages.HandoffPrompt);
         if (_run != null) _run.Record.MessagesToWorker++;
     }

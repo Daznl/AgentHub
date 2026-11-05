@@ -217,7 +217,38 @@ public partial class MainWindow : Window
         pane.RepoContextRequested += p => ShowContext(p.ContextFolder, p.ContextCli);
         pane.TimelineRequested += p => ShowTimeline(p.HistoryFolder);
         pane.UpdateShellOptions(_shellOptions);
+        pane.OrchestratorPauseRequested += p => { _ = ToggleOrchestratorPauseAsync(); };
+        pane.OrchestratorOpenRequested += _ => ShowIdeas();
         return pane;
+    }
+
+    /// <summary>
+    /// The orchestrator box goes above the one pane an orchestration run drives, and only there: Daniel's own terminals
+    /// never show it. Engine events come from any thread.
+    /// </summary>
+    private void RefreshOrchestratorBoxes()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.InvokeAsync(RefreshOrchestratorBoxes);
+            return;
+        }
+        var o = _orchestrator;
+        var view = o is null ? null : OrchestratorBoxView.For(o.State, o.IsThinking, o.CurrentIdea?.Title, o.WorkerSession, o.LatestProgress, o.LastSentToWorker);
+        var driven = view is null ? null : o!.ActivePane;
+        foreach (var pane in _panes)
+        {
+            var next = pane == driven ? view : null;
+            if (next != pane.OrchestratorView) pane.ShowOrchestrator(next);
+        }
+    }
+
+    private async Task ToggleOrchestratorPauseAsync()
+    {
+        if (_orchestrator is not { } o) return;
+        if (o.State == OrchestratorState.Paused) await o.ResumeAsync();
+        else o.Pause();
+        RefreshOrchestratorBoxes();
     }
 
     private void OpenIdeas_Click(object sender, RoutedEventArgs e) => ShowIdeas();
@@ -255,6 +286,11 @@ public partial class MainWindow : Window
                 Workflows = new WorkflowCatalogue(archive),
                 RepositoryInUse = path => Dispatcher.InvokeAsync(() => EnsureRepositoryAsync(path)).Task.Unwrap()
             };
+            _orchestrator.StateChanged += _ => RefreshOrchestratorBoxes();
+            _orchestrator.ThinkingChanged += _ => RefreshOrchestratorBoxes();
+            _orchestrator.ProgressChanged += _ => RefreshOrchestratorBoxes();
+            _orchestrator.CurrentIdeaChanged += _ => RefreshOrchestratorBoxes();
+            _orchestrator.LogAdded += _ => RefreshOrchestratorBoxes();
         }
         var window = new IdeasWindow(
             _ideaService,
