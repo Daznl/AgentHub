@@ -33,7 +33,7 @@
                         <!-- Hidden (not collapsed, so the wrap point does not move) when the row wraps -->
                         <Border x:Name="NavSeparator" Width="1" Background="{StaticResource BorderBrush}" Margin="2,0,10,8" />
                         <Button x:Name="ViewCockpitBtn" Click="ViewCockpitBtn_Click" Content="⚡ Cockpit" FontWeight="SemiBold" />
-                        <Button Click="OpenIdeas_Click" Content="💡 Ideas &amp; Build" FontWeight="SemiBold" ToolTip="Queue app ideas, orchestrate autonomous building while away, auto-wait on Claude usage resets &amp; handoff" />
+                        <Button Click="OpenIdeas_Click" Content="🧭 Orchestration" FontWeight="SemiBold" ToolTip="Orchestration: queue ideas, pick a workflow, orchestrate autonomous building while away, auto-wait on Claude usage resets &amp; handoff" />
                         <Button x:Name="ManageReposBtn" Click="ManageReposBtn_Click" Content="🔧 Manage GitHub Repos" FontWeight="SemiBold" />
                         <Button Click="OpenHistory_Click" Content="🕘 History" FontWeight="SemiBold" ToolTip="Every Claude Code and Codex session per repository: each prompt, reply, thinking step, tool call and result" />
                         <Button Click="OpenContext_Click" Content="📄 Context" FontWeight="SemiBold" ToolTip="View and edit the user-wide instruction file of each CLI: Claude Code CLAUDE.md, Codex AGENTS.md, Gemini / Antigravity GEMINI.md" />

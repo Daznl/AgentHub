@@ -268,6 +268,38 @@ public class WorkflowLoopTests : IDisposable
     }
 
     [Fact]
+    public async Task An_idea_never_shows_Building_when_nothing_is_building_it()
+    {
+        // Left over from before a restart (the 2026-11-04 runs left two ideas like this).
+        var (engine, ideas, idea, catalogue) = await SetupAsync(new ScriptedBrain(Send("Run stage 1 only.", stage: "1 clean")));
+        idea.Status = IdeaStatus.Building;
+        idea.StatusNote = "Building (Session #1)";
+        await ideas.UpdateIdeaAsync(idea);
+        await engine.RecoverAfterRestartAsync();
+        var saved = (await ideas.LoadAsync()).Single();
+        Assert.Equal(IdeaStatus.Queued, saved.Status);
+        Assert.Contains("Interrupted", saved.StatusNote);
+
+        // Closing AgentHub mid-run: back in the queue.
+        var worker = new ScriptedWorker();
+        await engine.BuildIdeaImmediatelyAsync(saved, worker);
+        await Until(() => worker.Received.Count == 1, "first instruction");
+        Assert.Equal(IdeaStatus.Building, (await ideas.LoadAsync()).Single().Status);
+        engine.Dispose();
+        saved = (await ideas.LoadAsync()).Single();
+        Assert.Equal(IdeaStatus.Queued, saved.Status);
+        Assert.Contains("picks up where it left off", saved.StatusNote);
+
+        // Stop: paused, not building.
+        using var engine2 = MakeEngine(ideas, new ScriptedBrain(Send("Carry on.", stage: "1 clean")), catalogue);
+        var worker2 = new ScriptedWorker();
+        await engine2.BuildIdeaImmediatelyAsync(saved, worker2);
+        await Until(() => worker2.Received.Count == 1, "instruction after reopening");
+        engine2.Stop();
+        await Until(() => ideas.LoadAsync().Result.Single().Status == IdeaStatus.Paused, "paused after Stop");
+    }
+
+    [Fact]
     public async Task Work_mode_skips_an_idea_whose_workflow_inputs_are_not_filled_in()
     {
         var brain = new ScriptedBrain();

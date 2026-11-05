@@ -67,6 +67,7 @@ public sealed class OrchestratorEngine : IDisposable
     private bool _thinking;
     private bool _loopRunning;
     private bool _recovered;
+    private bool _staleStatusesFixed;
     private OrchestratorWorkflow? _workflow;
     private bool _turnEndedWhileThinking;
     private bool _sentSinceLastTurn;
@@ -294,7 +295,9 @@ public sealed class OrchestratorEngine : IDisposable
         SetState(OrchestratorState.Idle);
         _handoffRequested = false;
         Log("Auto-Builder stopped.");
+        var ideaId = _run?.Record.IdeaId ?? _currentIdea?.Id;
         _ = EndRunAsync("stopped", "Stopped by Daniel.");
+        if (ideaId != null) _ = MarkNotBuildingAsync(ideaId, IdeaStatus.Paused, "Stopped");
     }
 
     public async Task AdvanceQueueAsync()
@@ -437,6 +440,47 @@ public sealed class OrchestratorEngine : IDisposable
             Log($"Run {run.Record.RunId} left open ({why}); building the idea again picks it up.");
         }
         catch (Exception ex) { Log($"Could not save the run: {ex.Message}", "Warn"); }
+        await MarkNotBuildingAsync(run.Record.IdeaId, IdeaStatus.Queued, $"Interrupted ({why.TrimEnd('.')}); picks up where it left off");
+    }
+
+    /// <summary>
+    /// An idea showing Building (or waiting for the usage reset) while nothing builds it is wrong in the queue: set it to what it is.
+    /// Ideas in any other state are left alone.
+    /// </summary>
+    private async Task MarkNotBuildingAsync(string ideaId, IdeaStatus status, string note)
+    {
+        try
+        {
+            var idea = (await _ideaService.LoadAsync()).FirstOrDefault(i => i.Id == ideaId);
+            if (idea is not { Status: IdeaStatus.Building or IdeaStatus.WaitingForReset }) return;
+            idea.Status = status;
+            idea.StatusNote = note;
+            await _ideaService.UpdateIdeaAsync(idea);
+            if (_currentIdea?.Id == ideaId) { _currentIdea.Status = status; _currentIdea.StatusNote = note; }
+        }
+        catch (Exception ex) { Log($"Could not update the idea's status: {ex.Message}", "Warn"); }
+    }
+
+    /// <summary>
+    /// Run once when AgentHub starts (the first time the Ideas window opens): nothing can be building yet, so ideas left marked
+    /// Building by a crash or an older AgentHub go back in the queue, and runs that can never be picked up are closed.
+    /// </summary>
+    public async Task RecoverAfterRestartAsync()
+    {
+        if (_staleStatusesFixed) return;
+        _staleStatusesFixed = true;
+        if (_run == null && _state == OrchestratorState.Idle)
+        {
+            foreach (var idea in await _ideaService.LoadAsync())
+            {
+                if (idea.Status is IdeaStatus.Building or IdeaStatus.WaitingForReset)
+                {
+                    await MarkNotBuildingAsync(idea.Id, IdeaStatus.Queued, "Interrupted (AgentHub was closed while it was building); picks up where it left off");
+                    Log($"\"{idea.Title}\" was still marked Building from before AgentHub restarted; back in the queue.");
+                }
+            }
+        }
+        await RecoverInterruptedRunsAsync();
     }
 
     private async Task EndRunAsync(string outcome, string? detail)

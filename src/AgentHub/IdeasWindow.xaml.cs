@@ -62,6 +62,8 @@ public partial class IdeasWindow : Window
 
         Loaded += async (_, _) =>
         {
+            try { await _orchestrator.RecoverAfterRestartAsync(); }
+            catch (Exception ex) { OrchestratorSubtext.Text = "Could not tidy up after the restart: " + ex.Message; }
             await ReloadWorkflowsAsync();
             await ReloadIdeasAsync();
             UpdateOrchestratorUi();

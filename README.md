@@ -99,7 +99,7 @@ It never stores API keys or provider credentials. Authentication stays with the 
 - Each card shows percentage left, reset time, the data source and refresh state. Cards can be hidden individually and reopened from chips.
 - Polled on a configurable interval. See [Usage limit cards](#usage-limit-cards) for where the numbers come from.
 
-### 💡 Project Ideas & Autonomous Auto-Builder (Work Mode)
+### 🧭 Orchestration: Project Ideas & Autonomous Auto-Builder (Work Mode)
 
 - **Idea To-Do Queue:** Store and prioritize application ideas in a structured queue, persisted in `%APPDATA%\AgentHub\ideas.json`.
 - **Autonomous Orchestration:** Designed to orchestrate continuous project building while you are away or at work, taking full advantage of your monthly Claude subscription.

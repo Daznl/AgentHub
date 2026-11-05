@@ -173,6 +173,10 @@ It also has three loop tests:
 - dispose, then reopen with the same run and orchestrator session;
 - missing inputs, so the idea is skipped and Paused.
 
+**Follow-ups the same day:**
+- Daniel: "In the build queue of that panel how come two of them say building and one queued?" Code Review Assistant and AI Stock Bot had been left as Building (Session #1) by the 2026-11-04 runs, because nothing reset the status. Now Stop sets the idea to Paused, and suspending a run (closing AgentHub, switching ideas) sets it back to Queued. `RecoverAfterRestartAsync`, called the first time the window opens, moves any leftover Building or WaitingForReset idea to Queued.
+- Daniel asked for the "💡 Ideas & Build" button and the window to be called **🧭 Orchestration**.
+
 **Not done / for Daniel:**
 - Not tried in the app yet.
 - The live orchestrator test was not re-run with a workflow.
