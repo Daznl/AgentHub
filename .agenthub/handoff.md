@@ -131,6 +131,53 @@ Two buttons beside Refresh in the Timeline window, **✨ You & Claude** and **�
 
 **Not done / for Daniel:** not tried in the app (needs clicks: launch a test build with its own settings and ask Daniel); the old 2026-11-04 runs were not backfilled into the archive (they had no orchestrator session); orchestrator model and the decision cap are constants (`OrchestratorModel`, `MaxDecisionsPerRun`); "Review this run" button (send a REVIEW.md to Claude for prompt improvements) not built; the orchestrator's transcripts appear in 🕘 History under their run folders.
 
+## 3e. Orchestrator workflow catalogue (built 2026-11-05, on `feature/workflow-catalogue`, branched from `feature/claude-orchestrator`)
+
+**Daniel's design (2026-11-05):**
+- "Every project has a different functionlaity… We need Orchestrator selection based on what needs to be built." The core (JSON etc.) stays the same and the instructions change.
+- **Builder:** keep building, watch context and handoffs, guide the worker's questions.
+- **Data Processing:** stages from a pipeline location, about an hour per stage. Hand off after each stage. The next worker reports issues first, and they are cleaned up before the next stage.
+- **Demo Builder:** Builder plus a UI click-through as a user ("claude in chrome works great… others click through local apps so whatever").
+- **Pipeline location:** "a specific location that I would change for each workflow… I would physically copy and paste the location. We need to be able to copy the base Data Stage orchestrator template and then modify it for our pipeline, then save it so that pipline is remembered for if I ever pause and come back the next day."
+- **Catalogue:** kept in AgentHub, and "I pick the workflow or create a new one".
+
+**What was built:**
+- **Workflow files:** `workflows/builder.md`, `data-processing.md` and `demo-builder.md` are templates, copied next to the exe.
+- **File format:** a front-matter block with `name`, `description`, `use-when`, `based-on`, `model`, `worker-command`, `handoff: on-context|after-each-stage`, `context-threshold` and `input.<name>: value`. Then come `# Orchestrator instructions` and `# Worker rules`, with `{{name}}` substituted.
+- **Missing inputs:** an input that is empty or starts with `<` counts as missing.
+- **`OrchestratorWorkflow`:** Parse, Serialize, Duplicate, MissingInputs and Version (sha256/8).
+- **`WorkflowCatalogue`:** templates come first (`template:<stem>`, read-only). Own workflows are saved under `C:\data\agenthub\workflows-archive\workflows\<slug>.md`. `GetAsync` falls back to Builder.
+- **`AgentHubArchive`:** renamed from `RunArchivePublisher`. It now holds both `runs/` and `workflows/` on the orphan branch **`agenthub-workflows`** (the old `orchestrator-runs` branch never existed in the real repo). It commits only its own folder (`git commit -- <folder>`) and never pushes.
+- **Orchestrator prompt:** `OrchestratorMessages.SystemPrompt` is the fixed core plus `===== WORKFLOW: name =====` and the resolved instructions. The decision gains `stage` and `stage_done`. Messages carry a `[WORKFLOW]` line, and the workflow's worker rules are appended to `AutonomyRules`.
+- **Engine, stages:** in `after-each-stage`, `stage_done` turns a send/wait into a handoff, and the fresh worker's event lists the stages done.
+- **Engine, model and handoffs:** the workflow sets the orchestrator model, and can set the context threshold and worker CLI.
+- **Engine, closing and reopening:** closing AgentHub (Dispose) *suspends* the run. The next build of that idea reopens it (`RunReopened`, same orchestrator session via `--resume`, `Reopened` count). Building another idea suspends the current one.
+- **Engine, interrupted runs:** `RecoverInterruptedRunsAsync` now closes only runs whose idea is gone or completed.
+- **Engine, missing inputs:** an idea whose workflow has missing inputs is set to Paused with a note, and the queue moves on.
+- **Run records and the idea:** `RunRecord` gains Workflow, WorkflowId, WorkflowVersion, CurrentStage and StagesDone. `workflow.md` is written into each run, and REVIEW and INDEX show the workflow. `ProjectIdea.WorkflowId` defaults to `template:builder`.
+- **UI:**
+  - The Ideas editor has an **Orchestrator workflow** combo and a 📚 button.
+  - The 📚 `WorkflowsWindow` has the catalogue list and an editor: name, model, fresh worker, context limit, worker CLI, description, use-when, inputs, instructions and worker rules. Its buttons are Duplicate, New, Delete, Save and ✔ Use for this idea.
+  - Build Now refuses a workflow with missing inputs and explains how to fill them in.
+
+**Tests:** 276 pass (3 live skipped). `WorkflowCatalogueTests.cs` covers:
+- the shipped templates parsing;
+- a copy with filled-in inputs round-tripping and resolving;
+- the system prompt having the core before the workflow;
+- the catalogue's save, ids, template refusal and delete;
+- saving into the archive branch in a temp repo, where the working branch is untouched and a fresh catalogue sees the workflow.
+
+It also has three loop tests:
+- a finished stage leads to a handoff, a fresh worker and the stages remembered;
+- dispose, then reopen with the same run and orchestrator session;
+- missing inputs, so the idea is skipped and Paused.
+
+**Not done / for Daniel:**
+- Not tried in the app yet.
+- The live orchestrator test was not re-run with a workflow.
+- Data Processing on the work computer needs the workflows branch there. Push `agenthub-workflows` (only when Daniel asks), or make the copy on that machine.
+- Demo Builder relies on the worker having Claude in Chrome or another UI tool. Otherwise it pauses for Daniel.
+
 ## 4. Timeline follow-ups Daniel has heard about (none asked for yet)
 
 - A session open for days has one card at its start time holding everything it ever committed; splitting such a session into one row per day of activity would put late merges where they happened.

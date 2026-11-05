@@ -22,6 +22,9 @@ public sealed class ProjectIdea
     public string? GitHubUrl { get; set; }
     public string AgentCommand { get; set; } = "claude";
 
+    /// <summary>Which orchestrator workflow runs this idea (see the workflow catalogue); Builder when unset.</summary>
+    public string WorkflowId { get; set; } = "template:builder";
+
     /// <summary>Context window fraction (0.50 - 0.95) that triggers an automated handoff turn.</summary>
     public double ContextHandoffThreshold { get; set; } = 0.75;
 

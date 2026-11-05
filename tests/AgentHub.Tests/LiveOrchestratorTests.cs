@@ -119,7 +119,7 @@ public class LiveOrchestratorTests(ITestOutputHelper output)
         var engine = new OrchestratorEngine(ideas, new GitService(runner), runner, new SteeringService(Path.Combine(root, "steering.json")))
         {
             RunsRoot = Path.Combine(root, "runs"),
-            Publisher = new RunArchivePublisher(runner, archiveRepo, Path.Combine(root, "archive worktree")),
+            Archive = new AgentHubArchive(runner, archiveRepo, Path.Combine(root, "archive worktree")),
             UsageReader = () => Task.FromResult<UsageSnapshot?>(null),
             TurnSettle = TimeSpan.FromSeconds(1),
             WorkerStartupDelay = TimeSpan.Zero,
@@ -169,8 +169,8 @@ public class LiveOrchestratorTests(ITestOutputHelper output)
             output.WriteLine("hello.js --shout: " + run.StdOut.Trim());
             Assert.Contains("HELLO, ADA!", run.StdOut);
 
-            var files = await runner.RunAsync("git", ["ls-tree", "-r", "--name-only", RunArchivePublisher.Branch], archiveRepo);
-            Assert.Contains($"orchestrator-runs/{record.RunId}/REVIEW.md", files.StdOut);
+            var files = await runner.RunAsync("git", ["ls-tree", "-r", "--name-only", AgentHubArchive.Branch], archiveRepo);
+            Assert.Contains($"runs/{record.RunId}/REVIEW.md", files.StdOut);
         }
     }
 }

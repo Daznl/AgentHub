@@ -221,24 +221,24 @@ public class RunArchiveTests : IDisposable
             await File.WriteAllTextAsync(Path.Combine(rec.Folder, "worker-transcript.jsonl"), "secret");
         }
 
-        var publisher = new RunArchivePublisher(new ProcessRunner(), repo, Path.Combine(_dir, "archive worktree"));
-        var first = await publisher.PublishAsync(Path.Combine(runs, "2026-11-06_0900_bot_aaaaaa"));
-        var second = await publisher.PublishAsync(Path.Combine(runs, "2026-11-06_1000_app_bbbbbb"));
+        var publisher = new AgentHubArchive(new ProcessRunner(), repo, Path.Combine(_dir, "archive worktree"));
+        var first = await publisher.PublishRunAsync(Path.Combine(runs, "2026-11-06_0900_bot_aaaaaa"));
+        var second = await publisher.PublishRunAsync(Path.Combine(runs, "2026-11-06_1000_app_bbbbbb"));
         Assert.Contains("not pushed", first);
         Assert.Contains("not pushed", second);
 
         Assert.Equal((0, "feature/x"), await Git(repo, "rev-parse", "--abbrev-ref", "HEAD"));
         Assert.Equal("work in progress", await File.ReadAllTextAsync(Path.Combine(repo, "app.txt")));
-        Assert.False(Directory.Exists(Path.Combine(repo, RunArchivePublisher.RunsFolder)));
+        Assert.False(Directory.Exists(Path.Combine(repo, AgentHubArchive.RunsFolder)));
 
-        var (_, files) = await Git(repo, "ls-tree", "-r", "--name-only", RunArchivePublisher.Branch);
+        var (_, files) = await Git(repo, "ls-tree", "-r", "--name-only", AgentHubArchive.Branch);
         Assert.Contains("README.md", files);
-        Assert.Contains("orchestrator-runs/INDEX.md", files);
-        Assert.Contains("orchestrator-runs/2026-11-06_0900_bot_aaaaaa/REVIEW.md", files);
-        Assert.Contains("orchestrator-runs/2026-11-06_1000_app_bbbbbb/run.json", files);
+        Assert.Contains("runs/INDEX.md", files);
+        Assert.Contains("runs/2026-11-06_0900_bot_aaaaaa/REVIEW.md", files);
+        Assert.Contains("runs/2026-11-06_1000_app_bbbbbb/run.json", files);
         Assert.DoesNotContain("worker-transcript", files);
 
-        var (_, log) = await Git(repo, "log", "--format=%s", RunArchivePublisher.Branch);
+        var (_, log) = await Git(repo, "log", "--format=%s", AgentHubArchive.Branch);
         Assert.Contains("Orchestrator run 2026-11-06_1000_app_bbbbbb: App (completed)", log);
         var (_, mainLog) = await Git(repo, "log", "--format=%s", "main");
         Assert.Equal("init", mainLog);

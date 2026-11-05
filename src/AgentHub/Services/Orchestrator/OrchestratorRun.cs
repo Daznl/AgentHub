@@ -27,11 +27,19 @@ public sealed class RunRecord
     public string TargetDirectory { get; set; } = "";
     public string WorkerCommand { get; set; } = "";
     public string OrchestratorModel { get; set; } = "";
+    public string Workflow { get; set; } = "Builder";
+    public string WorkflowId { get; set; } = OrchestratorWorkflow.DefaultId;
+    /// <summary>Hash of the workflow text as it ran (<see cref="OrchestratorWorkflow.Version"/>); workflow.md in the run folder is the text.</summary>
+    public string? WorkflowVersion { get; set; }
+    public string? CurrentStage { get; set; }
+    public List<string> StagesDone { get; set; } = [];
+    /// <summary>Times the run was picked up again after a pause or a closed AgentHub.</summary>
+    public int Reopened { get; set; }
     public string OrchestratorSessionId { get; set; } = "";
     public string? AgentHubBuild { get; set; }
     public DateTimeOffset StartedAt { get; set; }
     public DateTimeOffset? EndedAt { get; set; }
-    /// <summary>running, completed, stopped, paused_for_daniel, error, interrupted, switched.</summary>
+    /// <summary>running, suspended (AgentHub closed; picked up again on the next build of the idea), completed, stopped, interrupted, switched.</summary>
     public string Outcome { get; set; } = "running";
     public string? OutcomeDetail { get; set; }
     public string? LastProgress { get; set; }
@@ -65,6 +73,8 @@ public sealed class RunEvent
     public string? SteerHandling { get; set; }
     public string? Reason { get; set; }
     public string? Progress { get; set; }
+    public string? Stage { get; set; }
+    public bool? StageDone { get; set; }
     public int? Attempts { get; set; }
     public double? Seconds { get; set; }
     /// <summary>What AgentHub actually typed into the worker (the orchestrator's message plus any AgentHub rules).</summary>
@@ -210,7 +220,10 @@ public static class RunReview
         sb.Append("| | |\n|---|---|\n");
         Row(sb, "Outcome", OutcomeText(r));
         Row(sb, "Started", $"{r.StartedAt:yyyy-MM-dd HH:mm} · ran {Duration(r.Duration)}");
-        Row(sb, "Orchestrator", $"{r.OrchestratorModel} · {r.OrchestratorCalls} decisions · session `{r.OrchestratorSessionId}`");
+        Row(sb, "Workflow", $"{r.Workflow} (`{r.WorkflowId}`, version {r.WorkflowVersion ?? "?"}) · text in workflow.md");
+        Row(sb, "Orchestrator", $"{r.OrchestratorModel} · {r.OrchestratorCalls} decisions · session `{r.OrchestratorSessionId}`" + (r.Reopened > 0 ? $" · picked up again {r.Reopened}×" : ""));
+        if (r.StagesDone.Count > 0 || r.CurrentStage != null)
+            Row(sb, "Stages", (r.StagesDone.Count > 0 ? "done: " + string.Join(", ", r.StagesDone) : "none done") + (r.CurrentStage is { } cs && !r.StagesDone.Contains(cs) ? $" · current: {cs}" : ""));
         Row(sb, "Worker", $"`{r.WorkerCommand}` in `{r.TargetDirectory}` · {r.WorkerSessions.Count} session(s) · {r.MessagesToWorker} messages sent");
         Row(sb, "Steers / handoffs / flags", $"{r.Steers} / {r.Handoffs} / {r.Flags}");
         if (!string.IsNullOrEmpty(r.AgentHubBuild)) Row(sb, "AgentHub build", r.AgentHubBuild);
@@ -257,6 +270,7 @@ public static class RunReview
                 }
                 sb.Append("**Decision:** ").Append(e.Action).Append(" · ").Append(OneLine(e.Reason ?? "")).Append('\n');
                 if (!string.IsNullOrEmpty(e.Progress)) sb.Append("\n_Progress: ").Append(OneLine(e.Progress)).Append("_\n");
+                if (!string.IsNullOrEmpty(e.Stage)) sb.Append("\n_Stage: ").Append(OneLine(e.Stage)).Append(e.StageDone == true ? " ✅ done" : "").Append("_\n");
                 if (e.Attempts > 1) sb.Append("\n⚠ needed ").Append(e.Attempts).Append(" attempts to get valid JSON\n");
                 if (!string.IsNullOrEmpty(e.ToWorker)) sb.Append("\n**Sent to worker:**\n\n").Append(Quote(e.ToWorker)).Append('\n');
                 sb.Append('\n');
@@ -268,18 +282,18 @@ public static class RunReview
             }
         }
 
-        sb.Append("---\n\nFiles: `run.json` (facts), `events.jsonl` (everything AgentHub sent and did), `orchestrator.jsonl` (the orchestrator's raw Claude Code transcript). Worker transcripts stay on the machine that ran the build.\n");
+        sb.Append("---\n\nFiles: `run.json` (facts), `workflow.md` (the workflow exactly as it ran), `events.jsonl` (everything AgentHub sent and did), `orchestrator.jsonl` (the orchestrator's raw Claude Code transcript). Worker transcripts stay on the machine that ran the build.\n");
         return sb.ToString();
     }
 
     public static string RenderIndex(IEnumerable<RunRecord> runs)
     {
         var sb = new StringBuilder("# Orchestrator runs\n\nNewest first. Open a run's `REVIEW.md` to read it.\n\n");
-        sb.Append("| Started | Idea | Outcome | Ran | Decisions | Sent | Steers | Handoffs | Flags | Commits | Model |\n");
-        sb.Append("|---|---|---|---|---|---|---|---|---|---|---|\n");
+        sb.Append("| Started | Idea | Workflow | Outcome | Ran | Decisions | Sent | Steers | Handoffs | Flags | Commits | Model |\n");
+        sb.Append("|---|---|---|---|---|---|---|---|---|---|---|---|\n");
         foreach (var r in runs.OrderByDescending(r => r.StartedAt))
         {
-            sb.Append($"| {r.StartedAt:yyyy-MM-dd HH:mm} | [{Cell(r.IdeaTitle)}]({r.RunId}/REVIEW.md) | {Cell(r.Outcome)} | {Duration(r.Duration)} | {r.OrchestratorCalls} | {r.MessagesToWorker} | {r.Steers} | {r.Handoffs} | {r.Flags} | {r.WorkerCommits.Count} | {Cell(r.OrchestratorModel)} |\n");
+            sb.Append($"| {r.StartedAt:yyyy-MM-dd HH:mm} | [{Cell(r.IdeaTitle)}]({r.RunId}/REVIEW.md) | {Cell(r.Workflow)} {Cell(r.WorkflowVersion ?? "")} | {Cell(r.Outcome)} | {Duration(r.Duration)} | {r.OrchestratorCalls} | {r.MessagesToWorker} | {r.Steers} | {r.Handoffs} | {r.Flags} | {r.WorkerCommits.Count} | {Cell(r.OrchestratorModel)} |\n");
         }
         return sb.ToString();
     }

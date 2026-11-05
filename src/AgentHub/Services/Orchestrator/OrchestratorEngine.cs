@@ -32,7 +32,8 @@ public sealed record OrchestratorLog(
 /// final reply at each turn end, plus Daniel's steers, and answers with one JSON decision that this engine carries out.
 /// Hard limits stay in code where the orchestrator cannot argue with them: the Claude usage cap (wait for the reset), the
 /// context window (forced handoff into a fresh worker), a cap on decisions per run, and stop. Every run is recorded under
-/// <see cref="RunsRoot"/> and, when it ends, committed to the AgentHub repository's run archive (<see cref="RunArchivePublisher"/>).
+/// <see cref="RunsRoot"/> and, when it ends, committed to the AgentHub repository's archive branch (<see cref="AgentHubArchive"/>). What kind of job the orchestrator runs
+/// (its instructions, model, handoff policy) comes from the idea's workflow (<see cref="WorkflowCatalogue"/>).
 /// </summary>
 public sealed class OrchestratorEngine : IDisposable
 {
@@ -66,21 +67,28 @@ public sealed class OrchestratorEngine : IDisposable
     private bool _thinking;
     private bool _loopRunning;
     private bool _recovered;
+    private OrchestratorWorkflow? _workflow;
     private bool _turnEndedWhileThinking;
     private bool _sentSinceLastTurn;
     private readonly SynchronizationContext? _ui = SynchronizationContext.Current;
 
     // ---- Settings (public so tests can shorten the clocks) ----
 
-    /// <summary>Model of the orchestrator session. Sonnet: it reads short replies and writes short instructions.</summary>
+    /// <summary>Model of the orchestrator when the workflow names none. Sonnet: it reads short replies and writes short instructions.</summary>
     public string OrchestratorModel { get; set; } = "sonnet";
     public string OrchestratorCommand { get; set; } = "claude";
 
     /// <summary>Where runs are written live, one folder each.</summary>
     public string RunsRoot { get; set; } = Environment.GetEnvironmentVariable("AGENTHUB_RUNS_DIR") is { Length: > 0 } d ? d : @"C:\data\agenthub\orchestrator-runs";
 
-    /// <summary>Commits finished runs to the repository; null keeps them local only.</summary>
-    public RunArchivePublisher? Publisher { get; set; }
+    /// <summary>Commits finished runs (and Daniel's workflows) to the repository's archive branch; null keeps runs local only.</summary>
+    public AgentHubArchive? Archive { get; set; }
+
+    /// <summary>Where each idea's workflow comes from; null runs every idea as Builder.</summary>
+    public WorkflowCatalogue? Workflows { get; set; }
+
+    /// <summary>The workflow of the run in progress.</summary>
+    public OrchestratorWorkflow? CurrentWorkflow => _workflow;
 
     /// <summary>Builds the orchestrator for a new run (tests swap in a scripted one).</summary>
     public Func<RunRecord, string, IOrchestratorBrain>? BrainFactory { get; set; }
@@ -149,13 +157,13 @@ public sealed class OrchestratorEngine : IDisposable
         _runner = runner;
     }
 
-    /// <summary>The publisher for the AgentHub repository this build came from (or Desktop\AgentHub), with its archive worktree.</summary>
-    public static RunArchivePublisher? DefaultPublisher(ProcessRunner runner)
+    /// <summary>The archive for the AgentHub repository this build came from (or Desktop\AgentHub), with its own worktree.</summary>
+    public static AgentHubArchive? DefaultArchive(ProcessRunner runner)
     {
         var repo = Environment.GetEnvironmentVariable("AGENTHUB_RUNS_REPO") is { Length: > 0 } r ? r : FindAgentHubRepository();
         if (repo is null) return null;
-        var worktree = Environment.GetEnvironmentVariable("AGENTHUB_RUNS_WORKTREE") is { Length: > 0 } w ? w : @"C:\data\agenthub\orchestrator-runs-archive";
-        return new RunArchivePublisher(runner, repo, worktree);
+        var worktree = Environment.GetEnvironmentVariable("AGENTHUB_RUNS_WORKTREE") is { Length: > 0 } w ? w : @"C:\data\agenthub\workflows-archive";
+        return new AgentHubArchive(runner, repo, worktree);
     }
 
     private static string? FindAgentHubRepository()
@@ -232,13 +240,21 @@ public sealed class OrchestratorEngine : IDisposable
     {
         await RecoverInterruptedRunsAsync();
         if (_run != null && _run.Record.IdeaId != idea.Id)
-            await EndRunAsync("switched", $"Daniel started \"{idea.Title}\" instead.");
+            await SuspendRunAsync($"Daniel started \"{idea.Title}\" instead.");
 
         _currentIdea = idea;
         CurrentIdeaChanged?.Invoke(_currentIdea);
         SetState(OrchestratorState.Building);
         StartLoop();
         Log($"Build requested for \"{idea.Title}\".");
+
+        // Resumed after a pause (or a question for Daniel) with the worker still there: carry on in place.
+        if (_run != null && _run.Record.IdeaId == idea.Id && _worker is { IsRunning: true })
+        {
+            if (idea.Status == IdeaStatus.Paused) { idea.Status = IdeaStatus.Building; idea.StatusNote = "Building"; await _ideaService.UpdateIdeaAsync(idea); }
+            await AskAsync(OrchestratorEvent.Resumed);
+            return;
+        }
         await LaunchWorkerSessionAsync(idea);
     }
 
@@ -311,8 +327,25 @@ public sealed class OrchestratorEngine : IDisposable
 
     // ---- Runs ----
 
+    private async Task<OrchestratorWorkflow> LoadWorkflowAsync(ProjectIdea idea)
+    {
+        if (Workflows == null) return new OrchestratorWorkflow { Id = OrchestratorWorkflow.DefaultId, Name = "Builder", Model = OrchestratorModel };
+        try { return await Workflows.GetAsync(idea.WorkflowId); }
+        catch (Exception ex)
+        {
+            Log($"Could not read workflow {idea.WorkflowId}: {ex.Message}; running it as Builder.", "Warn");
+            return new OrchestratorWorkflow { Id = OrchestratorWorkflow.DefaultId, Name = "Builder", Model = OrchestratorModel };
+        }
+    }
+
+    private IOrchestratorBrain MakeBrain(RunRecord record, string folder, ProjectIdea idea, OrchestratorWorkflow workflow, bool reopen) =>
+        BrainFactory?.Invoke(record, folder) ?? new ClaudeOrchestratorBrain(_runner, OrchestratorCommand, record.OrchestratorModel, folder,
+            idea.TargetDirectory, OrchestratorMessages.SystemPrompt(idea.Title, idea.TargetDirectory, workflow),
+            sessionId: reopen ? record.OrchestratorSessionId : null, alreadyStarted: reopen);
+
     private async Task BeginRunAsync(ProjectIdea idea)
     {
+        var workflow = await LoadWorkflowAsync(idea);
         var now = DateTimeOffset.Now;
         var runId = RunRecorder.NewRunId(idea.Title, now);
         var folder = Path.Combine(RunsRoot, runId);
@@ -323,20 +356,87 @@ public sealed class OrchestratorEngine : IDisposable
             IdeaTitle = idea.Title,
             Spec = idea.Description,
             TargetDirectory = idea.TargetDirectory,
-            WorkerCommand = string.IsNullOrWhiteSpace(idea.AgentCommand) ? "claude" : idea.AgentCommand,
-            OrchestratorModel = OrchestratorModel,
+            WorkerCommand = WorkerCommandFor(idea, workflow),
+            OrchestratorModel = string.IsNullOrWhiteSpace(workflow.Model) ? OrchestratorModel : workflow.Model,
+            Workflow = workflow.Name,
+            WorkflowId = workflow.Id,
+            WorkflowVersion = workflow.Version(),
             AgentHubBuild = typeof(OrchestratorEngine).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
             StartedAt = now,
             TargetHeadAtStart = await GitHeadAsync(idea.TargetDirectory)
         };
         _run = new RunRecorder(folder, record);
-        _brain = BrainFactory?.Invoke(record, folder) ?? new ClaudeOrchestratorBrain(_runner, OrchestratorCommand, OrchestratorModel, folder,
-            idea.TargetDirectory, OrchestratorMessages.SystemPrompt(idea.Title, idea.TargetDirectory));
+        _workflow = workflow;
+        await File.WriteAllTextAsync(Path.Combine(folder, "workflow.md"), workflow.Serialize());
+        _brain = MakeBrain(record, folder, idea, workflow, reopen: false);
         record.OrchestratorSessionId = _brain.SessionId;
         _workerSession = 0;
         _lastReplyHandled = null;
-        await _run.AddAsync(new RunEvent { At = now, Kind = "note", Detail = $"Run started for \"{idea.Title}\" (orchestrator {OrchestratorModel})." });
-        Log($"Run {runId} started; recording to {folder}.");
+        await _run.AddAsync(new RunEvent { At = now, Kind = "note", Detail = $"Run started for \"{idea.Title}\" with workflow {workflow.Name} (orchestrator {record.OrchestratorModel})." });
+        Log($"Run {runId} started with workflow {workflow.Name}; recording to {folder}.");
+    }
+
+    /// <summary>
+    /// Picks up the idea's last unfinished run (paused, or AgentHub was closed): same record, same workflow text, and the
+    /// same orchestrator session, so it remembers where the job stood. False when there is none.
+    /// </summary>
+    private async Task<bool> ReopenRunAsync(ProjectIdea idea)
+    {
+        var found = FindOpenRun(idea.Id);
+        if (found is not { } open) return false;
+        var (folder, record) = open;
+
+        var workflowFile = Path.Combine(folder, "workflow.md");
+        var workflow = File.Exists(workflowFile)
+            ? OrchestratorWorkflow.Parse(await File.ReadAllTextAsync(workflowFile), record.WorkflowId)
+            : await LoadWorkflowAsync(idea);
+
+        record.Outcome = "running";
+        record.EndedAt = null;
+        record.Reopened++;
+        if (record.WorkerSessions.LastOrDefault() is { EndedAt: null } last) { last.EndedAt = DateTimeOffset.Now; last.EndReason ??= "AgentHub closed"; }
+        _run = new RunRecorder(folder, record);
+        _workflow = workflow;
+        _brain = MakeBrain(record, folder, idea, workflow, reopen: !string.IsNullOrEmpty(record.OrchestratorSessionId));
+        if (string.IsNullOrEmpty(record.OrchestratorSessionId)) record.OrchestratorSessionId = _brain.SessionId;
+        _workerSession = record.WorkerSessions.Count;
+        _lastReplyHandled = null;
+        await _run.AddAsync(new RunEvent { Kind = "note", At = DateTimeOffset.Now, Detail = $"Run picked up again ({record.Reopened}×) with workflow {workflow.Name}." });
+        Log($"Picking up run {record.RunId} again (workflow {workflow.Name}{(record.CurrentStage is { } st ? $", stage {st}" : "")}).");
+        return true;
+    }
+
+    /// <summary>The newest run of the idea that is neither finished nor closed.</summary>
+    private (string Folder, RunRecord Record)? FindOpenRun(string ideaId)
+    {
+        if (!Directory.Exists(RunsRoot)) return null;
+        return Directory.EnumerateDirectories(RunsRoot)
+            .Select(d => (Folder: d, Record: RunRecorder.ReadRecord(Path.Combine(d, "run.json"))))
+            .Where(x => x.Record is { Outcome: "running" or "suspended" } r && r.IdeaId == ideaId && r.RunId != _run?.Record.RunId)
+            .OrderByDescending(x => x.Record!.StartedAt)
+            .Select(x => ((string Folder, RunRecord Record)?)(x.Folder, x.Record!))
+            .FirstOrDefault();
+    }
+
+    /// <summary>Leaves the run open to be picked up later (AgentHub closing, another idea started): saved, not finished or published.</summary>
+    private async Task SuspendRunAsync(string why)
+    {
+        var run = _run;
+        if (run == null) return;
+        _run = null;
+        _brain = null;
+        _workflow = null;
+        _waitingSince = null;
+        try
+        {
+            run.Record.Outcome = "suspended";
+            run.Record.OutcomeDetail = why;
+            run.Record.EndedAt = DateTimeOffset.Now;
+            if (run.Record.WorkerSessions.LastOrDefault() is { EndedAt: null } s) { s.EndedAt = DateTimeOffset.Now; s.EndReason = "suspended"; s.TranscriptPath ??= _worker?.TranscriptPath; }
+            await run.AddAsync(new RunEvent { At = DateTimeOffset.Now, Kind = "suspended", Detail = why });
+            Log($"Run {run.Record.RunId} left open ({why}); building the idea again picks it up.");
+        }
+        catch (Exception ex) { Log($"Could not save the run: {ex.Message}", "Warn"); }
     }
 
     private async Task EndRunAsync(string outcome, string? detail)
@@ -345,6 +445,7 @@ public sealed class OrchestratorEngine : IDisposable
         if (run == null) return;
         _run = null;
         _brain = null;
+        _workflow = null;
         _waitingSince = null;
 
         try
@@ -363,29 +464,32 @@ public sealed class OrchestratorEngine : IDisposable
             return;
         }
 
-        if (Publisher == null) return;
-        try { Log(await Publisher.PublishAsync(run.Folder)); }
+        if (Archive == null) return;
+        try { Log(await Archive.PublishRunAsync(run.Folder)); }
         catch (Exception ex) { Log($"Run kept locally; publishing to the repository failed: {ex.Message}", "Warn"); }
     }
 
-    /// <summary>Runs left "running" by a crash or a closed AgentHub are closed as interrupted and published.</summary>
+    /// <summary>Open runs whose idea is gone or already completed can never be picked up again: close and publish them.</summary>
     private async Task RecoverInterruptedRunsAsync()
     {
         if (_recovered) return;
         _recovered = true;
         if (!Directory.Exists(RunsRoot)) return;
+        var ideas = await _ideaService.LoadAsync();
         foreach (var dir in Directory.EnumerateDirectories(RunsRoot))
         {
             var record = RunRecorder.ReadRecord(Path.Combine(dir, "run.json"));
-            if (record is not { Outcome: "running" } || record.RunId == _run?.Record.RunId) continue;
+            if (record is not { Outcome: "running" or "suspended" } || record.RunId == _run?.Record.RunId) continue;
+            var idea = ideas.FirstOrDefault(i => i.Id == record.IdeaId);
+            if (idea != null && idea.Status != IdeaStatus.Completed) continue; // kept to be picked up again
             try
             {
                 var recorder = new RunRecorder(dir, record);
                 record.WorkerCommits = await CommitsSinceAsync(record.TargetDirectory, record.StartedAt, 200);
-                await recorder.FinishAsync("interrupted", "AgentHub closed or crashed while the run was going; the end time is when this was noticed.");
-                if (Publisher != null) Log(await Publisher.PublishAsync(dir));
+                await recorder.FinishAsync("interrupted", idea == null ? "The idea was deleted while the run was open." : "The idea was completed elsewhere while this run was open.");
+                if (Archive != null) Log(await Archive.PublishRunAsync(dir));
             }
-            catch (Exception ex) { Log($"Could not close interrupted run {record.RunId}: {ex.Message}", "Warn"); }
+            catch (Exception ex) { Log($"Could not close run {record.RunId}: {ex.Message}", "Warn"); }
         }
     }
 
@@ -413,11 +517,31 @@ public sealed class OrchestratorEngine : IDisposable
 
         if (!await PrepareWorkspaceAsync(idea)) return;
 
-        var newRun = _run == null || _run.Record.IdeaId != idea.Id;
-        if (newRun)
+        var evt = OrchestratorEvent.NewWorkerSession;
+        if (_run == null || _run.Record.IdeaId != idea.Id)
         {
-            if (_run != null) await EndRunAsync("switched", $"Moved on to \"{idea.Title}\".");
-            await BeginRunAsync(idea);
+            if (FindOpenRun(idea.Id) == null && (await LoadWorkflowAsync(idea)) is { } wf && wf.MissingInputs() is { Count: > 0 } missing)
+            {
+                // A template like Data Processing needs its pipeline location before it can run: skip the idea, say why.
+                idea.Status = IdeaStatus.Paused;
+                idea.StatusNote = $"Workflow {wf.Name} needs {string.Join(", ", missing)} filled in";
+                await _ideaService.UpdateIdeaAsync(idea);
+                Log($"\"{idea.Title}\" skipped: its workflow {wf.Name} needs {string.Join(", ", missing)} filled in (📚 Workflows).", "Warn");
+                _currentIdea = null;
+                await AdvanceQueueAsync();
+                return;
+            }
+            if (_run != null) await SuspendRunAsync($"Moved on to \"{idea.Title}\".");
+            if (await ReopenRunAsync(idea))
+            {
+                evt = OrchestratorEvent.RunReopened;
+                reason ??= "AgentHub was closed or the build was stopped part-way";
+            }
+            else
+            {
+                await BeginRunAsync(idea);
+                evt = OrchestratorEvent.RunStarted;
+            }
         }
 
         idea.Status = IdeaStatus.Building;
@@ -434,7 +558,7 @@ public sealed class OrchestratorEngine : IDisposable
         }
 
         var handoff = ReadHandoff(idea);
-        var input = new OrchestratorInput(newRun ? OrchestratorEvent.RunStarted : OrchestratorEvent.NewWorkerSession)
+        var input = new OrchestratorInput(evt)
         {
             EventDetail = reason,
             Spec = idea.Description,
@@ -443,6 +567,10 @@ public sealed class OrchestratorEngine : IDisposable
         await AskAsync(input, startWorker: true);
     }
 
+    private static string WorkerCommandFor(ProjectIdea idea, OrchestratorWorkflow? workflow) =>
+        !string.IsNullOrWhiteSpace(workflow?.WorkerCommand) ? workflow.WorkerCommand!
+        : string.IsNullOrWhiteSpace(idea.AgentCommand) ? "claude" : idea.AgentCommand;
+
     private void StartWorker(ProjectIdea idea)
     {
         if (_worker == null || _run == null) return;
@@ -450,7 +578,7 @@ public sealed class OrchestratorEngine : IDisposable
         _workerStartedAt = DateTimeOffset.Now;
         _expectWorkerExit = false;
         _lastReplyHandled = null;
-        var command = string.IsNullOrWhiteSpace(idea.AgentCommand) ? "claude" : idea.AgentCommand;
+        var command = WorkerCommandFor(idea, _workflow);
         _run.Record.WorkerSessions.Add(new WorkerSessionRecord { Number = _workerSession, StartedAt = _workerStartedAt });
         Log($"Starting worker session #{_workerSession}: {command} in {idea.TargetDirectory}.");
         _worker.Start(command, idea.TargetDirectory, $"{_worker.Label} · {idea.Title} (worker #{_workerSession})", idea.Title);
@@ -566,6 +694,7 @@ public sealed class OrchestratorEngine : IDisposable
             {
                 Steers = steers,
                 Status = StatusLine(idea),
+                Workflow = WorkflowLine(),
                 RecentCommits = await CommitsSinceAsync(idea.TargetDirectory, run.Record.StartedAt, 8)
             };
             var message = OrchestratorMessages.Compose(input);
@@ -616,6 +745,16 @@ public sealed class OrchestratorEngine : IDisposable
                 flag = true;
             }
 
+            // Stages: remember where the job stands, and in an after-each-stage workflow a finished stage means a fresh worker.
+            if (d.Stage != null) run.Record.CurrentStage = d.Stage;
+            if (d.StageDone && d.Stage != null && !run.Record.StagesDone.Contains(d.Stage))
+            {
+                run.Record.StagesDone.Add(d.Stage);
+                Log($"🧠 Stage done: {d.Stage}.");
+            }
+            if (d.StageDone && !startWorker && _workflow?.Handoff == WorkflowHandoff.AfterEachStage && action is OrchestratorAction.Send or OrchestratorAction.Wait)
+                action = OrchestratorAction.Handoff;
+
             switch (action)
             {
                 case OrchestratorAction.Send:
@@ -623,7 +762,7 @@ public sealed class OrchestratorEngine : IDisposable
                     {
                         StartWorker(idea);
                         await Task.Delay(WorkerStartupDelay);
-                        sent = d.ToWorker + " " + OrchestratorMessages.AutonomyRules;
+                        sent = d.ToWorker + " " + OrchestratorMessages.WorkerRules(_workflow);
                     }
                     else sent = d.ToWorker!;
 
@@ -667,6 +806,8 @@ public sealed class OrchestratorEngine : IDisposable
                 SteerHandling = steers.Count > 0 ? d.SteerHandling : null,
                 Reason = d.Reason,
                 Progress = d.Progress,
+                Stage = d.Stage,
+                StageDone = d.StageDone ? true : null,
                 Attempts = reply.Attempts,
                 Seconds = Math.Round(reply.Elapsed.TotalSeconds, 1),
                 SentToWorker = sent,
@@ -686,7 +827,9 @@ public sealed class OrchestratorEngine : IDisposable
         {
             switch (f.Action)
             {
-                case OrchestratorAction.Handoff: await RequestHandoffAsync($"The orchestrator asked for it: {f.Reason}", forced: false); break;
+                case OrchestratorAction.Handoff:
+                    await RequestHandoffAsync(f.StageDone && f.Stage != null ? $"stage {f.Stage} is done: {f.Reason}" : $"The orchestrator asked for it: {f.Reason}", forced: false);
+                    break;
                 case OrchestratorAction.Complete: await CompleteIdeaAsync(f); break;
                 case OrchestratorAction.PauseForDaniel: await PauseForDanielAsync(f.Progress.Length > 0 ? f.Progress : f.Reason); break;
             }
@@ -701,8 +844,19 @@ public sealed class OrchestratorEngine : IDisposable
         OrchestratorEvent.WorkerStillIdle => $"worker idle {input.EventDetail}",
         OrchestratorEvent.SteerReceived => input.UrgentSteer ? "urgent steer" : "steer (worker idle)",
         OrchestratorEvent.Resumed => "resumed",
+        OrchestratorEvent.RunReopened => "run picked up again" + (input.EventDetail is { } r ? $" ({r})" : ""),
         _ => input.Event.ToString()
     };
+
+    private string? WorkflowLine()
+    {
+        if (_workflow == null || _run == null) return null;
+        var r = _run.Record;
+        var line = $"{_workflow.Name}" + (_workflow.Handoff == WorkflowHandoff.AfterEachStage ? " (fresh worker after each stage)" : "");
+        if (r.StagesDone.Count > 0) line += " · stages done: " + string.Join(", ", r.StagesDone);
+        if (r.CurrentStage is { } cs && !r.StagesDone.Contains(cs)) line += $" · current stage: {cs}";
+        return line;
+    }
 
     private string StatusLine(ProjectIdea idea)
     {
@@ -821,7 +975,9 @@ public sealed class OrchestratorEngine : IDisposable
             _ = RequestHandoffAsync($"worker context window at {reading.UsedFraction:P0} (limit {threshold:P0}, {reading.UsedTokens:N0} tokens)", forced: true);
     }
 
-    private double HandoffThreshold(ProjectIdea idea) => idea.ContextHandoffThreshold > 0 ? idea.ContextHandoffThreshold : _contextThreshold;
+    /// <summary>The workflow's context threshold when it sets one, else the idea's.</summary>
+    private double HandoffThreshold(ProjectIdea idea) =>
+        _workflow?.ContextThreshold ?? (idea.ContextHandoffThreshold > 0 ? idea.ContextHandoffThreshold : _contextThreshold);
 
     private async void OnWorkerExited()
     {
@@ -1145,8 +1301,8 @@ public sealed class OrchestratorEngine : IDisposable
         _disposeCts.Cancel();
         if (_run != null)
         {
-            // Close the record so it is not left "running"; bounded, because the app is closing.
-            try { Task.Run(() => EndRunAsync("interrupted", "AgentHub was closed during the run.")).Wait(TimeSpan.FromSeconds(15)); }
+            // Leave the run open so building the idea again picks it up (the next day, say); bounded, because the app is closing.
+            try { Task.Run(() => SuspendRunAsync("AgentHub was closed during the run.")).Wait(TimeSpan.FromSeconds(10)); }
             catch { }
         }
         if (_worker != null)

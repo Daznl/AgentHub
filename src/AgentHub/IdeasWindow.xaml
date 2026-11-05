@@ -175,6 +175,14 @@
 
                     <!-- Target Directory -->
                     <DockPanel Grid.Row="1" Margin="0,0,0,10">
+                        <StackPanel DockPanel.Dock="Left" Width="270" Margin="0,0,10,0">
+                            <TextBlock Text="Orchestrator workflow" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,3" />
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Content="📚" Click="ManageWorkflows_Click" Width="34" Height="30" Margin="6,0,0,0" ToolTip="Workflow catalogue: duplicate a template, fill in its inputs, save it, pick it" />
+                                <ComboBox x:Name="EditWorkflowCombo" Height="30" Background="#0E1624" Foreground="{StaticResource TextBrush}" DisplayMemberPath="DisplayName"
+                                          ToolTip="How the orchestrator runs this idea (Builder, Data Processing, Demo Builder or one of your own)" />
+                            </DockPanel>
+                        </StackPanel>
                         <Button DockPanel.Dock="Right" Content="Browse…" Click="BrowseTargetDir_Click" Padding="12,5" Margin="8,17,0,0" Height="30" />
                         <StackPanel>
                             <TextBlock Text="Target Directory (where code will be built)" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,3" />

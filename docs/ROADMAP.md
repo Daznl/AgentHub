@@ -73,7 +73,12 @@
   - Context window handoff loop: monitors transcript token consumption via `ContextWindowTracker`, prompts clean handoff documentation to `.agenthub/handoff.md` when reaching threshold (e.g. 75%), terminates bloated session cleanly, and launches a fresh session continuing from handoff notes
   - GitHub synchronization: 1-click fetch/pull/compile for AgentHub directly from GitHub
 - [x] **Claude orchestrator** (`ClaudeOrchestratorBrain`, `OrchestratorMessages`, `OrchestratorDecision`): a headless Sonnet Claude Code session directs the worker turn by turn with JSON decisions; steers go to it, not the worker; hard limits (usage cap, context handoff, decision cap) stay in code
-- [x] **Run archive** (`RunRecorder`, `RunReview`, `RunArchivePublisher`): every run recorded live, REVIEW.md + INDEX.md, committed to the `orchestrator-runs` branch through a dedicated worktree
+- [x] **Run archive** (`RunRecorder`, `RunReview`, `AgentHubArchive`): every run recorded live, REVIEW.md + INDEX.md, committed under `runs/` on the `agenthub-workflows` branch through a dedicated worktree
+- [x] **Workflow catalogue** (`OrchestratorWorkflow`, `WorkflowCatalogue`, 📚 `WorkflowsWindow`):
+  - Builder, Data Processing and Demo Builder templates; duplicate, fill in inputs and save your own (kept on the archive branch); one workflow per idea
+  - stages with a fresh worker after each one
+  - runs suspended on close and reopened on the next build
+- [ ] Tell the orchestrator about other ideas' workflows ("use when") so it can suggest one for a new idea
 - [ ] "Review this run" button: hand a REVIEW.md to Claude and ask what the orchestrator prompt should do differently
 - [ ] Orchestrator model and decision cap as settings (now `sonnet` / 400 in code)
 

@@ -246,7 +246,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        _orchestrator ??= new OrchestratorEngine(_ideaService, _git, _runner) { Publisher = OrchestratorEngine.DefaultPublisher(_runner) };
+        if (_orchestrator == null)
+        {
+            var archive = OrchestratorEngine.DefaultArchive(_runner);
+            _orchestrator = new OrchestratorEngine(_ideaService, _git, _runner) { Archive = archive, Workflows = new WorkflowCatalogue(archive) };
+        }
         var window = new IdeasWindow(
             _ideaService,
             _orchestrator,

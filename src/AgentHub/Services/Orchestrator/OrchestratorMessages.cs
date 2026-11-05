@@ -17,7 +17,9 @@ public enum OrchestratorEvent
     /// <summary>Daniel sent a steer that should not wait for the worker's turn end (urgent, or the worker is idle).</summary>
     SteerReceived,
     /// <summary>Daniel resumed a paused build.</summary>
-    Resumed
+    Resumed,
+    /// <summary>A run left paused or interrupted (AgentHub closed) is picked up again with a fresh worker.</summary>
+    RunReopened
 }
 
 /// <summary>Everything one message to the orchestrator carries. <see cref="OrchestratorMessages.Compose"/> renders it.</summary>
@@ -32,6 +34,8 @@ public sealed record OrchestratorInput(OrchestratorEvent Event)
     public string Status { get; init; } = "";
     public IReadOnlyList<string> RecentCommits { get; init; } = [];
     public bool WorkerBusy { get; init; }
+    /// <summary>Workflow name and the stage AgentHub last heard, so the orchestrator never loses its place.</summary>
+    public string? Workflow { get; init; }
 }
 
 public static class OrchestratorMessages
@@ -62,10 +66,34 @@ public static class OrchestratorMessages
         "[AGENTHUB] Claude usage is almost used up, so this session is about to stop. Commit what you have and update .agenthub/handoff.md " +
         "with the next tasks now, then end your turn.";
 
-    public static string SystemPrompt(string ideaTitle, string targetDirectory) =>
+    /// <summary>The worker's house rules: the core plus the workflow's own.</summary>
+    public static string WorkerRules(OrchestratorWorkflow? workflow) =>
+        workflow?.ResolvedWorkerRules() is { Length: > 0 } extra
+            ? AutonomyRules[..^1] + " Also: " + extra.Replace("\r", "").Replace('\n', ' ') + ")"
+            : AutonomyRules;
+
+    /// <summary>The orchestrator's system prompt: the fixed core (who is who, the decision JSON, limits) and then the workflow's instructions.</summary>
+    public static string SystemPrompt(string ideaTitle, string targetDirectory, OrchestratorWorkflow? workflow = null)
+    {
+        var core = CoreSystemPrompt(ideaTitle, targetDirectory);
+        if (workflow == null) return core;
+        var stages = workflow.Handoff == WorkflowHandoff.AfterEachStage
+            ? "\nThis workflow hands off after every stage: when a stage is finished and checked, reply with stage_done true and action handoff; AgentHub then starts a fresh worker for the next stage.\n"
+            : "";
+        return core + $"""
+
+            ===== WORKFLOW: {workflow.Name} =====
+            {workflow.Description}
+            {stages}
+            {workflow.ResolvedInstructions()}
+            """;
+    }
+
+    private static string CoreSystemPrompt(string ideaTitle, string targetDirectory) =>
         $"""
-        You are the ORCHESTRATOR of an autonomous software build that AgentHub runs for Daniel. The project is "{ideaTitle}" in {targetDirectory}.
-        A separate Claude Code session, the WORKER, does all the building there. You direct it; you never build anything yourself.
+        You are the ORCHESTRATOR of an autonomous job that AgentHub runs for Daniel. The project is "{ideaTitle}" in {targetDirectory}.
+        A separate Claude Code session, the WORKER, does all the work there. You direct it; you never do the work yourself.
+        The workflow section at the end says what kind of job this is and how to run it; follow it.
 
         How this conversation works:
         - Every message comes from AgentHub, the program that connects you to the worker. It has labelled sections:
@@ -88,11 +116,12 @@ public static class OrchestratorMessages
         - pause_for_daniel: only when the build cannot sensibly continue without a decision only Daniel can make (spending money,
           credentials or accounts, anything irreversible outside the project folder). progress holds the question.
 
+        - stage / stage_done: when the workflow has stages or phases, name the current one in "stage" every time, and set
+          "stage_done" true only in the reply where you confirm it finished and checked. Otherwise stage null, stage_done false.
+
         Checking the worker: you can read the project folder (Read, Grep, Glob). Use that briefly to check claims before accepting them,
         for example that tests exist, or that the handoff matches what was said. Keep tool use short; the worker does the heavy work.
-
-        Keep the worker moving toward the spec with steady, verifiable progress: working code, tests, commits. Prefer small verified steps
-        over big leaps. If the worker asks a question, answer it yourself with the sensible option. Keep "progress" to one line.
+        If the worker asks a question, answer it yourself with the sensible option. Keep "progress" to one line.
         """;
 
     /// <summary>Renders one message for the orchestrator.</summary>
@@ -100,6 +129,9 @@ public static class OrchestratorMessages
     {
         var sb = new StringBuilder();
         sb.Append("[EVENT] ").Append(EventText(input)).Append("\n\n");
+
+        if (!string.IsNullOrWhiteSpace(input.Workflow))
+            sb.Append("[WORKFLOW] ").Append(input.Workflow.Trim()).Append("\n\n");
 
         if (!string.IsNullOrWhiteSpace(input.Status))
             sb.Append("[STATUS] ").Append(input.Status.Trim()).Append("\n\n");
@@ -150,6 +182,10 @@ public static class OrchestratorMessages
             ? "steer_received: Daniel sent a steer while the worker is mid-turn. A send now is typed in and the worker reads it at its next step."
             : "steer_received: Daniel sent a steer; the worker is idle at its prompt.",
         OrchestratorEvent.Resumed => "resumed: Daniel resumed the build after a pause. The worker is at its prompt.",
+        OrchestratorEvent.RunReopened =>
+            $"run_reopened ({input.EventDetail ?? "AgentHub was restarted"}): this run is being picked up again, possibly the next day. " +
+            "A fresh worker with an empty context is starting and has not been given anything yet. Carry on from where the run stood " +
+            "(your memory of it, the stage, .agenthub/handoff.md); write its first instruction (action send).",
         _ => input.Event.ToString()
     };
 

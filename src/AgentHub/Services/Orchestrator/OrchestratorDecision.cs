@@ -25,7 +25,9 @@ public sealed record OrchestratorDecision(
     string? ToWorker,
     string SteerHandling,
     string Reason,
-    string Progress)
+    string Progress,
+    string? Stage = null,
+    bool StageDone = false)
 {
     public static string ActionName(OrchestratorAction action) => action switch
     {
@@ -46,9 +48,11 @@ public sealed record OrchestratorDecision(
             "to_worker": { "type": ["string", "null"], "description": "The exact message for the worker. Required for send, null otherwise." },
             "steer_handling": { "type": "string", "enum": ["relayed", "held", "none"], "description": "What you did with steers in this message: relayed in to_worker, held for a later message, or none received." },
             "reason": { "type": "string", "description": "One sentence: why this action now." },
-            "progress": { "type": "string", "description": "One line on where the build stands, shown in AgentHub. For pause_for_daniel: the question for Daniel." }
+            "progress": { "type": "string", "description": "One line on where the build stands, shown in AgentHub. For pause_for_daniel: the question for Daniel." },
+            "stage": { "type": ["string", "null"], "description": "The stage or phase the work is in, when the workflow has stages; null otherwise." },
+            "stage_done": { "type": "boolean", "description": "True only in the reply where you confirm that stage is finished and checked." }
           },
-          "required": ["action", "to_worker", "steer_handling", "reason", "progress"]
+          "required": ["action", "to_worker", "steer_handling", "reason", "progress", "stage", "stage_done"]
         }
         """;
 
@@ -83,6 +87,8 @@ public sealed record OrchestratorDecision(
             action == OrchestratorAction.Send ? toWorker : null,
             Str("steer_handling")?.Trim().ToLowerInvariant() ?? "none",
             Str("reason")?.Trim() ?? "",
-            Str("progress")?.Trim() ?? "");
+            Str("progress")?.Trim() ?? "",
+            Str("stage")?.Trim() is { Length: > 0 } stage ? stage : null,
+            root.TryGetProperty("stage_done", out var sd) && sd.ValueKind == JsonValueKind.True);
     }
 }

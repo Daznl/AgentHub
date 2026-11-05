@@ -27,6 +27,7 @@ public partial class IdeasWindow : Window
     private readonly ObservableCollection<ProjectIdea> _ideas = [];
     private ProjectIdea? _selectedIdea;
     private readonly DispatcherTimer _uiRefreshTimer;
+    private List<OrchestratorWorkflow> _workflows = [];
 
     public IdeasWindow(
         IdeaService ideaService,
@@ -61,6 +62,7 @@ public partial class IdeasWindow : Window
 
         Loaded += async (_, _) =>
         {
+            await ReloadWorkflowsAsync();
             await ReloadIdeasAsync();
             UpdateOrchestratorUi();
             RefreshStatusMetrics();
@@ -118,8 +120,47 @@ public partial class IdeasWindow : Window
             }
         }
 
+        SelectWorkflow(_selectedIdea.WorkflowId);
         LoadHandoffPreview(_selectedIdea.TargetDirectory);
         _ = LoadSteerNotesAsync();
+    }
+
+    // ---- Workflows ----
+
+    private async Task ReloadWorkflowsAsync()
+    {
+        try { _workflows = _orchestrator.Workflows is { } c ? await c.ListAsync() : []; }
+        catch (Exception ex) { _workflows = []; OrchestratorSubtext.Text = "Could not read the workflow catalogue: " + ex.Message; }
+        EditWorkflowCombo.ItemsSource = _workflows;
+        if (_selectedIdea != null) SelectWorkflow(_selectedIdea.WorkflowId);
+    }
+
+    private void SelectWorkflow(string? id) =>
+        EditWorkflowCombo.SelectedItem = _workflows.FirstOrDefault(w => w.Id == id) ?? _workflows.FirstOrDefault(w => w.Id == OrchestratorWorkflow.DefaultId);
+
+    private async void ManageWorkflows_Click(object sender, RoutedEventArgs e)
+    {
+        if (_orchestrator.Workflows is not { } catalogue) return;
+        var current = (EditWorkflowCombo.SelectedItem as OrchestratorWorkflow)?.Id ?? _selectedIdea?.WorkflowId;
+        var window = new WorkflowsWindow(catalogue, current, canUse: _selectedIdea != null) { Owner = this };
+        var used = window.ShowDialog() == true;
+        await ReloadWorkflowsAsync();
+        if (used && window.ChosenWorkflowId is { } chosen && _selectedIdea != null)
+        {
+            SelectWorkflow(chosen);
+            _selectedIdea.WorkflowId = chosen;
+            await _ideaService.UpdateIdeaAsync(_selectedIdea);
+        }
+    }
+
+    /// <summary>The idea's workflow, or a reason it cannot run yet (inputs not filled in).</summary>
+    private string? WorkflowProblem(ProjectIdea idea)
+    {
+        var w = _workflows.FirstOrDefault(x => x.Id == idea.WorkflowId);
+        if (w == null || w.MissingInputs() is not { Count: > 0 } missing) return null;
+        return w.IsTemplate
+            ? $"The workflow \"{w.Name}\" is a template that needs {string.Join(", ", missing)} filled in.\n\nOpen 📚, Duplicate it, fill those in, Save, and pick your copy for this idea."
+            : $"The workflow \"{w.Name}\" still needs {string.Join(", ", missing)} filled in. Open 📚 to fill it in.";
     }
 
     // ---- Steering ----
@@ -217,6 +258,7 @@ public partial class IdeasWindow : Window
         {
             _selectedIdea.AgentCommand = item.Content?.ToString() ?? "claude";
         }
+        if (EditWorkflowCombo.SelectedItem is OrchestratorWorkflow workflow) _selectedIdea.WorkflowId = workflow.Id;
 
         var threshText = EditThresholdBox.Text.Replace("%", "").Trim();
         if (double.TryParse(threshText, out var val))
@@ -294,6 +336,12 @@ public partial class IdeasWindow : Window
     private async void BuildNow_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as Button)?.Tag is not ProjectIdea idea) return;
+
+        if (WorkflowProblem(idea) is { } problem)
+        {
+            MessageBox.Show(this, problem, "Workflow", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
 
         var pane = _paneProvider();
         if (pane == null)
@@ -386,7 +434,7 @@ public partial class IdeasWindow : Window
     /// <summary>Opens the run archive: the repository branch's INDEX.md when it exists, else the local runs folder.</summary>
     private void OpenRuns_Click(object sender, RoutedEventArgs e)
     {
-        var index = _orchestrator.Publisher is { } p ? Path.Combine(p.RunsPath, "INDEX.md") : null;
+        var index = _orchestrator.Archive is { } p ? Path.Combine(p.RunsPath, "INDEX.md") : null;
         var target = index != null && File.Exists(index) ? index : _orchestrator.RunsRoot;
         try
         {
