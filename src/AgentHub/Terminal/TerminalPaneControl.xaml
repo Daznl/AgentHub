@@ -106,6 +106,7 @@
                     <TextBlock x:Name="OrchestratorTitle" Foreground="{StaticResource TextBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                 </DockPanel>
                 <TextBlock x:Name="OrchestratorProgress" Foreground="#B6C2D6" FontSize="11" Margin="0,3,0,0" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="OrchestratorLastRead" Foreground="#9AA8BE" FontSize="10" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
                 <TextBlock x:Name="OrchestratorLastSent" Foreground="#7E8CA6" FontSize="10" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
             </StackPanel>
         </DockPanel>

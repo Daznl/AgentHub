@@ -178,7 +178,9 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         OrchestratorProgress.Text = view.Progress;
         OrchestratorProgress.ToolTip = string.IsNullOrEmpty(view.Progress) ? null : view.Progress;
         OrchestratorProgress.Visibility = string.IsNullOrEmpty(view.Progress) ? Visibility.Collapsed : Visibility.Visible;
-        OrchestratorLastSent.Text = string.IsNullOrEmpty(view.LastSent) ? "" : "Last sent: " + view.LastSent;
+        OrchestratorLastRead.Text = "Last read: " + view.LastRead;
+        OrchestratorLastRead.ToolTip = view.LastRead;
+        OrchestratorLastSent.Text = string.IsNullOrEmpty(view.LastSent) ? "" : view.SentLabel + view.LastSent;
         OrchestratorLastSent.ToolTip = string.IsNullOrEmpty(view.LastSent) ? null : view.LastSent;
         OrchestratorLastSent.Visibility = string.IsNullOrEmpty(view.LastSent) ? Visibility.Collapsed : Visibility.Visible;
         OrchestratorPauseBtn.Content = view.Paused ? "▶ Resume" : "⏸ Pause";

@@ -549,6 +549,39 @@ public class OrchestratorLoopTests : IDisposable
         Assert.Null(TranscriptTurns.LastTurnEnd([prompt]));
     }
 
+    /// <summary>The orchestrator box shows the reply the orchestrator read and the message that answered it.</summary>
+    [Fact]
+    public async Task The_engine_records_the_reply_it_read_and_the_message_that_answered_it()
+    {
+        var brain = new ScriptedBrain(Send("Build slice 1."), Send("Build slice 2."),
+            new OrchestratorDecision(OrchestratorAction.Wait, null, "none", "tests still running", "waiting"));
+        var (engine, ideas, idea) = Setup(brain);
+        await ideas.AddIdeaAsync(idea);
+        await OrchestratorLoopTests.OnlyThisIdea(ideas, idea);
+        var worker = new ScriptedWorker();
+        using (engine)
+        {
+            await engine.BuildIdeaImmediatelyAsync(idea, worker);
+            await Until(() => worker.Received.Count == 1, "first instruction");
+            Assert.Null(engine.LastReadFromWorker);
+            Assert.Equal("Build slice 1.", engine.LastSentToWorker);
+
+            worker.FinishTurn("Slice 1 done, 5 tests pass.");
+            await Until(() => worker.Received.Count == 2, "second instruction");
+            Assert.Equal("Slice 1 done, 5 tests pass.", engine.LastReadFromWorker);
+            Assert.Equal("Build slice 2.", engine.LastSentToWorker);
+            Assert.True(engine.LastSentAnswersRead);
+
+            worker.FinishTurn("Still running the slow tests.");
+            await Until(() => brain.Messages.Count == 3 && !engine.IsThinking, "the wait decision");
+            Assert.Equal("Still running the slow tests.", engine.LastReadFromWorker);
+            Assert.Equal("Build slice 2.", engine.LastSentToWorker);
+            Assert.False(engine.LastSentAnswersRead);
+            engine.Stop();
+            await UntilReviewed();
+        }
+    }
+
     [Fact]
     public async Task A_question_for_Daniel_pauses_the_build_and_resuming_asks_the_orchestrator_again()
     {

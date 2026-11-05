@@ -114,6 +114,8 @@ try {
       Say ("{0} w{1} {2} {3} {4}" -f $e.kind, $e.workerSession, $e.action, $(if ($e.flag) { 'FLAG' } else { '' }), $d) }
     $seen = $ev.Count
     if ($n % 6 -eq 0) { Shot $main ("live-{0:000}.png" -f $n) }
+    # The orchestrator box above the worker's pane: once a reply has been read it shows it, and the message that followed.
+    if (-not $script:boxRead) { $r = @($main.FindAll($TS::Descendants, (Cond $A::ControlTypeProperty ([System.Windows.Automation.ControlType]::Text))) | Where-Object { $_.Current.Name -like 'Last read: *' -and $_.Current.Name -notlike 'Last read: nothing yet*' }); if ($r.Count -gt 0) { $script:boxRead = $r[0].Current.Name; Say "box: $($script:boxRead.Substring(0, [Math]::Min(140, $script:boxRead.Length)))"; Shot $main 'live-box-read.png' } }
     $s2turns = @($ev | Where-Object { $_.kind -eq 'turn' -and $_.workerSession -ge 2 -and $_.action -eq 'send' }).Count
     $done = Test-Path "$($runDir.FullName)\REVIEW.md"
     $paused = @($ev | Where-Object { $_.kind -eq 'paused' }).Count -gt 0
@@ -123,6 +125,7 @@ try {
   $ev = @(Get-Content "$($runDir.FullName)\events.jsonl" | ForEach-Object { $_ | ConvertFrom-Json })
   $sends = @($ev | Where-Object { $_.kind -eq 'turn' -and $_.action -eq 'send' })
   "Results"
+  Check ($script:boxRead -ne $null) 'the orchestrator box showed a reply it read from the worker'
   Check ($sends.Count -ge 3) "the orchestrator kept reading and sending ($($sends.Count) messages)"
   Check ((@($ev | Where-Object { $_.kind -eq 'delivery_cut' })).Count -eq 0) 'every message reached the worker whole (no delivery_cut)'
   Check ((@($ev | Where-Object { $_.kind -in 'handoff', 'forced_handoff' })).Count -ge 1) 'a handoff happened'

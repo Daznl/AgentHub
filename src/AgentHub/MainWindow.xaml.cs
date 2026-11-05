@@ -234,7 +234,8 @@ public partial class MainWindow : Window
             return;
         }
         var o = _orchestrator;
-        var view = o is null ? null : OrchestratorBoxView.For(o.State, o.IsThinking, o.CurrentIdea?.Title, o.WorkerSession, o.LatestProgress, o.LastSentToWorker);
+        var view = o is null ? null : OrchestratorBoxView.For(o.State, o.IsThinking, o.CurrentIdea?.Title, o.WorkerSession, o.LatestProgress,
+            o.LastReadFromWorker, o.LastSentToWorker, o.LastSentAnswersRead);
         var driven = view is null ? null : o!.ActivePane;
         foreach (var pane in _panes)
         {

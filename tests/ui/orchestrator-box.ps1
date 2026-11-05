@@ -108,6 +108,9 @@ try {
   Check ((Texts $main 'Box Test · worker #1').Count -eq 1) 'and the idea with its worker number'
   $sent = @(); for ($i = 0; $i -lt 160 -and $sent.Count -eq 0; $i++) { Start-Sleep -Milliseconds 250; $sent = Texts $main 'Last sent: *' }   # the first message waits until the worker is ready
   Check ($sent.Count -eq 1) 'and the last message sent to the worker'
+  $read = Texts $main 'Last read: nothing yet*'
+  Check ($read.Count -eq 1) 'and what it last read (nothing yet: a new worker is briefed from the spec)'
+  if ($read.Count -eq 1 -and $sent.Count -eq 1) { Check ((Rect $read[0]).Bottom -le (Rect $sent[0]).Top) 'read above sent: the reply, then the message it led to' }
   Check ((@(Get-Content (Join-Path $T 'ideas.json') -Raw | ConvertFrom-Json))[0].AgentCommand -eq 'cmd.exe') 'the idea kept its own worker command (cmd.exe)'
   Shot $main 'b-box.png'
 

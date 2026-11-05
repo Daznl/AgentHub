@@ -144,6 +144,10 @@ public sealed class OrchestratorEngine : IDisposable
     public int WorkerSession => _workerSession;
     /// <summary>The orchestrator's latest message to the worker (without AgentHub's rules).</summary>
     public string? LastSentToWorker { get; private set; }
+    /// <summary>The worker's latest reply the orchestrator read (the reply its latest decision answers); null for a new worker.</summary>
+    public string? LastReadFromWorker { get; private set; }
+    /// <summary>The last message sent came after (in answer to) the last reply read; false when the orchestrator then chose to wait.</summary>
+    public bool LastSentAnswersRead { get; private set; }
     public string? CurrentRunFolder => _run?.Folder;
     public RunRecord? CurrentRun => _run?.Record;
     public SteeringService Steering { get; }
@@ -622,6 +626,9 @@ public sealed class OrchestratorEngine : IDisposable
             await Task.Delay(1000);
         }
 
+        // A new worker is briefed from the spec and the handoff, not from a reply.
+        LastReadFromWorker = null;
+        LastSentToWorker = null;
         var handoff = ReadHandoff(idea);
         var input = new OrchestratorInput(evt)
         {
@@ -783,6 +790,7 @@ public sealed class OrchestratorEngine : IDisposable
                 RecentCommits = await CommitsSinceAsync(idea.TargetDirectory, run.Record.StartedAt, 8)
             };
             var message = OrchestratorMessages.Compose(input);
+            if (!string.IsNullOrWhiteSpace(input.WorkerReply)) { LastReadFromWorker = input.WorkerReply; LastSentAnswersRead = false; }
 
             SetThinking(true);
             BrainReply reply;
@@ -862,6 +870,7 @@ public sealed class OrchestratorEngine : IDisposable
                         _waitingSince = null;
                         _idleAsks = 0;
                         LastSentToWorker = d.ToWorker;
+                        LastSentAnswersRead = LastReadFromWorker != null;
                         Log($"🧠 → worker: {OneLine(d.ToWorker!, 160)}");
                     }
                     else
@@ -1015,6 +1024,7 @@ public sealed class OrchestratorEngine : IDisposable
         await AddEventAsync(new RunEvent { Kind = forced ? "forced_handoff" : "handoff", Detail = reason, Flag = forced });
         _lastSubmitAt = DateTimeOffset.Now;
         LastSentToWorker = "[AgentHub] Time to hand off: write .agenthub/handoff.md and commit.";
+        LastSentAnswersRead = true;
         await w.SubmitAsync(OrchestratorMessages.HandoffPrompt);
         if (_run != null) _run.Record.MessagesToWorker++;
     }
