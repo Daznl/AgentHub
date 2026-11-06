@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -9,6 +10,9 @@ using AgentHub.Services;
 using AgentHub.Services.Instructions;
 using Color = System.Windows.Media.Color;
 using ColorConverter = System.Windows.Media.ColorConverter;
+using Button = System.Windows.Controls.Button;
+using HorizontalAlignment = System.Windows.HorizontalAlignment;
+using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using MessageBox = System.Windows.MessageBox;
 using RadioButton = System.Windows.Controls.RadioButton;
 
@@ -35,6 +39,7 @@ public partial class ContextWindow : Window
         Controls.DarkTitleBar.Apply(this);
         Controls.WindowPlacement.KeepOnScreen(this);
         Activated += (_, _) => CheckDisk();
+        HelperLog.ItemsSource = _helperLog;
     }
 
     /// <summary>The folder shown by a repo context window; null for the global one.</summary>
@@ -147,6 +152,7 @@ public partial class ContextWindow : Window
         FilePathText.ToolTip = $"{file.Path}\n{file.Note}";
         RefreshState();
         StatusText.Text = status ?? file.Note;
+        HelperTarget.Text = $"Suggests edits to {Path.GetFileName(file.Path)} · {(Folder is null ? "user-wide" : "this repository")}";
         SelectTab(file);
         Editor.Focus();
     }
@@ -197,7 +203,7 @@ public partial class ContextWindow : Window
         if (outcome == SaveOutcome.ChangedOnDisk)
         {
             var choice = MessageBox.Show(this,
-                $"{file.Label} was changed outside AgentHub after you opened it:\n{file.Path}\n\n" +
+                $"{Path.GetFileName(file.Path)} was changed outside AgentHub after you opened it:\n{file.Path}\n\n" +
                 "Yes: replace it with your version (the other change is lost).\n" +
                 "No: discard your edits and load the file as it is now.\n" +
                 "Cancel: keep editing without saving.",
@@ -258,7 +264,7 @@ public partial class ContextWindow : Window
         _reviewCts = cts;
         SetReviewing(true);
         var started = DateTime.Now;
-        void Tick() => StatusText.Text = $"Reviewing {file.Label} with Claude Code… {(int)(DateTime.Now - started).TotalSeconds} s. Small files take under a minute, large ones a few minutes.";
+        void Tick() => StatusText.Text = $"Reviewing {Path.GetFileName(file.Path)} with Claude Code… {(int)(DateTime.Now - started).TotalSeconds} s. Small files take under a minute, large ones a few minutes.";
         var ticker = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         ticker.Tick += (_, _) => Tick();
         Tick();
@@ -266,7 +272,7 @@ public partial class ContextWindow : Window
         try
         {
             var suggestion = await InstructionReview.RunAsync(new ProcessRunner(), ReviewCommand, file, text, Folder, cts.Token);
-            if (_current == file) ShowReview(file, text, suggestion);
+            if (_current == file) ShowReview(file, text, suggestion, fromHelper: false);
         }
         catch (OperationCanceledException)
         {
@@ -287,12 +293,15 @@ public partial class ContextWindow : Window
     }
 
     // The editor is frozen while Claude Code reads it, so the suggestions always apply to the text it saw.
-    private void SetReviewing(bool reviewing)
+    private void SetReviewing(bool reviewing, bool helper = false)
     {
+        _helperRunning = reviewing && helper;
         Editor.IsReadOnly = reviewing;
         TabsPanel.IsEnabled = !reviewing && !ShowingReview;
-        ReviewBtn.Content = reviewing ? "■ Cancel review" : "✨ Review";
+        ReviewBtn.Content = reviewing && !helper ? "■ Cancel review" : "✨ Review";
+        ReviewBtn.IsEnabled = !(reviewing && helper);
         OpenFolderBtn.IsEnabled = !reviewing;
+        UpdateHelperSend();
         if (reviewing)
         {
             SaveBtn.IsEnabled = false;
@@ -301,7 +310,8 @@ public partial class ContextWindow : Window
         else RefreshState();
     }
 
-    private void ShowReview(InstructionFile file, string original, ReviewSuggestion suggestion)
+    /// <summary>Shows the suggested edits with Apply boxes. Returns the plan, so the helper can say what came of its request.</summary>
+    private ReviewPlan ShowReview(InstructionFile file, string original, ReviewSuggestion suggestion, bool fromHelper)
     {
         var plan = InstructionReview.Plan(original, suggestion.Edits);
         var hunks = plan.Segments.Where(s => s.IsChange).Select((s, i) => ReviewHunk.From(s, plan.Reasons[i])).ToList();
@@ -311,12 +321,15 @@ public partial class ContextWindow : Window
                 ? $"{plan.Unplaced.Count} suggested edit{(plan.Unplaced.Count == 1 ? "" : "s")} did not match the file's text, so nothing changed."
                 : "No changes suggested.";
             StatusText.Text = suggestion.Summary.Length > 0 ? $"{why} {suggestion.Summary}" : why;
-            return;
+            return plan;
         }
 
         _reviewSegments = plan.Segments;
         _reviewHunks = hunks;
-        ReviewHeading.Text = $"Claude Code suggests {hunks.Count} change{(hunks.Count == 1 ? "" : "s")} to {file.Label}";
+        _reviewFromHelper = fromHelper;
+        ReviewHeading.Text = fromHelper
+            ? $"Suggested for your request: {hunks.Count} change{(hunks.Count == 1 ? "" : "s")} to {Path.GetFileName(file.Path)}"
+            : $"Claude Code suggests {hunks.Count} change{(hunks.Count == 1 ? "" : "s")} to {Path.GetFileName(file.Path)}";
         ReviewSummary.Text = suggestion.Summary;
         ReviewSummary.Visibility = suggestion.Summary.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         ReviewUnplaced.Text = plan.Unplaced.Count == 0 ? "" :
@@ -331,7 +344,9 @@ public partial class ContextWindow : Window
         ReviewButtons.Visibility = Visibility.Visible;
         TabsPanel.IsEnabled = false;
         UpdateApplyButton();
+        UpdateHelperSend();
         StatusText.Text = "Untick any change you do not want, then apply. Nothing is saved until you press Save.";
+        return plan;
     }
 
     /// <summary>
@@ -353,7 +368,7 @@ public partial class ContextWindow : Window
             if (ShowingReview) CloseReview();
         }
         if (_current != file) return false; // the file could not be read
-        ShowReview(file, Editor.Text, suggestion);
+        ShowReview(file, Editor.Text, suggestion, fromHelper: false);
         return true;
     }
 
@@ -371,14 +386,39 @@ public partial class ContextWindow : Window
         if (_reviewSegments is not { } segments) return;
         var chosen = _reviewHunks.Count(h => h.Accepted);
         var merged = LineDiff.Merge(segments, i => _reviewHunks[i].Accepted);
+        var fromHelper = _reviewFromHelper;
+        var (at, length) = FirstAppliedText(segments, i => _reviewHunks[i].Accepted);
         CloseReview();
         Editor.Text = merged;
         Editor.Focus();
+        // Select the first applied change and bring it into view once the editor is laid out again.
+        Dispatcher.BeginInvoke(() =>
+        {
+            Editor.Select(Math.Min(at, Editor.Text.Length), length);
+            Editor.ScrollToLine(Math.Max(0, Editor.GetLineIndexFromCharacterIndex(Editor.SelectionStart) - 3));
+        }, System.Windows.Threading.DispatcherPriority.Loaded);
         StatusText.Text = $"Applied {chosen} of {_reviewHunks.Count} suggested change{(_reviewHunks.Count == 1 ? "" : "s")}. Check the editor, then Save.";
+        if (fromHelper) Say($"Put {chosen} of {_reviewHunks.Count} into the editor. Press Save (Ctrl+S) to write {Path.GetFileName(_current?.Path)}, or ask for more.");
+    }
+
+    /// <summary>Where the first accepted change's new lines start in the merged text (CRLF-joined, as Merge writes it), and their length.</summary>
+    private static (int At, int Length) FirstAppliedText(IReadOnlyList<DiffSegment> segments, Func<int, bool> accept)
+    {
+        var at = 0;
+        var change = 0;
+        foreach (var segment in segments)
+        {
+            var kept = segment.IsChange && accept(change++);
+            var lines = segment.IsChange && !kept ? segment.OldLines : segment.NewLines;
+            if (kept) return (at, Math.Max(0, string.Join("\r\n", lines).Length));
+            at += lines.Sum(l => l.Length + 2);
+        }
+        return (0, 0);
     }
 
     private void DiscardReview_Click(object sender, RoutedEventArgs e)
     {
+        if (_reviewFromHelper) Say("Discarded; the editor is unchanged. Tell me what to do differently.");
         CloseReview();
         StatusText.Text = "Review discarded; the editor is unchanged.";
     }
@@ -393,7 +433,176 @@ public partial class ContextWindow : Window
         EditButtons.Visibility = Visibility.Visible;
         ReviewButtons.Visibility = Visibility.Collapsed;
         TabsPanel.IsEnabled = true;
+        _reviewFromHelper = false;
+        UpdateHelperSend();
     }
+
+    // ---- Context helper (🦀): ask in plain words; the edits show in the review panel like a Review's ----
+
+    private const double HelperWidth = 330;
+    private const string HelperKeysHint = "Enter sends · Shift+Enter new line";
+    private readonly ObservableCollection<HelperMessage> _helperLog = [];
+    private bool _helperRunning;
+    private bool _reviewFromHelper;
+    private double _helperGrewBy;
+
+    private void Crab_Toggled(object sender, RoutedEventArgs e) => SetHelperOpen(CrabBtn.IsChecked == true);
+
+    private void CloseHelper_Click(object sender, RoutedEventArgs e) => SetHelperOpen(false);
+
+    // The window widens by the panel so the editor keeps its size, and narrows again on close; a maximised window stays as it is.
+    private void SetHelperOpen(bool open)
+    {
+        CrabBtn.IsChecked = open;
+        if ((HelperPanel.Visibility == Visibility.Visible) == open) return;
+        HelperPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        if (open)
+        {
+            if (WindowState == WindowState.Normal)
+            {
+                var area = SystemParameters.WorkArea;
+                var width = Math.Min(Width + HelperWidth, area.Width);
+                _helperGrewBy = width - Width;
+                Width = width;
+                if (Left + Width > area.Right) Left = Math.Max(area.Left, area.Right - Width);
+            }
+            MinWidth += HelperWidth;
+            UpdateHelperSend();
+            HelperInput.Focus();
+        }
+        else
+        {
+            MinWidth -= HelperWidth;
+            if (WindowState == WindowState.Normal && _helperGrewBy > 0) Width = Math.Max(MinWidth, Width - _helperGrewBy);
+            _helperGrewBy = 0;
+        }
+    }
+
+    private void Example_Click(object sender, RoutedEventArgs e)
+    {
+        HelperInput.Text = (sender as Button)?.Content as string ?? "";
+        HelperInput.CaretIndex = HelperInput.Text.Length;
+        HelperInput.Focus();
+    }
+
+    private void HelperInput_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        HelperInputHint.Visibility = HelperInput.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateHelperSend();
+    }
+
+    // Enter sends, as in a chat; Shift+Enter is a new line.
+    private void HelperInput_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) return;
+        e.Handled = true;
+        if (!_helperRunning && HelperSendBtn.IsEnabled) HelperSend_Click(HelperSendBtn, e);
+    }
+
+    // One request or review at a time, and never over suggestions still waiting to be applied or discarded.
+    private void UpdateHelperSend()
+    {
+        if (_helperRunning)
+        {
+            HelperSendBtn.Content = "■ Cancel";
+            HelperSendBtn.IsEnabled = true;
+            HelperHint.Text = "Working on it…";
+            return;
+        }
+        var blocked = ShowingReview ? "Apply or discard the suggestions first."
+            : Reviewing ? "Waiting for ✨ Review to finish."
+            : null;
+        HelperSendBtn.Content = "Suggest";
+        HelperSendBtn.IsEnabled = blocked is null && _current is not null && HelperInput.Text.Trim().Length > 0;
+        HelperHint.Text = blocked ?? HelperKeysHint;
+    }
+
+    private async void HelperSend_Click(object sender, RoutedEventArgs e)
+    {
+        if (_helperRunning)
+        {
+            _reviewCts?.Cancel();
+            return;
+        }
+        if (_current is not { } file || Reviewing || ShowingReview) return;
+        var ask = HelperInput.Text.Trim();
+        if (ask.Length == 0) return;
+
+        HelperInput.Text = "";
+        HelperExamples.Visibility = Visibility.Collapsed;
+        _helperLog.Add(HelperMessage.User(ask));
+        var reply = HelperMessage.Crab("");
+        _helperLog.Add(reply);
+        ScrollHelperToEnd();
+
+        var text = Editor.Text;
+        var cts = new CancellationTokenSource();
+        _reviewCts = cts;
+        SetReviewing(true, helper: true);
+        var started = DateTime.Now;
+        void Tick()
+        {
+            var seconds = (int)(DateTime.Now - started).TotalSeconds;
+            reply.Text = $"Working out the edits to {Path.GetFileName(file.Path)}… {seconds} s";
+            StatusText.Text = $"Context helper is asking Claude Code… {seconds} s. Usually under a minute.";
+        }
+        var ticker = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        ticker.Tick += (_, _) => Tick();
+        Tick();
+        ticker.Start();
+        try
+        {
+            var suggestion = await InstructionRequest.RunAsync(new ProcessRunner(), ReviewCommand, file, text, Folder, ask, cts.Token);
+            if (_current != file)
+            {
+                reply.Text = $"Another file was opened before the answer came back, so it was dropped. Open {Path.GetFileName(file.Path)} and ask again.";
+                return;
+            }
+            var plan = ShowReview(file, text, suggestion, fromHelper: true);
+            reply.Text = Describe(suggestion, plan);
+        }
+        catch (OperationCanceledException)
+        {
+            reply.Text = "Cancelled.";
+            StatusText.Text = "Context helper cancelled.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            reply.Text = ex.Message;
+            reply.IsError = true;
+            StatusText.Text = "Context helper failed; the reason is in the helper panel.";
+        }
+        finally
+        {
+            ticker.Stop();
+            _reviewCts = null;
+            cts.Dispose();
+            SetReviewing(false);
+            ScrollHelperToEnd();
+        }
+    }
+
+    private static string Describe(ReviewSuggestion suggestion, ReviewPlan plan)
+    {
+        var count = plan.Reasons.Count;
+        var lines = new List<string>();
+        if (suggestion.Summary.Length > 0) lines.Add(suggestion.Summary);
+        if (count > 0) lines.Add($"{count} change{(count == 1 ? " is" : "s are")} on the left. Untick any you do not want, then Apply.");
+        else if (plan.Unplaced.Count > 0) lines.Add("The suggested edits did not match the file's text, so nothing changed. Try asking again.");
+        else if (lines.Count == 0) lines.Add("Nothing to change for that.");
+        if (count > 0 && plan.Unplaced.Count > 0)
+            lines.Add($"{plan.Unplaced.Count} more did not match the file's text and {(plan.Unplaced.Count == 1 ? "was" : "were")} left out.");
+        return string.Join("\n\n", lines);
+    }
+
+    private void Say(string text)
+    {
+        _helperLog.Add(HelperMessage.Crab(text));
+        ScrollHelperToEnd();
+    }
+
+    private void ScrollHelperToEnd() =>
+        Dispatcher.BeginInvoke(HelperScroll.ScrollToEnd, System.Windows.Threading.DispatcherPriority.Background);
 
     // Picks up edits made elsewhere (an agent, another editor) whenever the window comes back into focus.
     // Not during a review: the suggestions belong to the text that was sent, and Save still catches the change on disk.

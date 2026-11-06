@@ -38,6 +38,10 @@
                         <Button Click="OpenHistory_Click" Content="🕘 History" FontWeight="SemiBold" ToolTip="Every Claude Code and Codex session per repository: each prompt, reply, thinking step, tool call and result" />
                         <Button Click="OpenContext_Click" Content="📄 Context" FontWeight="SemiBold" ToolTip="View and edit the user-wide instruction file of each CLI: Claude Code CLAUDE.md, Codex AGENTS.md, Gemini / Antigravity GEMINI.md" />
                         <Button Click="OpenSettings_Click" Content="⚙ Settings" Margin="0,0,0,8" />
+                        <!-- The AgentHub helper: opens a pane to the right of the terminals -->
+                        <ToggleButton x:Name="AppHelperBtn" Style="{StaticResource CrabToggle}" Width="34" Height="34" Margin="10,0,0,8" VerticalAlignment="Top"
+                                      Checked="AppHelperBtn_Toggled" Unchecked="AppHelperBtn_Toggled" AutomationProperties.Name="AgentHub helper"
+                                      ToolTip="AgentHub helper: ask how to do anything in AgentHub" />
                     </StackPanel>
                     <!-- Manage GitHub Repos view: repository management actions -->
                     <StackPanel x:Name="ManageBar" Visibility="Collapsed" Orientation="Horizontal" FlowDirection="LeftToRight">
@@ -61,8 +65,14 @@
 
         </StackPanel>
 
-        <!-- Main Content Area: View 1 (Repositories) or View 2 (Cockpit) -->
+        <!-- Main Content Area: View 1 (Repositories) or View 2 (Cockpit), with the helper pane to the right when open -->
         <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <controls:AppHelperPane x:Name="AppHelper" Grid.Column="1" Width="400" Margin="10,0,0,0" Visibility="Collapsed" />
+
             <!-- VIEW 1: REPOSITORIES & GIT -->
             <Grid x:Name="RepoViewGrid" Visibility="Collapsed">
                 <Grid.ColumnDefinitions>

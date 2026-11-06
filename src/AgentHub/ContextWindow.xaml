@@ -108,7 +108,13 @@
         <CommandBinding Command="ApplicationCommands.Save" Executed="SaveCommand_Executed" />
     </Window.CommandBindings>
 
-    <Grid Margin="16,14,16,16">
+    <Grid>
+    <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+    </Grid.ColumnDefinitions>
+
+    <Grid Grid.Column="0" Margin="16,14,16,16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -117,10 +123,15 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Margin="0,0,0,10">
-            <TextBlock x:Name="HeadingText" FontSize="18" FontWeight="SemiBold" />
-            <TextBlock x:Name="SubheadingText" Margin="0,3,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
-        </StackPanel>
+        <DockPanel Grid.Row="0" Margin="0,0,0,10" LastChildFill="True">
+            <ToggleButton x:Name="CrabBtn" DockPanel.Dock="Right" Style="{StaticResource CrabToggle}" VerticalAlignment="Top" Margin="12,0,0,0"
+                          Checked="Crab_Toggled" Unchecked="Crab_Toggled" AutomationProperties.Name="Context helper"
+                          ToolTip="Context helper: say what to add or change in this file. Claude Code suggests the edits and you choose which go in." />
+            <StackPanel>
+                <TextBlock x:Name="HeadingText" FontSize="18" FontWeight="SemiBold" />
+                <TextBlock x:Name="SubheadingText" Margin="0,3,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+        </DockPanel>
 
         <WrapPanel x:Name="TabsPanel" Grid.Row="1" Margin="0,0,0,4" />
 
@@ -189,5 +200,60 @@
             </StackPanel>
             <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="2,0,12,0" />
         </DockPanel>
+    </Grid>
+
+    <!-- Context helper: ask in plain words for something to add; the suggested edits appear on the left with Apply boxes -->
+    <Border x:Name="HelperPanel" Grid.Column="1" Width="330" Visibility="Collapsed" Background="#0B121D"
+            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1,0,0,0">
+        <Grid Margin="14,14,14,16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <DockPanel Grid.Row="0" Margin="0,0,0,10" LastChildFill="True">
+                <Button DockPanel.Dock="Right" Click="CloseHelper_Click" Content="✕" Margin="0" Padding="8,3" FontSize="11" VerticalAlignment="Top"
+                        Background="Transparent" BorderBrush="Transparent" ToolTip="Close the helper" AutomationProperties.Name="Close helper" />
+                <Image DockPanel.Dock="Left" Source="{StaticResource CrabIcon}" Width="28" Height="28" Margin="0,0,10,0" VerticalAlignment="Top" />
+                <StackPanel>
+                    <TextBlock Text="Context helper" FontSize="15" FontWeight="SemiBold" />
+                    <TextBlock x:Name="HelperTarget" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+            </DockPanel>
+
+            <ScrollViewer x:Name="HelperScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <!-- Shown until the first request -->
+                    <StackPanel x:Name="HelperExamples">
+                        <TextBlock Foreground="#B6C2D6" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"
+                                   Text="Say what you want the agent to know or do, in your own words. Claude Code turns it into rules, puts them in the right section, and shows them on the left. You tick which to keep, then Save." />
+                        <TextBlock Text="For example" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6" />
+                        <Button Style="{StaticResource ExampleChip}" Click="Example_Click" Content="Always run the tests before committing, and fix any that fail" />
+                        <Button Style="{StaticResource ExampleChip}" Click="Example_Click" Content="Ask me before deleting files or force-pushing" />
+                        <Button Style="{StaticResource ExampleChip}" Click="Example_Click" Content="Use Australian spelling in docs and commit messages" />
+                    </StackPanel>
+                    <ItemsControl x:Name="HelperLog" ItemTemplate="{StaticResource HelperMessageTemplate}" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <StackPanel Grid.Row="2" Margin="0,10,0,0">
+                <Grid>
+                    <TextBox x:Name="HelperInput" Style="{StaticResource Editor}" FontFamily="Segoe UI" MinHeight="64" MaxHeight="160"
+                             AcceptsTab="False" PreviewKeyDown="HelperInput_PreviewKeyDown" TextChanged="HelperInput_TextChanged"
+                             AutomationProperties.Name="Request" />
+                    <TextBlock x:Name="HelperInputHint" IsHitTestVisible="False" Margin="14,9,14,0" Foreground="#4A5A73" FontSize="13"
+                               TextWrapping="Wrap" VerticalAlignment="Top" Text="What should be added or changed?" />
+                </Grid>
+                <DockPanel Margin="0,8,0,0" LastChildFill="True">
+                    <Button x:Name="HelperSendBtn" DockPanel.Dock="Right" Click="HelperSend_Click" Content="Suggest" Margin="0" Padding="16,6"
+                            FontSize="12" FontWeight="SemiBold" Background="#9A3F17" IsEnabled="False"
+                            ToolTip="Ask Claude Code for edits that do this (Enter). Uses your Claude login; it only reads this file's text and never edits files." />
+                    <TextBlock x:Name="HelperHint" Text="Enter sends · Shift+Enter new line" Foreground="{StaticResource MutedBrush}" FontSize="11"
+                               VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,10,0" />
+                </DockPanel>
+            </StackPanel>
+        </Grid>
+    </Border>
     </Grid>
 </Window>

@@ -87,6 +87,37 @@ public partial class MainWindow : Window
         Controls.DarkTitleBar.Apply(this);
         Controls.WindowPlacement.KeepOnScreen(this);
         AgentCombo.SelectionChanged += (_, _) => UpdateAgentPreview();
+        AppHelper.ClaudeCommand = () => ClaudeCommand;
+        AppHelper.AppState = DescribeAppState;
+        AppHelper.CloseRequested += () => AppHelperBtn.IsChecked = false;
+    }
+
+    private void AppHelperBtn_Toggled(object sender, RoutedEventArgs e)
+    {
+        var open = AppHelperBtn.IsChecked == true;
+        AppHelper.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        if (open) AppHelper.FocusInput();
+    }
+
+    /// <summary>What is on screen, for the helper: the view, each pane and where settings live. Never file contents.</summary>
+    private string DescribeAppState()
+    {
+        var view = CockpitViewGrid.Visibility == Visibility.Visible ? "⚡ Cockpit"
+            : RepoViewGrid.Visibility == Visibility.Visible ? "🔧 Manage GitHub Repos → 📁 Local Repos"
+            : GitHubViewGrid.Visibility == Visibility.Visible ? "🔧 Manage GitHub Repos → 🐙 GitHub Repos"
+            : "unknown";
+        var state = new System.Text.StringBuilder();
+        state.AppendLine($"AgentHub version: {typeof(MainWindow).Assembly.GetName().Version}");
+        state.AppendLine($"Current view: {view}");
+        state.AppendLine($"Registered repositories: {_settings.Repositories.Count}");
+        state.AppendLine($"Terminal panes: {_panes.Count}");
+        foreach (var pane in _panes)
+        {
+            var cli = pane.ContextCli is { } c ? Services.Instructions.InstructionReview.CliName(c) : "plain shell";
+            state.AppendLine($"- Pane {pane.PaneIndex}: \"{pane.SessionTitle.Text}\", {(pane.IsRunning ? "session running" : "no session yet")}, {cli}, folder {pane.ContextFolder}");
+        }
+        state.AppendLine($"Settings file: {_settingsService.SettingsPath}");
+        return state.ToString();
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
