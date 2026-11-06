@@ -4,6 +4,7 @@ Newest first. Open a run's `REVIEW.md` to read it.
 
 | Started | Idea | Workflow | Outcome | Ran | Decisions | Sent | Steers | Handoffs | Flags | Commits | Model |
 |---|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-11-06 11:13 | [Contractor Management UI Walkthrough](2026-11-06_1113_contractor-management-ui-walkthrough_a9e69d/REVIEW.md) | UI Click through d568bee0 | interrupted | 0m | 1 | 1 | 0 | 0 | 0 | 0 | sonnet |
 | 2026-11-05 22:12 | [AI Stock Bot Improvement](2026-11-05_2212_ai-stock-bot-improvement_e363a9/REVIEW.md) | Builder 5262f40e | completed | 6h 57m | 13 | 2 | 0 | 0 | 0 | 11 | sonnet |
 | 2026-11-05 22:10 | [AI Stock Bot Improvement](2026-11-05_2210_ai-stock-bot-improvement_7301d6/REVIEW.md) | Builder 5262f40e | interrupted | 0m | 1 | 1 | 0 | 0 | 2 | 0 | sonnet |
 | 2026-11-05 19:38 | [AI Stock Bot Orchestrator](2026-11-05_1938_ai-stock-bot-orchestrator_211263/REVIEW.md) | Builder 5262f40e | completed | 1h 33m | 7 | 3 | 0 | 0 | 0 | 7 | sonnet |
