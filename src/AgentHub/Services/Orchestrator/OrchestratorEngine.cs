@@ -1150,8 +1150,11 @@ public sealed class OrchestratorEngine : IDisposable
     private async Task CheckDeliveryAsync(IBuildWorker worker, RunRecorder run, string sent)
     {
         var until = DateTimeOffset.Now + DeliveryCheckTimeout;
-        while (DateTimeOffset.Now < until && !_disposeCts.IsCancellationRequested)
+        // Looks after every pause, the last one past the deadline included: on a busy machine the first pause can
+        // overrun the whole timeout, and the message must still be looked for once (2026-11-06, flaky test).
+        for (var looked = false; !looked || DateTimeOffset.Now < until; looked = true)
         {
+            if (_disposeCts.IsCancellationRequested) return;
             try { await Task.Delay(TimeSpan.FromSeconds(DeliveryCheckTimeout < TimeSpan.FromSeconds(5) ? 0.1 : 2), _disposeCts.Token); }
             catch (OperationCanceledException) { return; }
             string? received;

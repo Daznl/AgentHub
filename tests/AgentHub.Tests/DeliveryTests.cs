@@ -95,18 +95,34 @@ public class DeliveryLoopTests : IDisposable
         };
         var worker = new ScriptedWorker { Arrives = p => p[^76..] }; // only the end arrives, as on 2026-11-05
         await engine.BuildIdeaImmediatelyAsync(idea, worker);
-        for (var i = 0; i < 100 && worker.Received.Count == 0; i++) await Task.Delay(25);
-        await Task.Delay(600); // the delivery check runs
+        // Wait for the delivery check itself, not a fixed time: under a full test run it can take seconds (it was flaky at 600 ms).
+        // Reading events.jsonl while the engine appends must not block it (2026-11-06: the reader made the append fail).
+        await Until(() => DeliveryCuts(runs).Any(e => e.Flag), "the delivery check flags the cut message");
 
         worker.Arrives = null;
         worker.FinishTurn("I only got the end of your message.");
-        for (var i = 0; i < 200 && brain.Messages.Count < 2; i++) await Task.Delay(25);
+        await Until(() => brain.Messages.Count >= 2, "the orchestrator hears about the cut");
 
         Assert.StartsWith("[EVENT] worker_turn_ended", brain.Messages[1]);
         Assert.Contains("[DELIVERY] Your previous message reached the worker cut off. It received only: \"", brain.Messages[1]);
-        var events = RunRecorder.ReadEvents(Path.Combine(Directory.GetDirectories(runs).Single(), "events.jsonl"));
-        Assert.Contains(events, e => e.Kind == "delivery_cut" && e.Flag);
         engine.Stop();
+    }
+
+    private static IEnumerable<RunEvent> DeliveryCuts(string runs)
+    {
+        var events = Directory.Exists(runs) ? Directory.GetDirectories(runs).Select(d => Path.Combine(d, "events.jsonl")).FirstOrDefault(File.Exists) : null;
+        try { return events is null ? [] : RunRecorder.ReadEvents(events).Where(e => e.Kind == "delivery_cut").ToList(); }
+        catch (IOException) { return []; } // being written
+    }
+
+    private static async Task Until(Func<bool> condition, string what)
+    {
+        var until = DateTime.UtcNow.AddSeconds(30);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > until) throw new TimeoutException($"Timed out waiting for {what}.");
+            await Task.Delay(25);
+        }
     }
 }
 

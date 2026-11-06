@@ -1,3 +1,4 @@
+using AgentHub.Hosting;
 using System.IO;
 using System.Text.Json;
 using AgentHub.Models;
@@ -93,7 +94,7 @@ public sealed class SteeringService
             {
                 await JsonSerializer.SerializeAsync(stream, list, JsonOptions);
             }
-            File.Move(temp, _storagePath, overwrite: true);
+            await SharedFile.ReplaceAsync(temp, _storagePath);
         }
         finally { _lock.Release(); }
     }

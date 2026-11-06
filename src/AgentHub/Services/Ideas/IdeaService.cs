@@ -1,3 +1,4 @@
+using AgentHub.Hosting;
 using System.IO;
 using System.Text.Json;
 using AgentHub.Models;
@@ -141,7 +142,7 @@ public sealed class IdeaService
             await JsonSerializer.SerializeAsync(stream, ideas, JsonOptions);
         }
 
-        File.Move(tempPath, _storagePath, overwrite: true);
+        await SharedFile.ReplaceAsync(tempPath, _storagePath);
     }
 
     private static List<ProjectIdea> SeedDefaults()

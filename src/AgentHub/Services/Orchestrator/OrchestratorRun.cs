@@ -1,3 +1,4 @@
+using AgentHub.Hosting;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -141,7 +142,7 @@ public sealed class RunRecorder
         try
         {
             if (e.Flag) Record.Flags++;
-            await File.AppendAllTextAsync(EventsPath, JsonSerializer.Serialize(e, JsonLine) + "\n");
+            await SharedFile.AppendAsync(EventsPath, JsonSerializer.Serialize(e, JsonLine) + "\n");
             await WriteRecordAsync();
         }
         finally { _lock.Release(); }
@@ -151,14 +152,14 @@ public sealed class RunRecorder
     {
         var temp = RecordPath + ".tmp";
         await File.WriteAllTextAsync(temp, JsonSerializer.Serialize(Record, Json));
-        File.Move(temp, RecordPath, overwrite: true);
+        await SharedFile.ReplaceAsync(temp, RecordPath);
     }
 
     public static List<RunEvent> ReadEvents(string eventsPath)
     {
         var list = new List<RunEvent>();
         if (!File.Exists(eventsPath)) return list;
-        foreach (var line in File.ReadLines(eventsPath))
+        foreach (var line in SharedFile.ReadLinesShared(eventsPath))
         {
             if (string.IsNullOrWhiteSpace(line)) continue;
             try { if (JsonSerializer.Deserialize<RunEvent>(line, Json) is { } e) list.Add(e); }
@@ -184,7 +185,7 @@ public sealed class RunRecorder
             Record.EndedAt ??= DateTimeOffset.Now;
             var open = Record.WorkerSessions.LastOrDefault();
             if (open is { EndedAt: null }) { open.EndedAt = Record.EndedAt; open.EndReason ??= outcome; }
-            await File.AppendAllTextAsync(EventsPath,
+            await SharedFile.AppendAsync(EventsPath,
                 JsonSerializer.Serialize(new RunEvent { At = Record.EndedAt.Value, Kind = "end", Action = outcome, Detail = detail }, JsonLine) + "\n");
             await WriteRecordAsync();
 

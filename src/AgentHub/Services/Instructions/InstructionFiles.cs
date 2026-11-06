@@ -1,3 +1,4 @@
+using AgentHub.Hosting;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -142,7 +143,7 @@ public static class InstructionFiles
         try
         {
             File.WriteAllBytes(temp, bytes);
-            File.Move(temp, path, overwrite: true);
+            SharedFile.Replace(temp, path);
         }
         finally
         {

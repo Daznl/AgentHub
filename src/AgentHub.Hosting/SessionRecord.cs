@@ -90,7 +90,7 @@ public sealed class SessionStore
         var path = ScreenPath(id);
         var temp = path + ".tmp";
         File.WriteAllText(temp, JsonSerializer.Serialize(screen, JsonOptions));
-        File.Move(temp, path, overwrite: true);
+        SharedFile.Replace(temp, path);
     }
 
     public ScreenSnapshot? LoadScreen(string id)
@@ -117,7 +117,7 @@ public sealed class SessionStore
         var path = RecordPath(record.Id);
         var temp = path + ".tmp";
         File.WriteAllText(temp, JsonSerializer.Serialize(record, JsonOptions));
-        File.Move(temp, path, overwrite: true);
+        SharedFile.Replace(temp, path);
     }
 
     public SessionRecord? Load(string id)
