@@ -67,6 +67,33 @@ public sealed class OrchestratorEngine : IDisposable
     private bool _loopRunning;
     private bool _recovered;
     private bool _staleStatusesFixed;
+    /// <summary>Where the run's worker works: a git worktree of the idea's repository, or null for the repository folder itself.</summary>
+    private string? _workDir;
+
+    // ---- Running beside other engines (OrchestratorFleet) ----
+
+    /// <summary>
+    /// True for the Auto-Builder lane: when its idea is done it takes the next queued one. False for a Build Now run, which
+    /// finishes with its own idea (Daniel 2026-11-06: each orchestrator works as before, just several at once).
+    /// </summary>
+    public bool FollowsQueue { get; set; } = true;
+
+    /// <summary>True when another engine is building this idea; the queue skips it.</summary>
+    public Func<string, bool>? IdeaTakenElsewhere { get; set; }
+
+    /// <summary>True when another engine's worker works in this folder; this run then gets a git worktree of its own.</summary>
+    public Func<string, bool>? FolderInUseElsewhere { get; set; }
+
+    /// <summary>Where separate git worktrees go, one folder per repository and idea.</summary>
+    public string WorktreesRoot { get; set; } = Environment.GetEnvironmentVariable("AGENTHUB_WORKTREES_DIR") is { Length: > 0 } wt ? wt : @"C:\data\agenthub\worktrees";
+
+    /// <summary>The folder this engine's worker works in while a run is going; null when idle.</summary>
+    public string? WorkingDirectory => _state == OrchestratorState.Idle ? null : _workDir ?? _currentIdea?.TargetDirectory;
+
+    /// <summary>The branch of the run's own worktree; null when it works in the repository folder.</summary>
+    public string? WorktreeBranch => _workDir != null ? _run?.Record.Branch : null;
+
+    private string Dir(ProjectIdea idea) => _workDir ?? idea.TargetDirectory;
 
     /// <summary>Called with the folder a build is about to use (created and git-initialised if needed), so AgentHub can list it among its repositories.</summary>
     public Func<string, Task>? RepositoryInUse { get; set; }
@@ -335,14 +362,14 @@ public sealed class OrchestratorEngine : IDisposable
 
         var idea = _currentIdea != null && _currentIdea.Status is IdeaStatus.Building or IdeaStatus.WaitingForReset
             ? _currentIdea
-            : await _ideaService.GetNextQueuedAsync();
+            : FollowsQueue ? await NextQueuedAsync() : null;
 
         if (idea == null)
         {
             SetState(OrchestratorState.Idle);
             _currentIdea = null;
             CurrentIdeaChanged?.Invoke(null);
-            Log("All queued ideas are done. Orchestrator idle.");
+            Log(FollowsQueue ? "All queued ideas are done. Orchestrator idle." : "Finished; this orchestrator is idle.");
             return;
         }
 
@@ -354,6 +381,65 @@ public sealed class OrchestratorEngine : IDisposable
             return;
         }
         await LaunchWorkerSessionAsync(idea);
+    }
+
+    /// <summary>The queue's next idea that no other engine is building: one left Building or waiting for a reset first, then the first queued.</summary>
+    private async Task<ProjectIdea?> NextQueuedAsync()
+    {
+        var free = (await _ideaService.LoadAsync()).Where(i => IdeaTakenElsewhere?.Invoke(i.Id) != true).ToList();
+        return free.FirstOrDefault(i => i.Status is IdeaStatus.Building or IdeaStatus.WaitingForReset)
+            ?? free.FirstOrDefault(i => i.Status == IdeaStatus.Queued);
+    }
+
+    /// <summary>
+    /// Lets go of the worker's pane once this engine is idle, so another engine can drive it. False (nothing done) while a
+    /// run is going.
+    /// </summary>
+    public bool ReleaseWorker()
+    {
+        if (_state != OrchestratorState.Idle || _run != null) return false;
+        if (_worker != null)
+        {
+            _worker.TurnEnded -= OnWorkerTurnEnded;
+            _worker.Exited -= OnWorkerExited;
+            _worker.ContextChanged -= OnContextChanged;
+        }
+        _paneWorker?.Dispose();
+        _paneWorker = null;
+        _worker = null;
+        return true;
+    }
+
+    // ---- Worktrees ----
+
+    /// <summary>
+    /// The folder a new or reopened run works in. The repository folder itself, unless another engine's worker works there
+    /// (Daniel 2026-11-06: a second run on the same repository gets a separate git worktree): then a worktree on a branch of
+    /// its own under <see cref="WorktreesRoot"/>, made if missing and reused if there. Throws when git cannot make it.
+    /// </summary>
+    private async Task<(string? Dir, string? Branch, bool Created)> WorkFolderAsync(ProjectIdea idea)
+    {
+        if (FolderInUseElsewhere?.Invoke(idea.TargetDirectory) != true) return (null, null, false);
+
+        var name = $"{RunRecorder.Slug(idea.Title)}-{idea.Id[..Math.Min(6, idea.Id.Length)]}";
+        var repoName = RunRecorder.Slug(Path.GetFileName(idea.TargetDirectory.TrimEnd(Path.DirectorySeparatorChar)));
+        var dir = Path.Combine(WorktreesRoot, repoName, name);
+        var branch = $"agenthub/{name}";
+        if (File.Exists(Path.Combine(dir, ".git")))
+        {
+            Log($"Another orchestrator is working in {idea.TargetDirectory}; this run uses its worktree {dir} (branch {branch}).");
+            return (dir, branch, false);
+        }
+
+        if (await _runner.RunAsync("git", ["rev-parse", "--verify", "HEAD"], idea.TargetDirectory) is { ExitCode: not 0 })
+            throw new InvalidOperationException($"{idea.TargetDirectory} has no commits yet, so git cannot branch a worktree from it.");
+        Directory.CreateDirectory(Path.GetDirectoryName(dir)!);
+        var branchExists = (await _runner.RunAsync("git", ["rev-parse", "--verify", "--quiet", $"refs/heads/{branch}"], idea.TargetDirectory)).ExitCode == 0;
+        string[] args = branchExists ? ["worktree", "add", dir, branch] : ["worktree", "add", "-b", branch, dir];
+        var r = await _runner.RunAsync("git", args, idea.TargetDirectory, timeout: TimeSpan.FromMinutes(5)); // checks out the whole tree
+        if (r.ExitCode != 0) throw new InvalidOperationException($"git worktree add failed: {(r.StdErr + r.StdOut).Trim()}");
+        Log($"Another orchestrator is working in {idea.TargetDirectory}, so this run got its own git worktree: {dir} on branch {branch}. Merge that branch when it is done.", "Warn");
+        return (dir, branch, true);
     }
 
     // ---- Runs ----
@@ -371,11 +457,15 @@ public sealed class OrchestratorEngine : IDisposable
 
     private IOrchestratorBrain MakeBrain(RunRecord record, string folder, ProjectIdea idea, OrchestratorWorkflow workflow, bool reopen) =>
         BrainFactory?.Invoke(record, folder) ?? new ClaudeOrchestratorBrain(_runner, OrchestratorCommand, record.OrchestratorModel, folder,
-            idea.TargetDirectory, OrchestratorMessages.SystemPrompt(idea.Title, idea.TargetDirectory, workflow),
+            Dir(idea), OrchestratorMessages.SystemPrompt(idea.Title, Dir(idea), workflow),
             sessionId: reopen ? record.OrchestratorSessionId : null, alreadyStarted: reopen);
+
+    /// <summary>The run's worktree was made just now, so the handoff in it (if any) came from the branch it was cut from.</summary>
+    private bool _freshWorktree;
 
     private async Task BeginRunAsync(ProjectIdea idea)
     {
+        (_workDir, var branch, _freshWorktree) = await WorkFolderAsync(idea);
         var workflow = await LoadWorkflowAsync(idea);
         var now = DateTimeOffset.Now;
         var runId = RunRecorder.NewRunId(idea.Title, now);
@@ -387,6 +477,8 @@ public sealed class OrchestratorEngine : IDisposable
             IdeaTitle = idea.Title,
             Spec = idea.Description,
             TargetDirectory = idea.TargetDirectory,
+            WorkingDirectory = _workDir,
+            Branch = branch,
             WorkerCommand = WorkerCommandFor(idea, workflow),
             OrchestratorModel = string.IsNullOrWhiteSpace(workflow.Model) ? OrchestratorModel : workflow.Model,
             Workflow = workflow.Name,
@@ -394,7 +486,7 @@ public sealed class OrchestratorEngine : IDisposable
             WorkflowVersion = workflow.Version(),
             AgentHubBuild = typeof(OrchestratorEngine).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
             StartedAt = now,
-            TargetHeadAtStart = await GitHeadAsync(idea.TargetDirectory)
+            TargetHeadAtStart = await GitHeadAsync(Dir(idea))
         };
         _run = new RunRecorder(folder, record);
         _workflow = workflow;
@@ -421,6 +513,20 @@ public sealed class OrchestratorEngine : IDisposable
         var workflow = File.Exists(workflowFile)
             ? OrchestratorWorkflow.Parse(await File.ReadAllTextAsync(workflowFile), record.WorkflowId)
             : await LoadWorkflowAsync(idea);
+
+        // Back in the worktree it used before; else the repository folder, or a new worktree when that folder is busy.
+        if (record.WorkingDirectory is { } kept && File.Exists(Path.Combine(kept, ".git")))
+        {
+            _workDir = kept;
+            _freshWorktree = false;
+        }
+        else
+        {
+            if (record.WorkingDirectory != null) Log($"The run's worktree {record.WorkingDirectory} is gone; working in {idea.TargetDirectory} unless that is busy.", "Warn");
+            (_workDir, var branch, _freshWorktree) = await WorkFolderAsync(idea);
+            record.WorkingDirectory = _workDir;
+            record.Branch = branch;
+        }
 
         record.Outcome = "running";
         record.EndedAt = null;
@@ -457,6 +563,7 @@ public sealed class OrchestratorEngine : IDisposable
         _run = null;
         _brain = null;
         _workflow = null;
+        _workDir = null;
         _waitingSince = null;
         try
         {
@@ -518,6 +625,7 @@ public sealed class OrchestratorEngine : IDisposable
         _run = null;
         _brain = null;
         _workflow = null;
+        _workDir = null;
         _waitingSince = null;
 
         try
@@ -525,8 +633,8 @@ public sealed class OrchestratorEngine : IDisposable
             var r = run.Record;
             r.EndedAt = DateTimeOffset.Now;
             if (_worker?.TranscriptPath is { } t && r.WorkerSessions.LastOrDefault() is { TranscriptPath: null } s) s.TranscriptPath = t;
-            r.TargetHeadAtEnd = await GitHeadAsync(r.TargetDirectory);
-            r.WorkerCommits = await CommitsSinceAsync(r.TargetDirectory, r.StartedAt, 200);
+            r.TargetHeadAtEnd = await GitHeadAsync(r.WorkingDirectory ?? r.TargetDirectory);
+            r.WorkerCommits = await CommitsSinceAsync(r.WorkingDirectory ?? r.TargetDirectory, r.StartedAt, 200);
             await run.FinishAsync(outcome, detail);
             Log($"Run {r.RunId} ended ({outcome}). Review: {Path.Combine(run.Folder, "REVIEW.md")}");
         }
@@ -557,7 +665,7 @@ public sealed class OrchestratorEngine : IDisposable
             try
             {
                 var recorder = new RunRecorder(dir, record);
-                record.WorkerCommits = await CommitsSinceAsync(record.TargetDirectory, record.StartedAt, 200);
+                record.WorkerCommits = await CommitsSinceAsync(record.WorkingDirectory ?? record.TargetDirectory, record.StartedAt, 200);
                 await recorder.FinishAsync("interrupted", idea == null ? "The idea was deleted while the run was open." : "The idea was completed elsewhere while this run was open.");
                 if (Archive != null) Log(await Archive.PublishRunAsync(dir));
             }
@@ -604,17 +712,29 @@ public sealed class OrchestratorEngine : IDisposable
                 return;
             }
             if (_run != null) await SuspendRunAsync($"Moved on to \"{idea.Title}\".");
-            if (await ReopenRunAsync(idea))
+            try
             {
-                evt = OrchestratorEvent.RunReopened;
-                reason ??= "AgentHub was closed or the build was stopped part-way";
+                if (await ReopenRunAsync(idea))
+                {
+                    evt = OrchestratorEvent.RunReopened;
+                    reason ??= "AgentHub was closed or the build was stopped part-way";
+                }
+                else
+                {
+                    await BeginRunAsync(idea);
+                    evt = OrchestratorEvent.RunStarted;
+                }
             }
-            else
+            catch (InvalidOperationException ex) when (_run == null)
             {
-                await BeginRunAsync(idea);
-                evt = OrchestratorEvent.RunStarted;
+                // No worktree, so no folder of its own: working in the busy one would put two workers in one tree.
+                _workDir = null;
+                _currentIdea = idea;
+                await PauseForDanielCoreAsync($"Another orchestrator is working in {idea.TargetDirectory} and a separate git worktree could not be made: {ex.Message}");
+                return;
             }
         }
+        if (!await PrepareHandoffAsync(idea)) return;
 
         idea.Status = IdeaStatus.Building;
         idea.LastActiveAt = DateTimeOffset.Now;
@@ -655,8 +775,8 @@ public sealed class OrchestratorEngine : IDisposable
         _lastReplyHandled = null;
         var command = WorkerCommandFor(idea, _workflow);
         _run.Record.WorkerSessions.Add(new WorkerSessionRecord { Number = _workerSession, StartedAt = _workerStartedAt });
-        Log($"Starting worker session #{_workerSession}: {command} in {idea.TargetDirectory}.");
-        _worker.Start(command, idea.TargetDirectory, $"{_worker.Label} · {idea.Title} (worker #{_workerSession})", idea.Title);
+        Log($"Starting worker session #{_workerSession}: {command} in {Dir(idea)}.");
+        _worker.Start(command, Dir(idea), $"{_worker.Label} · {idea.Title} (worker #{_workerSession})", idea.Title);
     }
 
     private async Task<bool> PrepareWorkspaceAsync(ProjectIdea idea)
@@ -683,16 +803,44 @@ public sealed class OrchestratorEngine : IDisposable
                 catch (Exception ex) { Log($"Could not add {idea.TargetDirectory} to AgentHub's repositories: {ex.Message}", "Warn"); }
             }
 
-            var agenthubDir = Path.Combine(idea.TargetDirectory, ".agenthub");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log($"Could not prepare the workspace: {ex.Message}", "Error");
+            idea.StatusNote = $"Workspace error: {ex.Message}";
+            await _ideaService.UpdateIdeaAsync(idea);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The starter handoff in the folder the worker works in (the repository, or the run's worktree). A worktree made just
+    /// now carries the handoff of whatever else works on the branch it was cut from; that one is kept aside, not shown to
+    /// this idea's orchestrator as if it were its own.
+    /// </summary>
+    private async Task<bool> PrepareHandoffAsync(ProjectIdea idea)
+    {
+        try
+        {
+            var agenthubDir = Path.Combine(Dir(idea), ".agenthub");
             Directory.CreateDirectory(agenthubDir);
             var handoffFile = Path.Combine(agenthubDir, "handoff.md");
+            var existing = File.Exists(handoffFile) ? await File.ReadAllTextAsync(handoffFile) : null;
+            if (_freshWorktree && existing != null && !existing.StartsWith($"# Autonomous Project: {idea.Title}\n", StringComparison.Ordinal))
+            {
+                var aside = Path.Combine(agenthubDir, "handoff-from-branch-point.md");
+                File.Move(handoffFile, aside, overwrite: true);
+                Log($"The new worktree came with another project's handoff; kept it as {aside} and started this idea's own.");
+                existing = null;
+            }
+            _freshWorktree = false;
             // The starter handoff copies the spec. While nobody has worked on it yet ("Not started"), rewrite it from the spec as it is
             // now, so a spec written after the first try (Daniel 2026-11-05: Build Now on the placeholder) does not sit beside a stale Goal.
-            var untouchedStarter = File.Exists(handoffFile)
-                && await File.ReadAllTextAsync(handoffFile) is var existing
+            var untouchedStarter = existing != null
                 && existing.StartsWith("# Autonomous Project:", StringComparison.Ordinal)
                 && existing.Contains("**Status:** Not started.", StringComparison.Ordinal);
-            if (!File.Exists(handoffFile) || untouchedStarter)
+            if (existing == null || untouchedStarter)
             {
                 await File.WriteAllTextAsync(handoffFile,
                     $"# Autonomous Project: {idea.Title}\n\n**Goal:** {idea.Description}\n\n**Initialized:** {DateTimeOffset.Now:yyyy-MM-dd HH:mm}\n" +
@@ -703,7 +851,7 @@ public sealed class OrchestratorEngine : IDisposable
         }
         catch (Exception ex)
         {
-            Log($"Could not prepare the workspace: {ex.Message}", "Error");
+            Log($"Could not write the starter handoff: {ex.Message}", "Error");
             idea.StatusNote = $"Workspace error: {ex.Message}";
             await _ideaService.UpdateIdeaAsync(idea);
             return false;
@@ -789,7 +937,7 @@ public sealed class OrchestratorEngine : IDisposable
                 Steers = steers,
                 Status = StatusLine(idea),
                 Workflow = WorkflowLine(),
-                RecentCommits = await CommitsSinceAsync(idea.TargetDirectory, run.Record.StartedAt, 8)
+                RecentCommits = await CommitsSinceAsync(Dir(idea), run.Record.StartedAt, 8)
             };
             var message = OrchestratorMessages.Compose(input);
             if (!string.IsNullOrWhiteSpace(input.WorkerReply)) AddExchange(ExchangeKind.Read, input.WorkerReply);
@@ -1386,11 +1534,11 @@ public sealed class OrchestratorEngine : IDisposable
 
     // ---- Helpers ----
 
-    private static string? ReadHandoff(ProjectIdea idea)
+    private string? ReadHandoff(ProjectIdea idea)
     {
         try
         {
-            var path = Path.Combine(idea.TargetDirectory, ".agenthub", "handoff.md");
+            var path = Path.Combine(Dir(idea), ".agenthub", "handoff.md");
             return File.Exists(path) ? File.ReadAllText(path) : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }

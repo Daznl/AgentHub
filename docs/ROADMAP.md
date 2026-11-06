@@ -78,6 +78,8 @@
   - Builder, Data Processing and Demo Builder templates; duplicate, fill in inputs and save your own (kept on the archive branch); one workflow per idea
   - stages with a fresh worker after each one
   - runs suspended on close and reopened on the next build
+- [x] **Parallel orchestrations** (`OrchestratorFleet`): one engine per Build Now plus the Auto-Builder lane, side by side; shared usage reading and steering; a second run on a busy repository gets its own git worktree and branch; the Orchestration window monitors the selected idea's run
+- [ ] Merge helper for a finished run's worktree branch (now merged by hand)
 - [ ] Tell the orchestrator about other ideas' workflows ("use when") so it can suggest one for a new idea
 - [ ] "Review this run" button: hand a REVIEW.md to Claude and ask what the orchestrator prompt should do differently
 - [ ] Orchestrator model and decision cap as settings (now `sonnet` / 400 in code)

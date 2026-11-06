@@ -26,6 +26,10 @@ public sealed class RunRecord
     public string IdeaTitle { get; set; } = "";
     public string Spec { get; set; } = "";
     public string TargetDirectory { get; set; } = "";
+    /// <summary>The git worktree the worker used when another run had the repository folder; null when it used the folder itself.</summary>
+    public string? WorkingDirectory { get; set; }
+    /// <summary>The worktree's branch, to merge when the run is done.</summary>
+    public string? Branch { get; set; }
     public string WorkerCommand { get; set; } = "";
     public string OrchestratorModel { get; set; } = "";
     public string Workflow { get; set; } = "Builder";
@@ -225,7 +229,8 @@ public static class RunReview
         Row(sb, "Orchestrator", $"{r.OrchestratorModel} · {r.OrchestratorCalls} decisions · session `{r.OrchestratorSessionId}`" + (r.Reopened > 0 ? $" · picked up again {r.Reopened}×" : ""));
         if (r.StagesDone.Count > 0 || r.CurrentStage != null)
             Row(sb, "Stages", (r.StagesDone.Count > 0 ? "done: " + string.Join(", ", r.StagesDone) : "none done") + (r.CurrentStage is { } cs && !r.StagesDone.Contains(cs) ? $" · current: {cs}" : ""));
-        Row(sb, "Worker", $"`{r.WorkerCommand}` in `{r.TargetDirectory}` · {r.WorkerSessions.Count} session(s) · {r.MessagesToWorker} messages sent");
+        Row(sb, "Worker", $"`{r.WorkerCommand}` in `{r.WorkingDirectory ?? r.TargetDirectory}` · {r.WorkerSessions.Count} session(s) · {r.MessagesToWorker} messages sent");
+        if (r.WorkingDirectory != null) Row(sb, "Worktree", $"branch `{r.Branch}` of `{r.TargetDirectory}`: merge it when the run is done");
         Row(sb, "Steers / handoffs / flags", $"{r.Steers} / {r.Handoffs} / {r.Flags}");
         if (!string.IsNullOrEmpty(r.AgentHubBuild)) Row(sb, "AgentHub build", r.AgentHubBuild);
         if (!string.IsNullOrEmpty(r.LastProgress)) Row(sb, "Last progress", r.LastProgress);

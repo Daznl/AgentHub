@@ -35,9 +35,10 @@
             <!-- Header bar with title, orchestrator status, and action buttons -->
             <RowDefinition Height="Auto" />
             <!-- Main content split: Ideas list & Idea details/handoff -->
-            <RowDefinition Height="*" />
-            <!-- Bottom section: Orchestrator live monitor & logs -->
-            <RowDefinition Height="210" />
+            <RowDefinition Height="*" MinHeight="220" />
+            <!-- Splitter, then the monitor of the selected idea's orchestration -->
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="300" MinHeight="180" />
         </Grid.RowDefinitions>
 
         <!-- TOP BAR -->
@@ -68,7 +69,7 @@
         </Border>
 
         <!-- MAIN SPLIT -->
-        <Grid Grid.Row="1" Margin="0,0,0,12">
+        <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <!-- Ideas List -->
                 <ColumnDefinition Width="460" MinWidth="340" />
@@ -85,10 +86,26 @@
                         <TextBlock x:Name="QueueCountText" Text="0 ideas" Foreground="{StaticResource MutedBrush}" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Center" />
                     </DockPanel>
 
-                    <ListBox x:Name="IdeasList" SelectionChanged="IdeasList_SelectionChanged" Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox x:Name="IdeasList" SelectionChanged="IdeasList_SelectionChanged" Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             HorizontalContentAlignment="Stretch">
+                        <!-- Cards fill the column; the selected one (whose orchestration the monitor below shows) is outlined, not greyed. -->
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="Margin" Value="0,0,6,0" />
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListBoxItem">
+                                            <ContentPresenter />
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,8">
+                                <Border x:Name="Card" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,8">
                                     <Grid>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />
@@ -101,7 +118,7 @@
                                             <Border DockPanel.Dock="Right" Background="{Binding StatusBadgeBrush}" CornerRadius="3" Padding="6,2" VerticalAlignment="Center">
                                                 <TextBlock Text="{Binding StatusBadgeText}" Foreground="White" FontSize="10" FontWeight="Bold" />
                                             </Border>
-                                            <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="13" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="13" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,8,0" />
                                         </DockPanel>
 
                                         <!-- Target Folder & Handoffs -->
@@ -127,6 +144,12 @@
                                         </DockPanel>
                                     </Grid>
                                 </Border>
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                        <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                        <Setter TargetName="Card" Property="Background" Value="#E6162436" />
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
@@ -280,51 +303,66 @@
             </Border>
         </Grid>
 
-        <!-- BOTTOM PANEL: ORCHESTRATOR LIVE MONITOR & LOGS -->
-        <Border Grid.Row="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,10">
+        <!-- Drag to give the monitor (or the editor) more room. -->
+        <GridSplitter Grid.Row="2" Height="12" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="Transparent" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" Cursor="SizeNS" ToolTip="Drag to resize" />
+
+        <!-- BOTTOM PANEL: THE ORCHESTRATION OF THE IDEA SELECTED ON THE LEFT (Daniel 2026-11-06: one monitor per selected run, not one global status) -->
+        <Border Grid.Row="3" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,10">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <!-- Metrics & Quota Gauges -->
-                    <ColumnDefinition Width="340" />
+                    <ColumnDefinition Width="300" />
                     <ColumnDefinition Width="12" />
-                    <!-- Live Event Log -->
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="12" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
-                <!-- Quotas & Status Gauges -->
-                <StackPanel Grid.Column="0">
-                    <TextBlock Text="Live Orchestrator Status" FontWeight="SemiBold" FontSize="13" Foreground="{StaticResource TextBrush}" Margin="0,0,0,8" />
-
-                    <!-- Active Idea -->
-                    <TextBlock Text="Current Active Build:" Foreground="{StaticResource MutedBrush}" FontSize="11" />
-                    <TextBlock x:Name="ActiveIdeaLabel" Text="None (Idle)" FontWeight="SemiBold" FontSize="12" Foreground="#60A5FA" Margin="0,1,0,8" />
-
-                    <!-- Claude Usage Limits -->
-                    <TextBlock Text="Claude Quota Monitor:" Foreground="{StaticResource MutedBrush}" FontSize="11" />
-                    <TextBlock x:Name="ClaudeQuotaLabel" Text="Checking usage..." FontSize="11" Foreground="{StaticResource TextBrush}" Margin="0,1,0,8" />
-
-                    <!-- Next Reset Timer -->
-                    <TextBlock Text="Next Quota Reset:" Foreground="{StaticResource MutedBrush}" FontSize="11" />
-                    <TextBlock x:Name="ResetCountdownLabel" Text="None active" FontSize="11" FontWeight="SemiBold" Foreground="#F59E0B" Margin="0,1,0,8" />
-
-                    <!-- The orchestrator's own one-line progress -->
-                    <DockPanel>
-                        <Button DockPanel.Dock="Right" Content="📂 Runs" Click="OpenRuns_Click" FontSize="10" Padding="6,1" ToolTip="Open the recorded orchestrator runs (INDEX.md and one REVIEW.md per run)" />
-                        <TextBlock Text="🧠 Orchestrator (Sonnet):" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" />
+                <!-- The selected run: what it is, its controls, and the account-wide quota -->
+                <DockPanel Grid.Column="0" LastChildFill="False">
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                        <Border DockPanel.Dock="Right" x:Name="SelectedStateChip" Background="#1E293B" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
+                            <TextBlock x:Name="SelectedStateText" Text="NOT RUNNING" Foreground="#94A3B8" FontSize="10" FontWeight="Bold" />
+                        </Border>
+                        <TextBlock Text="Selected Orchestration" FontWeight="SemiBold" FontSize="13" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
                     </DockPanel>
-                    <TextBlock x:Name="OrchestratorProgressLabel" Text="Not running" FontSize="11" Foreground="#A78BFA" TextWrapping="Wrap" MaxHeight="44" TextTrimming="CharacterEllipsis" Margin="0,1,0,0" />
-                </StackPanel>
+                    <TextBlock DockPanel.Dock="Top" x:Name="SelectedIdeaLabel" Text="No idea selected" FontWeight="SemiBold" FontSize="12" Foreground="#60A5FA" TextTrimming="CharacterEllipsis" />
+                    <TextBlock DockPanel.Dock="Top" x:Name="SelectedFolderLabel" Foreground="{StaticResource MutedBrush}" FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,1,0,6" />
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button x:Name="SelectedPauseBtn" Click="SelectedPause_Click" Content="⏸ Pause" FontSize="11" Padding="8,3" Margin="0,0,6,0" ToolTip="Pause this orchestration: its worker is left as it is and gets nothing new" />
+                        <Button x:Name="SelectedStopBtn" Click="SelectedStop_Click" Content="■ Stop" Background="#7F1D1D" FontSize="11" Padding="8,3" Margin="0,0,6,0" ToolTip="Stop this orchestration and close its run" />
+                        <Button Content="📂 Runs" Click="OpenRuns_Click" FontSize="11" Padding="8,3" ToolTip="Open the recorded orchestrator runs (INDEX.md and one REVIEW.md per run)" />
+                    </StackPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="🧠 Orchestrator:" Foreground="{StaticResource MutedBrush}" FontSize="11" />
+                    <TextBlock DockPanel.Dock="Top" x:Name="OrchestratorProgressLabel" Text="Not running" FontSize="11" Foreground="#A78BFA" TextWrapping="Wrap" MaxHeight="44" TextTrimming="CharacterEllipsis" Margin="0,1,0,8" />
+                    <TextBlock DockPanel.Dock="Top" Text="Claude quota (all orchestrations):" Foreground="{StaticResource MutedBrush}" FontSize="11" />
+                    <TextBlock DockPanel.Dock="Top" x:Name="ClaudeQuotaLabel" Text="Checking usage..." FontSize="11" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" Margin="0,1,0,8" />
+                    <TextBlock DockPanel.Dock="Top" Text="Next quota reset:" Foreground="{StaticResource MutedBrush}" FontSize="11" />
+                    <TextBlock DockPanel.Dock="Top" x:Name="ResetCountdownLabel" Text="None active" FontSize="11" FontWeight="SemiBold" Foreground="#F59E0B" Margin="0,1,0,0" />
+                </DockPanel>
 
-                <!-- SPLITTER -->
                 <Border Grid.Column="1" Width="1" Background="{StaticResource BorderBrush}" HorizontalAlignment="Center" />
 
-                <!-- LIVE LOG -->
+                <!-- Every message of the selected run's current worker session -->
                 <DockPanel Grid.Column="2">
-                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-                        <TextBlock Text="Orchestrator Activity Log" FontWeight="SemiBold" FontSize="12" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
-                        <Button DockPanel.Dock="Right" Content="Clear Log" Click="ClearLog_Click" FontSize="10" Padding="6,2" HorizontalAlignment="Right" />
-                    </DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="Conversation (current worker session)" FontWeight="SemiBold" FontSize="12" Foreground="{StaticResource TextBrush}" Height="26" Padding="0,5,0,0" Margin="0,0,0,4" />
+                    <Border Background="#070C14" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="6,6,2,2">
+                        <ScrollViewer x:Name="ConversationScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel Margin="0,0,4,0">
+                                <TextBlock x:Name="ConversationEmptyText" Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" />
+                                <ItemsControl x:Name="ConversationList" ItemTemplate="{StaticResource OrchestratorExchangeTemplate}" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+                </DockPanel>
 
+                <Border Grid.Column="3" Width="1" Background="{StaticResource BorderBrush}" HorizontalAlignment="Center" />
+
+                <!-- The selected run's activity log (or AgentHub's own notes when the idea has no orchestration) -->
+                <DockPanel Grid.Column="4">
+                    <DockPanel DockPanel.Dock="Top" Height="26" Margin="0,0,0,4">
+                        <Button DockPanel.Dock="Right" Content="Clear Log" Click="ClearLog_Click" FontSize="10" Padding="6,1" VerticalAlignment="Center" />
+                        <TextBlock x:Name="LogHeaderText" Text="Activity Log" FontWeight="SemiBold" FontSize="12" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                    </DockPanel>
                     <ListBox x:Name="LogListBox" Background="#070C14" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Foreground="{StaticResource TextBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="11">
                         <ListBox.ItemTemplate>
                             <DataTemplate>

@@ -19,9 +19,13 @@ namespace AgentHub;
 public partial class IdeasWindow : Window
 {
     private readonly IdeaService _ideaService;
-    private readonly OrchestratorEngine _orchestrator;
+    private readonly OrchestratorFleet _fleet;
     private readonly UsageService _usageService;
-    private readonly Func<TerminalPaneControl?> _paneProvider;
+    /// <summary>A pane for an engine's worker (null engine: a new one); null when every pane is busy.</summary>
+    private readonly Func<OrchestratorEngine?, TerminalPaneControl?> _paneProvider;
+    /// <summary>The orchestration shown in the monitor: the selected idea's, null when it has none.</summary>
+    private OrchestratorEngine? _shown;
+    private readonly ObservableCollection<OrchestratorExchange> _conversation = [];
     private readonly Action<string>? _openContextAction;
     private readonly Func<IReadOnlyList<RepositoryDefinition>> _repositories;
     private readonly Func<string, Task<RepositoryDefinition>>? _addRepository;
@@ -33,9 +37,9 @@ public partial class IdeasWindow : Window
 
     public IdeasWindow(
         IdeaService ideaService,
-        OrchestratorEngine orchestrator,
+        OrchestratorFleet orchestrators,
         UsageService usageService,
-        Func<TerminalPaneControl?> paneProvider,
+        Func<OrchestratorEngine?, TerminalPaneControl?> paneProvider,
         Action<string>? openContextAction = null,
         Func<IReadOnlyList<RepositoryDefinition>>? repositories = null,
         Func<string, Task<RepositoryDefinition>>? addRepository = null)
@@ -45,7 +49,7 @@ public partial class IdeasWindow : Window
         Controls.WindowPlacement.KeepOnScreen(this);
 
         _ideaService = ideaService;
-        _orchestrator = orchestrator;
+        _fleet = orchestrators;
         _usageService = usageService;
         _paneProvider = paneProvider;
         _openContextAction = openContextAction;
@@ -62,14 +66,13 @@ public partial class IdeasWindow : Window
         };
 
         IdeasList.ItemsSource = _ideas;
-        LogListBox.ItemsSource = _orchestrator.Logs;
+        LogListBox.ItemsSource = _fleet.Logs;
+        ConversationList.ItemsSource = _conversation;
 
-        _orchestrator.StateChanged += OnOrchestratorStateChanged;
-        _orchestrator.CurrentIdeaChanged += OnOrchestratorCurrentIdeaChanged;
-        _orchestrator.LogAdded += _ => ScrollLogToBottom();
-        _orchestrator.Steering.Changed += OnSteeringChanged;
-        _orchestrator.ProgressChanged += OnOrchestratorProgress;
-        _orchestrator.ThinkingChanged += OnOrchestratorThinking;
+        _fleet.StateChanged += OnFleetStateChanged;
+        _fleet.Changed += OnFleetChanged;
+        _fleet.LogAdded += OnFleetLog;
+        _fleet.Steering.Changed += OnSteeringChanged;
 
         _uiRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _uiRefreshTimer.Tick += (_, _) => RefreshStatusMetrics();
@@ -77,22 +80,22 @@ public partial class IdeasWindow : Window
 
         Loaded += async (_, _) =>
         {
-            try { await _orchestrator.RecoverAfterRestartAsync(); }
+            try { await _fleet.RecoverAfterRestartAsync(); }
             catch (Exception ex) { OrchestratorSubtext.Text = "Could not tidy up after the restart: " + ex.Message; }
             await ReloadWorkflowsAsync();
             await ReloadIdeasAsync();
             UpdateOrchestratorUi();
+            ShowSelectedRun();
             RefreshStatusMetrics();
         };
 
         Closed += (_, _) =>
         {
             _uiRefreshTimer.Stop();
-            _orchestrator.StateChanged -= OnOrchestratorStateChanged;
-            _orchestrator.CurrentIdeaChanged -= OnOrchestratorCurrentIdeaChanged;
-            _orchestrator.Steering.Changed -= OnSteeringChanged;
-            _orchestrator.ProgressChanged -= OnOrchestratorProgress;
-            _orchestrator.ThinkingChanged -= OnOrchestratorThinking;
+            _fleet.StateChanged -= OnFleetStateChanged;
+            _fleet.Changed -= OnFleetChanged;
+            _fleet.LogAdded -= OnFleetLog;
+            _fleet.Steering.Changed -= OnSteeringChanged;
         };
     }
 
@@ -157,6 +160,7 @@ public partial class IdeasWindow : Window
         }
         _selectedIdea = IdeasList.SelectedItem as ProjectIdea;
         ShowEditor(_selectedIdea != null);
+        ShowSelectedRun();
         if (_selectedIdea == null)
         {
             EditTitleBox.Text = string.Empty;
@@ -188,7 +192,7 @@ public partial class IdeasWindow : Window
             EditAgentCombo.SelectedIndex = EditAgentCombo.Items.Add(new ComboBoxItem { Content = _selectedIdea.AgentCommand });
 
         SelectWorkflow(_selectedIdea.WorkflowId);
-        LoadHandoffPreview(_selectedIdea.TargetDirectory);
+        LoadHandoffPreview(HandoffFolder(_selectedIdea));
         _ = LoadSteerNotesAsync();
     }
 
@@ -196,7 +200,7 @@ public partial class IdeasWindow : Window
 
     private async Task ReloadWorkflowsAsync()
     {
-        try { _workflows = _orchestrator.Workflows is { } c ? await c.ListAsync() : []; }
+        try { _workflows = _fleet.Workflows is { } c ? await c.ListAsync() : []; }
         catch (Exception ex) { _workflows = []; OrchestratorSubtext.Text = "Could not read the workflow catalogue: " + ex.Message; }
         EditWorkflowCombo.ItemsSource = _workflows;
         if (_selectedIdea != null) SelectWorkflow(_selectedIdea.WorkflowId);
@@ -207,7 +211,7 @@ public partial class IdeasWindow : Window
 
     private async void ManageWorkflows_Click(object sender, RoutedEventArgs e)
     {
-        if (_orchestrator.Workflows is not { } catalogue) return;
+        if (_fleet.Workflows is not { } catalogue) return;
         var current = (EditWorkflowCombo.SelectedItem as OrchestratorWorkflow)?.Id ?? _selectedIdea?.WorkflowId;
         var window = new WorkflowsWindow(catalogue, current, canUse: _selectedIdea != null) { Owner = this };
         var used = window.ShowDialog() == true;
@@ -235,7 +239,7 @@ public partial class IdeasWindow : Window
     private async Task LoadSteerNotesAsync()
     {
         var idea = _selectedIdea;
-        SteerNotesList.ItemsSource = idea == null ? null : await _orchestrator.Steering.GetForIdeaAsync(idea.Id);
+        SteerNotesList.ItemsSource = idea == null ? null : await _fleet.Steering.GetForIdeaAsync(idea.Id);
     }
 
     private void OnSteeringChanged(string ideaId) =>
@@ -243,7 +247,7 @@ public partial class IdeasWindow : Window
         {
             if (_selectedIdea?.Id != ideaId) return;
             await LoadSteerNotesAsync();
-            LoadHandoffPreview(_selectedIdea?.TargetDirectory);
+            LoadHandoffPreview(_selectedIdea is { } shown ? HandoffFolder(shown) : null);
         });
 
     private void QueueSteer_Click(object sender, RoutedEventArgs e) => _ = SteerAsync(sendNow: false);
@@ -269,7 +273,7 @@ public partial class IdeasWindow : Window
         QueueSteerBtn.IsEnabled = SendSteerNowBtn.IsEnabled = false;
         try
         {
-            await _orchestrator.SteerAsync(idea, text, sendNow);
+            await _fleet.SteerAsync(idea, text, sendNow);
             SteerBox.Clear();
         }
         catch (Exception ex)
@@ -280,7 +284,7 @@ public partial class IdeasWindow : Window
         {
             QueueSteerBtn.IsEnabled = SendSteerNowBtn.IsEnabled = true;
             await LoadSteerNotesAsync();
-            LoadHandoffPreview(idea.TargetDirectory);
+            LoadHandoffPreview(HandoffFolder(idea));
         }
     }
 
@@ -288,7 +292,7 @@ public partial class IdeasWindow : Window
     {
         if (sender is not Button { Tag: SteeringNote note }) return;
         // The handoff bullet stays: it is the record of what was asked, and the agent may already have read it.
-        if (!await _orchestrator.Steering.RemovePendingAsync(note.Id))
+        if (!await _fleet.Steering.RemovePendingAsync(note.Id))
             MessageBox.Show(this, "That note was already delivered.", "Steer", MessageBoxButton.OK, MessageBoxImage.Information);
         await LoadSteerNotesAsync();
     }
@@ -455,42 +459,62 @@ public partial class IdeasWindow : Window
             return;
         }
 
-        var pane = _paneProvider();
-        if (pane == null)
+        // Its own orchestrator, beside the others: never suspends another idea's run (Daniel 2026-11-06).
+        if (_selectedIdea?.Id != idea.Id) IdeasList.SelectedItem = _ideas.FirstOrDefault(i => i.Id == idea.Id);
+        try { await _fleet.BuildNowAsync(idea, _paneProvider); }
+        catch (InvalidOperationException ex)
         {
-            MessageBox.Show(this, "Every Cockpit pane has a running session. Close one (or end its session) so the builder gets a pane of its own.", "Cockpit", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, ex.Message, "Cockpit", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-
-        await _orchestrator.BuildIdeaImmediatelyAsync(idea, pane);
         UpdateOrchestratorUi();
+        ShowSelectedRun();
     }
 
+    /// <summary>The Auto-Builder lane: one more orchestrator, working through the queue one idea after another.</summary>
     private async void ToggleOrchestrator_Click(object sender, RoutedEventArgs e)
     {
-        if (_orchestrator.State is OrchestratorState.Building or OrchestratorState.HandoffPending or OrchestratorState.WaitingForReset)
-        {
-            _orchestrator.Pause();
-        }
-        else if (_orchestrator.State == OrchestratorState.Paused)
-        {
-            await SaveEditorAsync();
-            await _orchestrator.ResumeAsync();
-        }
+        var auto = _fleet.AutoBuilder;
+        if (auto?.State is OrchestratorState.Building or OrchestratorState.HandoffPending or OrchestratorState.WaitingForReset)
+            auto.Pause();
         else
         {
-            var pane = _paneProvider();
-            if (pane == null)
+            await SaveEditorAsync();
+            try { await _fleet.StartAutoBuilderAsync(_paneProvider); }
+            catch (InvalidOperationException ex)
             {
-                MessageBox.Show(this, "Every Cockpit pane has a running session. Close one (or end its session) so the builder gets a pane of its own.", "Cockpit", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, ex.Message, "Cockpit", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
-
-            await SaveEditorAsync();
-            await _orchestrator.StartAsync(pane);
         }
-
         UpdateOrchestratorUi();
+        ShowSelectedRun();
+    }
+
+    /// <summary>Pause or Resume the selected idea's orchestration only.</summary>
+    private async void SelectedPause_Click(object sender, RoutedEventArgs e)
+    {
+        if (_shown is not { } engine || engine.State == OrchestratorState.Idle) return;
+        if (engine.State == OrchestratorState.Paused)
+        {
+            await SaveEditorAsync();
+            await engine.ResumeAsync();
+        }
+        else engine.Pause();
+        UpdateOrchestratorUi();
+        ShowSelectedRun();
+    }
+
+    /// <summary>Stops the selected idea's orchestration and closes its run; the others carry on.</summary>
+    private void SelectedStop_Click(object sender, RoutedEventArgs e)
+    {
+        if (_shown is not { } engine || engine.State == OrchestratorState.Idle) return;
+        var title = engine.CurrentIdea?.Title ?? "this idea";
+        if (MessageBox.Show(this, $"Stop the orchestration of \"{title}\"? Its run is closed; its worker is left as it is. The other orchestrations carry on.",
+                "Stop", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        engine.Stop();
+        UpdateOrchestratorUi();
+        ShowSelectedRun();
     }
 
     private async void SyncGitHub_Click(object sender, RoutedEventArgs e)
@@ -503,7 +527,7 @@ public partial class IdeasWindow : Window
 
         if (result != MessageBoxResult.Yes) return;
 
-        var (succeeded, msg) = await _orchestrator.SyncAgentHubFromGitHubAsync(progress: text =>
+        var (succeeded, msg) = await _fleet.SyncAgentHubFromGitHubAsync(progress: text =>
         {
             Dispatcher.Invoke(() => OrchestratorSubtext.Text = text);
         });
@@ -639,24 +663,92 @@ public partial class IdeasWindow : Window
         _openContextAction?.Invoke(_selectedIdea.TargetDirectory);
     }
 
-    private void ClearLog_Click(object sender, RoutedEventArgs e) => _orchestrator.Logs.Clear();
+    private void ClearLog_Click(object sender, RoutedEventArgs e) => (_shown?.Logs ?? _fleet.Logs).Clear();
 
-    private void OnOrchestratorProgress(string progress) =>
-        Dispatcher.InvokeAsync(() => { if (!_orchestrator.IsThinking) OrchestratorProgressLabel.Text = progress; });
+    /// <summary>The folder whose handoff the editor previews: the run's worktree while it has one, else the repository.</summary>
+    private string? HandoffFolder(ProjectIdea idea) => _fleet.EngineFor(idea.Id)?.WorkingDirectory ?? idea.TargetDirectory;
 
-    private void OnOrchestratorThinking(bool thinking) =>
-        Dispatcher.InvokeAsync(() => OrchestratorProgressLabel.Text = thinking
-            ? "thinking…" + (_orchestrator.LatestProgress is { } p ? "  (last: " + p + ")" : "")
-            : _orchestrator.LatestProgress ?? "Waiting for the builder");
+    private void OnFleetStateChanged() =>
+        Dispatcher.InvokeAsync(() =>
+        {
+            UpdateOrchestratorUi();
+            ShowSelectedRun();
+            _ = ReloadIdeasAsync();
+        });
+
+    private void OnFleetChanged() => Dispatcher.InvokeAsync(ShowSelectedRun);
+
+    private void OnFleetLog(OrchestratorEngine engine, OrchestratorLog entry)
+    {
+        if (engine == _shown) ScrollLogToBottom();
+    }
+
+    /// <summary>
+    /// The monitor shows the orchestration of the idea selected on the left (Daniel 2026-11-06): its state, folder, controls,
+    /// progress, conversation and log. An idea with none shows AgentHub's own notes in the log.
+    /// </summary>
+    private void ShowSelectedRun()
+    {
+        var engine = _selectedIdea is { } idea ? _fleet.EngineFor(idea.Id) : null;
+        if (engine != _shown)
+        {
+            _shown = engine;
+            LogListBox.ItemsSource = engine?.Logs ?? _fleet.Logs;
+            _conversation.Clear();
+            ScrollLogToBottom();
+        }
+
+        var state = engine?.State ?? OrchestratorState.Idle;
+        var running = state != OrchestratorState.Idle;
+        var (label, background, foreground) = state switch
+        {
+            OrchestratorState.Paused => ("PAUSED", Color.FromRgb(107, 114, 128), Colors.White),
+            OrchestratorState.WaitingForReset => ("WAITING FOR RESET", Color.FromRgb(245, 158, 11), Colors.Black),
+            OrchestratorState.HandoffPending => ("HANDING OFF", Color.FromRgb(139, 92, 246), Colors.White),
+            OrchestratorState.Building when engine!.IsThinking => ("THINKING…", Color.FromRgb(124, 58, 237), Colors.White),
+            OrchestratorState.Building => ("DRIVING", Color.FromRgb(16, 185, 129), Colors.White),
+            _ => ("NOT RUNNING", Color.FromRgb(30, 41, 59), Color.FromRgb(148, 163, 184)),
+        };
+        SelectedStateText.Text = label;
+        SelectedStateText.Foreground = new SolidColorBrush(foreground);
+        SelectedStateChip.Background = new SolidColorBrush(background);
+
+        SelectedIdeaLabel.Text = _selectedIdea == null ? "No idea selected"
+            : _selectedIdea.Title + (running && engine!.WorkerSession > 0 ? $" · worker #{engine.WorkerSession}" : "")
+              + (engine?.FollowsQueue == true && running ? " · Auto-Builder" : "");
+        SelectedFolderLabel.Text = engine?.WorkingDirectory is { } wd
+            ? engine.WorktreeBranch is { } branch ? $"Worktree {wd} (branch {branch})" : wd
+            : _selectedIdea?.TargetDirectory ?? "";
+        SelectedFolderLabel.ToolTip = string.IsNullOrEmpty(SelectedFolderLabel.Text) ? null : SelectedFolderLabel.Text;
+
+        SelectedPauseBtn.IsEnabled = SelectedStopBtn.IsEnabled = running;
+        SelectedPauseBtn.Content = state == OrchestratorState.Paused ? "▶ Resume" : "⏸ Pause";
+
+        OrchestratorProgressLabel.Text = !running ? (engine?.LatestProgress is { } last ? "Not running · last: " + last : "Not running")
+            : engine!.IsThinking ? "thinking…" + (engine.LatestProgress is { } p ? "  (last: " + p + ")" : "")
+            : engine.LatestProgress ?? "Waiting for the builder";
+        OrchestratorProgressLabel.ToolTip = OrchestratorProgressLabel.Text;
+
+        var next = engine?.Conversation ?? [];
+        var scroll = ConversationScroll;
+        var following = scroll.VerticalOffset >= scroll.ScrollableHeight - 8 || _conversation.Count == 0
+            || next.Count == 0 || !ReferenceEquals(_conversation[0], next[0]);
+        if (OrchestratorBoxView.Sync(_conversation, next) && following)
+            Dispatcher.BeginInvoke(scroll.ScrollToEnd, DispatcherPriority.Loaded);
+        ConversationEmptyText.Text = engine == null ? "This idea has no orchestration yet: ▶ Build Now starts one beside any others."
+            : next.Count == 0 ? OrchestratorBoxView.NothingYet : "";
+        ConversationEmptyText.Visibility = next.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        LogHeaderText.Text = engine == null ? "Activity Log (AgentHub)" : "Activity Log";
+    }
 
     /// <summary>Opens the run archive: the repository branch's INDEX.md when it exists, else the local runs folder.</summary>
     private void OpenRuns_Click(object sender, RoutedEventArgs e)
     {
-        var index = _orchestrator.Archive is { } p ? Path.Combine(p.RunsPath, "INDEX.md") : null;
-        var target = index != null && File.Exists(index) ? index : _orchestrator.RunsRoot;
+        var index = _fleet.Archive is { } p ? Path.Combine(p.RunsPath, "INDEX.md") : null;
+        var target = index != null && File.Exists(index) ? index : _fleet.RunsRoot;
         try
         {
-            Directory.CreateDirectory(_orchestrator.RunsRoot);
+            Directory.CreateDirectory(_fleet.RunsRoot);
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(target) { UseShellExecute = true });
         }
         catch (Exception ex)
@@ -665,68 +757,28 @@ public partial class IdeasWindow : Window
         }
     }
 
-    private void OnOrchestratorStateChanged(OrchestratorState state) =>
-        Dispatcher.Invoke(() =>
-        {
-            UpdateOrchestratorUi();
-            _ = ReloadIdeasAsync();
-        });
-
-    private void OnOrchestratorCurrentIdeaChanged(ProjectIdea? idea) =>
-        Dispatcher.Invoke(() =>
-        {
-            ActiveIdeaLabel.Text = idea != null ? $"{idea.Title} (Session #{idea.HandoffCount + 1})" : "None (Idle)";
-            _ = ReloadIdeasAsync();
-        });
-
+    /// <summary>The top bar: how many orchestrations are going, and the Auto-Builder lane's button.</summary>
     private void UpdateOrchestratorUi()
     {
-        switch (_orchestrator.State)
+        var active = _fleet.Active;
+        var paused = active.Count(e => e.State == OrchestratorState.Paused);
+        var going = active.Count - paused;
+        OrchestratorStatusText.Text = active.Count == 0 ? "IDLE"
+            : going == 0 ? $"{paused} PAUSED"
+            : $"{going} RUNNING" + (paused > 0 ? $" · {paused} PAUSED" : "");
+        OrchestratorStatusBadge.Background = new SolidColorBrush(active.Count == 0 ? Color.FromRgb(30, 41, 59)
+            : going == 0 ? Color.FromRgb(107, 114, 128) : Color.FromRgb(16, 185, 129));
+        OrchestratorStatusText.Foreground = active.Count == 0 ? new SolidColorBrush(Color.FromRgb(148, 163, 184)) : Brushes.White;
+
+        var auto = _fleet.AutoBuilder?.State ?? OrchestratorState.Idle;
+        var (text, colour) = auto switch
         {
-            case OrchestratorState.Building:
-                OrchestratorStatusBadge.Background = new SolidColorBrush(Color.FromRgb(16, 185, 129)); // Green
-                OrchestratorStatusText.Text = "BUILDING";
-                OrchestratorStatusText.Foreground = Brushes.White;
-                ToggleOrchestratorBtn.Content = "⏸ Pause Auto-Builder";
-                ToggleOrchestratorBtn.Background = new SolidColorBrush(Color.FromRgb(245, 158, 11)); // Amber
-                break;
-
-            case OrchestratorState.HandoffPending:
-                OrchestratorStatusBadge.Background = new SolidColorBrush(Color.FromRgb(139, 92, 246)); // Purple
-                OrchestratorStatusText.Text = "HANDOFF CYCLE";
-                OrchestratorStatusText.Foreground = Brushes.White;
-                ToggleOrchestratorBtn.Content = "⏸ Pause Auto-Builder";
-                ToggleOrchestratorBtn.Background = new SolidColorBrush(Color.FromRgb(245, 158, 11));
-                break;
-
-            case OrchestratorState.WaitingForReset:
-                OrchestratorStatusBadge.Background = new SolidColorBrush(Color.FromRgb(245, 158, 11)); // Amber
-                OrchestratorStatusText.Text = "WAITING FOR RESET";
-                OrchestratorStatusText.Foreground = Brushes.Black;
-                ToggleOrchestratorBtn.Content = "⏸ Pause Auto-Builder";
-                ToggleOrchestratorBtn.Background = new SolidColorBrush(Color.FromRgb(245, 158, 11));
-                break;
-
-            case OrchestratorState.Paused:
-                OrchestratorStatusBadge.Background = new SolidColorBrush(Color.FromRgb(107, 114, 128)); // Gray
-                OrchestratorStatusText.Text = "PAUSED";
-                OrchestratorStatusText.Foreground = Brushes.White;
-                ToggleOrchestratorBtn.Content = "▶ Resume Auto-Builder";
-                ToggleOrchestratorBtn.Background = new SolidColorBrush(Color.FromRgb(16, 185, 129));
-                break;
-
-            default:
-                OrchestratorStatusBadge.Background = new SolidColorBrush(Color.FromRgb(30, 41, 59)); // Slate
-                OrchestratorStatusText.Text = "IDLE";
-                OrchestratorStatusText.Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184));
-                ToggleOrchestratorBtn.Content = "▶ Start Auto-Builder (Work Mode)";
-                ToggleOrchestratorBtn.Background = new SolidColorBrush(Color.FromRgb(16, 185, 129));
-                break;
-        }
-
-        ActiveIdeaLabel.Text = _orchestrator.CurrentIdea != null
-            ? $"{_orchestrator.CurrentIdea.Title} (Session #{_orchestrator.CurrentIdea.HandoffCount + 1})"
-            : "None (Idle)";
+            OrchestratorState.Building or OrchestratorState.HandoffPending or OrchestratorState.WaitingForReset => ("⏸ Pause Auto-Builder", Color.FromRgb(245, 158, 11)),
+            OrchestratorState.Paused => ("▶ Resume Auto-Builder", Color.FromRgb(16, 185, 129)),
+            _ => ("▶ Start Auto-Builder (Work Mode)", Color.FromRgb(16, 185, 129)),
+        };
+        ToggleOrchestratorBtn.Content = text;
+        ToggleOrchestratorBtn.Background = new SolidColorBrush(colour);
     }
 
     private async void RefreshStatusMetrics()
@@ -752,17 +804,14 @@ public partial class IdeasWindow : Window
                 ClaudeQuotaLabel.Text = snapshot.Error ?? "Claude CLI not reporting live usage.";
             }
 
-            if (_orchestrator.NextResetTime.HasValue)
+            // One Claude account: the selected run's reset, else any run's.
+            var reset = _shown?.NextResetTime ?? _fleet.Active.Select(e => e.NextResetTime).FirstOrDefault(t => t.HasValue);
+            if (reset.HasValue)
             {
-                var duration = _orchestrator.NextResetTime.Value - DateTimeOffset.Now;
-                if (duration.TotalSeconds > 0)
-                {
-                    ResetCountdownLabel.Text = $"Resets at {_orchestrator.NextResetTime:t} (in {(int)duration.TotalHours}h {duration.Minutes}m {duration.Seconds}s)";
-                }
-                else
-                {
-                    ResetCountdownLabel.Text = "Reset time reached. Resuming...";
-                }
+                var duration = reset.Value - DateTimeOffset.Now;
+                ResetCountdownLabel.Text = duration.TotalSeconds > 0
+                    ? $"Resets at {reset:t} (in {(int)duration.TotalHours}h {duration.Minutes}m {duration.Seconds}s)"
+                    : "Reset time reached. Resuming...";
             }
             else
             {
@@ -774,7 +823,7 @@ public partial class IdeasWindow : Window
 
     private void ScrollLogToBottom()
     {
-        Dispatcher.Invoke(() =>
+        Dispatcher.InvokeAsync(() =>
         {
             if (LogListBox.Items.Count > 0)
             {

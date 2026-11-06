@@ -265,8 +265,12 @@ internal sealed class ScriptedWorker : IBuildWorker
     public event Action? Exited;
     public event Action<ContextReading?>? ContextChanged;
 
+    /// <summary>The folder the last session started in.</summary>
+    public string? StartedIn { get; private set; }
+
     public void Start(string commandLine, string workingDirectory, string title, string sessionName)
     {
+        StartedIn = workingDirectory;
         Starts++;
         IsRunning = true;
         IsAwaitingInput = true;

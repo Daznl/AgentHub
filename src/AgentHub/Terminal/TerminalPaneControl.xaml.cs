@@ -187,28 +187,18 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     private readonly ObservableCollection<OrchestratorExchange> _conversation = [];
 
-    /// <summary>
-    /// The engine replaces its list on every change, so only the new tail is added here; a list that does not continue
-    /// the shown one (a new worker session) starts the box over. Follows the newest message unless Daniel scrolled up.
-    /// </summary>
+    /// <summary>Shows the run's conversation; follows the newest message unless Daniel scrolled up.</summary>
     private void ShowConversation(IReadOnlyList<OrchestratorExchange> next)
     {
         if (OrchestratorConversation.ItemsSource is null) OrchestratorConversation.ItemsSource = _conversation;
         var scroll = OrchestratorConversationScroll;
-        var following = scroll.VerticalOffset >= scroll.ScrollableHeight - 8;
-
-        var continues = next.Count >= _conversation.Count && _conversation.Select((x, i) => ReferenceEquals(x, next[i])).All(same => same);
-        if (!continues)
-        {
-            _conversation.Clear();
-            following = true;
-        }
-        var added = next.Count > _conversation.Count;
-        foreach (var exchange in next.Skip(_conversation.Count)) _conversation.Add(exchange);
+        var following = scroll.VerticalOffset >= scroll.ScrollableHeight - 8
+            || _conversation.Count > 0 && (next.Count == 0 || !ReferenceEquals(_conversation[0], next[0])); // a new session starts at its end
+        var changed = OrchestratorBoxView.Sync(_conversation, next);
 
         OrchestratorNothingYet.Text = OrchestratorBoxView.NothingYet;
         OrchestratorNothingYet.Visibility = next.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (added && following)
+        if (changed && following)
             Dispatcher.BeginInvoke(scroll.ScrollToEnd, System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
