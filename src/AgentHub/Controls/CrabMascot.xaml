@@ -1,0 +1,11 @@
+<UserControl x:Class="AgentHub.Controls.CrabMascot"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Focusable="False">
+    <!-- The canvas sizes to nothing, so the crab never moves the header layout; frames may poke above it while hopping -->
+    <Canvas x:Name="Stage" ClipToBounds="False" UseLayoutRounding="True">
+        <Image x:Name="Sprite" Stretch="Fill" Cursor="Hand" SnapsToDevicePixels="True"
+               RenderOptions.BitmapScalingMode="NearestNeighbor" RenderOptions.EdgeMode="Aliased"
+               AutomationProperties.Name="AgentHub crab" MouseLeftButtonUp="Sprite_MouseLeftButtonUp" />
+    </Canvas>
+</UserControl>
