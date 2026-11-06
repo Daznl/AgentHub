@@ -19,6 +19,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The AgentHub helper's knowledge (Services/Help/AppHelp.cs): packed in, so its answers always match this build -->
+    <EmbeddedResource Include="..\..\README.md" LogicalName="AgentHub.Docs.README.md" />
+    <EmbeddedResource Include="..\..\docs\*.md" LogicalName="AgentHub.Docs.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="System.IO" />
   </ItemGroup>
 

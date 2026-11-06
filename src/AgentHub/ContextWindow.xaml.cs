@@ -653,53 +653,6 @@ public partial class ContextWindow : Window
     }
 }
 
-/// <summary>One line of the context helper's conversation: the user's request (right) or the crab's reply (left).</summary>
-public sealed class HelperMessage : INotifyPropertyChanged
-{
-    private static readonly SolidColorBrush UserBack = Freeze("#12324A"), UserBorder = Freeze("#24506B"), UserFore = Freeze("#E8F1FB");
-    private static readonly SolidColorBrush CrabBack = Freeze("#1E140E"), CrabBorder = Freeze("#4A2A18"), CrabFore = Freeze("#EADFD6");
-    private static readonly SolidColorBrush ErrorBack = Freeze("#2A1218"), ErrorBorder = Freeze("#5B2230"), ErrorFore = Freeze("#FCA5A5");
-
-    private string _text = "";
-    private bool _isError;
-
-    private HelperMessage(bool fromUser) => FromUser = fromUser;
-
-    public static HelperMessage User(string text) => new(true) { Text = text };
-    public static HelperMessage Crab(string text) => new(false) { Text = text };
-
-    public bool FromUser { get; }
-
-    public string Text
-    {
-        get => _text;
-        set { _text = value; Changed(nameof(Text)); }
-    }
-
-    public bool IsError
-    {
-        get => _isError;
-        set { _isError = value; Changed(nameof(Background)); Changed(nameof(Border)); Changed(nameof(Foreground)); }
-    }
-
-    public HorizontalAlignment Alignment => FromUser ? HorizontalAlignment.Right : HorizontalAlignment.Left;
-    public Thickness Indent => FromUser ? new Thickness(36, 0, 0, 10) : new Thickness(0, 0, 0, 10);
-    public Visibility CrabVisibility => FromUser ? Visibility.Collapsed : Visibility.Visible;
-    public SolidColorBrush Background => FromUser ? UserBack : IsError ? ErrorBack : CrabBack;
-    public SolidColorBrush Border => FromUser ? UserBorder : IsError ? ErrorBorder : CrabBorder;
-    public SolidColorBrush Foreground => FromUser ? UserFore : IsError ? ErrorFore : CrabFore;
-
-    public event PropertyChangedEventHandler? PropertyChanged;
-    private void Changed(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-
-    private static SolidColorBrush Freeze(string hex)
-    {
-        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
-        brush.Freeze();
-        return brush;
-    }
-}
-
 /// <summary>One suggested change in the review list: the lines it removes and adds, and whether the user keeps it.</summary>
 public sealed class ReviewHunk
 {
