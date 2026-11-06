@@ -46,7 +46,11 @@ public sealed class AppSettings
     /// </summary>
     public bool AnimatedBackground { get; set; } = true;
 
-    /// <summary>The pixel-art crab beside the header logo. It only moves while <see cref="AnimatedBackground"/> and Windows animations are on.</summary>
+    /// <summary>
+    /// Whether the pixel-art crab at the top right of the header (the AgentHub helper's button) wanders and does tricks.
+    /// False keeps it still at home; it is always shown. It also stays still while <see cref="AnimatedBackground"/> or
+    /// Windows animations are off.
+    /// </summary>
     public bool CrabMascot { get; set; } = true;
 
     /// <summary>Whether the usage section above the terminals is shown. Toggled by the 📊 Usage header button.</summary>

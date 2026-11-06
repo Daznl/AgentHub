@@ -89,12 +89,14 @@ public partial class MainWindow : Window
         AgentCombo.SelectionChanged += (_, _) => UpdateAgentPreview();
         AppHelper.ClaudeCommand = () => ClaudeCommand;
         AppHelper.AppState = DescribeAppState;
-        AppHelper.CloseRequested += () => AppHelperBtn.IsChecked = false;
+        AppHelper.CloseRequested += () => SetHelperOpen(false);
+        Mascot.Poked += () => SetHelperOpen(!Mascot.IsActive);
     }
 
-    private void AppHelperBtn_Toggled(object sender, RoutedEventArgs e)
+    /// <summary>The crab in the header opens and closes the helper pane, and glows while it is open.</summary>
+    private void SetHelperOpen(bool open)
     {
-        var open = AppHelperBtn.IsChecked == true;
+        Mascot.IsActive = open;
         AppHelper.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
         if (open) AppHelper.FocusInput();
     }
@@ -125,8 +127,7 @@ public partial class MainWindow : Window
         Activate();
         _settings = await _settingsService.LoadAsync();
         Backdrop.SetAnimated(_settings.AnimatedBackground);
-        Mascot.Visibility = _settings.CrabMascot ? Visibility.Visible : Visibility.Collapsed;
-        Mascot.SetAnimated(_settings.AnimatedBackground);
+        Mascot.SetAnimated(_settings.AnimatedBackground && _settings.CrabMascot);  // always shown: it is the helper's button
         ApplyUsagePanelVisibility();
 
         if (_settings.Repositories.Count == 0)
