@@ -133,7 +133,8 @@ public static class InstructionReview
 
         foreach (var edit in edits)
         {
-            var range = Locate(lines, edit);
+            var range = Locate(lines, edit) is { } found ? TrimUnchanged(lines, found) : ((int First, int Last, string[] NewLines)?)null;
+            if (range is { } same && same.First > same.Last && same.NewLines.Length == 0) continue; // changes nothing
             if (range is not { } r || placed.Any(p => r.First <= p.Last && p.First <= r.Last))
             {
                 unplaced.Add(edit);
@@ -142,8 +143,9 @@ public static class InstructionReview
             placed.Add((r.First, r.Last, r.NewLines, edit.Why));
         }
 
-        // A stable order: several appends share a position and must keep the order they were given in, matching Reasons.
-        var ordered = placed.OrderBy(p => p.First).ToList();
+        // A stable order: several appends share a position and must keep the order they were given in, matching Reasons;
+        // an insertion goes before a change that starts on the same line.
+        var ordered = placed.OrderBy(p => p.First).ThenBy(p => p.Last >= p.First).ToList();
         var segments = new List<DiffSegment>();
         var next = 0;
         foreach (var (first, last, newLines, _) in ordered)
@@ -154,6 +156,20 @@ public static class InstructionReview
         }
         if (next < lines.Length) segments.Add(Same(lines, next, lines.Length - 1));
         return new ReviewPlan(segments, ordered.Select(p => p.Why).ToList(), unplaced);
+    }
+
+    /// <summary>
+    /// Drops lines an edit keeps as they are from both ends of its passage, so an addition anchored on an existing line
+    /// ("start" repeated as the first line of "replace") shows as added lines only, not that line removed and re-added.
+    /// </summary>
+    private static (int First, int Last, string[] NewLines) TrimUnchanged(string[] lines, (int First, int Last, string[] NewLines) range)
+    {
+        var (first, last, add) = range;
+        var head = 0;
+        while (first + head <= last && head < add.Length && lines[first + head] == add[head]) head++;
+        var tail = 0;
+        while (last - tail >= first + head && tail < add.Length - head && lines[last - tail] == add[^(tail + 1)]) tail++;
+        return (first + head, last - tail, add[head..(add.Length - tail)]);
     }
 
     private static DiffSegment Same(string[] lines, int first, int last)

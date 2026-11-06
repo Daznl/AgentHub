@@ -152,7 +152,7 @@ public partial class ContextWindow : Window
         FilePathText.ToolTip = $"{file.Path}\n{file.Note}";
         RefreshState();
         StatusText.Text = status ?? file.Note;
-        HelperTarget.Text = $"Suggests edits to {file.Label} · {(Folder is null ? "user-wide" : "this repository")}";
+        HelperTarget.Text = $"Suggests edits to {Path.GetFileName(file.Path)} · {(Folder is null ? "user-wide" : "this repository")}";
         SelectTab(file);
         Editor.Focus();
     }
@@ -203,7 +203,7 @@ public partial class ContextWindow : Window
         if (outcome == SaveOutcome.ChangedOnDisk)
         {
             var choice = MessageBox.Show(this,
-                $"{file.Label} was changed outside AgentHub after you opened it:\n{file.Path}\n\n" +
+                $"{Path.GetFileName(file.Path)} was changed outside AgentHub after you opened it:\n{file.Path}\n\n" +
                 "Yes: replace it with your version (the other change is lost).\n" +
                 "No: discard your edits and load the file as it is now.\n" +
                 "Cancel: keep editing without saving.",
@@ -264,7 +264,7 @@ public partial class ContextWindow : Window
         _reviewCts = cts;
         SetReviewing(true);
         var started = DateTime.Now;
-        void Tick() => StatusText.Text = $"Reviewing {file.Label} with Claude Code… {(int)(DateTime.Now - started).TotalSeconds} s. Small files take under a minute, large ones a few minutes.";
+        void Tick() => StatusText.Text = $"Reviewing {Path.GetFileName(file.Path)} with Claude Code… {(int)(DateTime.Now - started).TotalSeconds} s. Small files take under a minute, large ones a few minutes.";
         var ticker = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         ticker.Tick += (_, _) => Tick();
         Tick();
@@ -328,8 +328,8 @@ public partial class ContextWindow : Window
         _reviewHunks = hunks;
         _reviewFromHelper = fromHelper;
         ReviewHeading.Text = fromHelper
-            ? $"Suggested for your request: {hunks.Count} change{(hunks.Count == 1 ? "" : "s")} to {file.Label}"
-            : $"Claude Code suggests {hunks.Count} change{(hunks.Count == 1 ? "" : "s")} to {file.Label}";
+            ? $"Suggested for your request: {hunks.Count} change{(hunks.Count == 1 ? "" : "s")} to {Path.GetFileName(file.Path)}"
+            : $"Claude Code suggests {hunks.Count} change{(hunks.Count == 1 ? "" : "s")} to {Path.GetFileName(file.Path)}";
         ReviewSummary.Text = suggestion.Summary;
         ReviewSummary.Visibility = suggestion.Summary.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         ReviewUnplaced.Text = plan.Unplaced.Count == 0 ? "" :
@@ -387,11 +387,33 @@ public partial class ContextWindow : Window
         var chosen = _reviewHunks.Count(h => h.Accepted);
         var merged = LineDiff.Merge(segments, i => _reviewHunks[i].Accepted);
         var fromHelper = _reviewFromHelper;
+        var (at, length) = FirstAppliedText(segments, i => _reviewHunks[i].Accepted);
         CloseReview();
         Editor.Text = merged;
         Editor.Focus();
+        // Select the first applied change and bring it into view once the editor is laid out again.
+        Dispatcher.BeginInvoke(() =>
+        {
+            Editor.Select(Math.Min(at, Editor.Text.Length), length);
+            Editor.ScrollToLine(Math.Max(0, Editor.GetLineIndexFromCharacterIndex(Editor.SelectionStart) - 3));
+        }, System.Windows.Threading.DispatcherPriority.Loaded);
         StatusText.Text = $"Applied {chosen} of {_reviewHunks.Count} suggested change{(_reviewHunks.Count == 1 ? "" : "s")}. Check the editor, then Save.";
-        if (fromHelper) Say($"Put {chosen} of {_reviewHunks.Count} into the editor. Press Save (Ctrl+S) to write {_current?.Label}, or ask for more.");
+        if (fromHelper) Say($"Put {chosen} of {_reviewHunks.Count} into the editor. Press Save (Ctrl+S) to write {Path.GetFileName(_current?.Path)}, or ask for more.");
+    }
+
+    /// <summary>Where the first accepted change's new lines start in the merged text (CRLF-joined, as Merge writes it), and their length.</summary>
+    private static (int At, int Length) FirstAppliedText(IReadOnlyList<DiffSegment> segments, Func<int, bool> accept)
+    {
+        var at = 0;
+        var change = 0;
+        foreach (var segment in segments)
+        {
+            var kept = segment.IsChange && accept(change++);
+            var lines = segment.IsChange && !kept ? segment.OldLines : segment.NewLines;
+            if (kept) return (at, Math.Max(0, string.Join("\r\n", lines).Length));
+            at += lines.Sum(l => l.Length + 2);
+        }
+        return (0, 0);
     }
 
     private void DiscardReview_Click(object sender, RoutedEventArgs e)
@@ -424,7 +446,7 @@ public partial class ContextWindow : Window
     private bool _reviewFromHelper;
     private double _helperGrewBy;
 
-    private void Crab_Click(object sender, RoutedEventArgs e) => SetHelperOpen(CrabBtn.IsChecked == true);
+    private void Crab_Toggled(object sender, RoutedEventArgs e) => SetHelperOpen(CrabBtn.IsChecked == true);
 
     private void CloseHelper_Click(object sender, RoutedEventArgs e) => SetHelperOpen(false);
 
@@ -484,10 +506,10 @@ public partial class ContextWindow : Window
         {
             HelperSendBtn.Content = "■ Cancel";
             HelperSendBtn.IsEnabled = true;
-            HelperHint.Text = "Working on it. You can type your next request.";
+            HelperHint.Text = "Working on it…";
             return;
         }
-        var blocked = ShowingReview ? "Apply or discard the suggestions on the left first."
+        var blocked = ShowingReview ? "Apply or discard the suggestions first."
             : Reviewing ? "Waiting for ✨ Review to finish."
             : null;
         HelperSendBtn.Content = "Suggest";
@@ -521,7 +543,7 @@ public partial class ContextWindow : Window
         void Tick()
         {
             var seconds = (int)(DateTime.Now - started).TotalSeconds;
-            reply.Text = $"Working out the edits to {file.Label}… {seconds} s";
+            reply.Text = $"Working out the edits to {Path.GetFileName(file.Path)}… {seconds} s";
             StatusText.Text = $"Context helper is asking Claude Code… {seconds} s. Usually under a minute.";
         }
         var ticker = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -533,7 +555,7 @@ public partial class ContextWindow : Window
             var suggestion = await InstructionRequest.RunAsync(new ProcessRunner(), ReviewCommand, file, text, Folder, ask, cts.Token);
             if (_current != file)
             {
-                reply.Text = $"Another file was opened before the answer came back, so it was dropped. Open {file.Label} and ask again.";
+                reply.Text = $"Another file was opened before the answer came back, so it was dropped. Open {Path.GetFileName(file.Path)} and ask again.";
                 return;
             }
             var plan = ShowReview(file, text, suggestion, fromHelper: true);

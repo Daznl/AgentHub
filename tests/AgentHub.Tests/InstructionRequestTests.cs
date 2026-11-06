@@ -43,6 +43,39 @@ public class InstructionRequestTests(ITestOutputHelper output)
         Assert.Empty(plan.Unplaced);
         Assert.Equal("# Rules\r\n- be concise\r\n\r\n# Git\r\n- branch first\r\n- never force-push without asking\r\n",
             LineDiff.Merge(plan.Segments, _ => true));
+        // Shown as one added line after line 5, not line 5 removed and re-added.
+        var change = Assert.Single(plan.Segments, s => s.IsChange);
+        Assert.Empty(change.OldLines);
+        Assert.Equal(["- never force-push without asking"], change.NewLines);
+        Assert.Equal(6, change.OldStart);
+    }
+
+    [Fact]
+    public void An_edit_that_changes_nothing_is_dropped_and_unchanged_ends_are_trimmed()
+    {
+        const string rules = "# A\r\n- one\r\n- two\r\n- three\r\n";
+        var plan = InstructionReview.Plan(rules, [
+            new ReviewEdit("noop", "- one", "", "- one"),
+            new ReviewEdit("middle", "- one", "- three", "- one\n- 2\n- three")]);
+
+        Assert.Empty(plan.Unplaced);
+        var change = Assert.Single(plan.Segments, s => s.IsChange);
+        Assert.Equal(["- two"], change.OldLines);
+        Assert.Equal(["- 2"], change.NewLines);
+        Assert.Equal(["middle"], plan.Reasons);
+    }
+
+    [Fact]
+    public void An_insertion_and_a_change_on_the_next_line_both_apply_in_order()
+    {
+        const string rules = "# A\r\n- one\r\n- two\r\n";
+        var plan = InstructionReview.Plan(rules, [
+            new ReviewEdit("change", "- two", "", "- 2"),
+            new ReviewEdit("insert", "- one", "", "- one\n- one and a half")]);
+
+        Assert.Empty(plan.Unplaced);
+        Assert.Equal("# A\r\n- one\r\n- one and a half\r\n- 2\r\n", LineDiff.Merge(plan.Segments, _ => true));
+        Assert.Equal(["insert", "change"], plan.Reasons);
     }
 
     [LiveFact("claude", optIn: "AGENTHUB_LIVE_REVIEW")]

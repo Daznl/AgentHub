@@ -218,7 +218,7 @@
 
         <DockPanel Grid.Row="0" Margin="0,0,0,10" LastChildFill="True">
             <ToggleButton x:Name="CrabBtn" DockPanel.Dock="Right" Style="{StaticResource CrabToggle}" VerticalAlignment="Top" Margin="12,0,0,0"
-                          Click="Crab_Click" AutomationProperties.Name="Context helper"
+                          Checked="Crab_Toggled" Unchecked="Crab_Toggled" AutomationProperties.Name="Context helper"
                           ToolTip="Context helper: say what to add or change in this file. Claude Code suggests the edits and you choose which go in." />
             <StackPanel>
                 <TextBlock x:Name="HeadingText" FontSize="18" FontWeight="SemiBold" />
