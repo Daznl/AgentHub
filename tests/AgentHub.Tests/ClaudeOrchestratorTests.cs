@@ -549,9 +549,11 @@ public class OrchestratorLoopTests : IDisposable
         Assert.Null(TranscriptTurns.LastTurnEnd([prompt]));
     }
 
-    /// <summary>The orchestrator box shows the reply the orchestrator read and the message that answered it.</summary>
+    private static (ExchangeKind, string)[] Talk(OrchestratorEngine engine) => engine.Conversation.Select(x => (x.Kind, x.Text)).ToArray();
+
+    /// <summary>The orchestrator box lists every reply read and message sent in the worker session, waits included.</summary>
     [Fact]
-    public async Task The_engine_records_the_reply_it_read_and_the_message_that_answered_it()
+    public async Task The_engine_keeps_the_worker_sessions_whole_conversation()
     {
         var brain = new ScriptedBrain(Send("Build slice 1."), Send("Build slice 2."),
             new OrchestratorDecision(OrchestratorAction.Wait, null, "none", "tests still running", "waiting"));
@@ -563,20 +565,53 @@ public class OrchestratorLoopTests : IDisposable
         {
             await engine.BuildIdeaImmediatelyAsync(idea, worker);
             await Until(() => worker.Received.Count == 1, "first instruction");
-            Assert.Null(engine.LastReadFromWorker);
-            Assert.Equal("Build slice 1.", engine.LastSentToWorker);
+            Assert.Equal([(ExchangeKind.Sent, "Build slice 1.")], Talk(engine)); // without AgentHub's rules
 
             worker.FinishTurn("Slice 1 done, 5 tests pass.");
             await Until(() => worker.Received.Count == 2, "second instruction");
-            Assert.Equal("Slice 1 done, 5 tests pass.", engine.LastReadFromWorker);
-            Assert.Equal("Build slice 2.", engine.LastSentToWorker);
-            Assert.True(engine.LastSentAnswersRead);
-
             worker.FinishTurn("Still running the slow tests.");
             await Until(() => brain.Messages.Count == 3 && !engine.IsThinking, "the wait decision");
-            Assert.Equal("Still running the slow tests.", engine.LastReadFromWorker);
-            Assert.Equal("Build slice 2.", engine.LastSentToWorker);
-            Assert.False(engine.LastSentAnswersRead);
+            Assert.Equal(
+            [
+                (ExchangeKind.Sent, "Build slice 1."),
+                (ExchangeKind.Read, "Slice 1 done, 5 tests pass."),
+                (ExchangeKind.Sent, "Build slice 2."),
+                (ExchangeKind.Read, "Still running the slow tests."),
+                (ExchangeKind.Wait, "tests still running"),
+            ], Talk(engine));
+            engine.Stop();
+            await UntilReviewed();
+        }
+    }
+
+    /// <summary>Daniel 2026-11-06: the box shows only the current worker session; a fresh worker starts it over.</summary>
+    [Fact]
+    public async Task A_fresh_worker_starts_the_conversation_over()
+    {
+        var brain = new ScriptedBrain(Send("Build it."),
+            new OrchestratorDecision(OrchestratorAction.Handoff, null, "none", "long session", "handing off"),
+            Send("Read the handoff and carry on."));
+        var (engine, ideas, idea) = Setup(brain);
+        await ideas.AddIdeaAsync(idea);
+        await OrchestratorLoopTests.OnlyThisIdea(ideas, idea);
+        var worker = new ScriptedWorker();
+        using (engine)
+        {
+            await engine.BuildIdeaImmediatelyAsync(idea, worker);
+            await Until(() => worker.Received.Count == 1, "first instruction");
+            worker.FinishTurn("Half of it is built.");
+            await Until(() => worker.Received.Count == 2, "handoff prompt");
+            Assert.Equal(
+            [
+                (ExchangeKind.Sent, "Build it."),
+                (ExchangeKind.Read, "Half of it is built."),
+                (ExchangeKind.AgentHub, OrchestratorMessages.HandoffPrompt),
+            ], Talk(engine));
+
+            worker.FinishTurn("Handoff written.");
+            await Until(() => worker.Received.Count == 3, "fresh session's first instruction");
+            Assert.Equal(2, worker.Starts);
+            Assert.Equal([(ExchangeKind.Sent, "Read the handoff and carry on.")], Talk(engine));
             engine.Stop();
             await UntilReviewed();
         }

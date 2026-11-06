@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -178,14 +179,37 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         OrchestratorProgress.Text = view.Progress;
         OrchestratorProgress.ToolTip = string.IsNullOrEmpty(view.Progress) ? null : view.Progress;
         OrchestratorProgress.Visibility = string.IsNullOrEmpty(view.Progress) ? Visibility.Collapsed : Visibility.Visible;
-        OrchestratorLastRead.Text = "Last read: " + view.LastRead;
-        OrchestratorLastRead.ToolTip = view.LastRead;
-        OrchestratorLastSent.Text = string.IsNullOrEmpty(view.LastSent) ? "" : view.SentLabel + view.LastSent;
-        OrchestratorLastSent.ToolTip = string.IsNullOrEmpty(view.LastSent) ? null : view.LastSent;
-        OrchestratorLastSent.Visibility = string.IsNullOrEmpty(view.LastSent) ? Visibility.Collapsed : Visibility.Visible;
+        ShowConversation(view.Conversation);
         OrchestratorPauseBtn.Content = view.Paused ? "▶ Resume" : "⏸ Pause";
         OrchestratorPauseBtn.ToolTip = view.Paused ? "Resume the orchestrator" : "Pause the orchestrator: the worker is left as it is and gets nothing new";
         OrchestratorBox.Visibility = Visibility.Visible;
+    }
+
+    private readonly ObservableCollection<OrchestratorExchange> _conversation = [];
+
+    /// <summary>
+    /// The engine replaces its list on every change, so only the new tail is added here; a list that does not continue
+    /// the shown one (a new worker session) starts the box over. Follows the newest message unless Daniel scrolled up.
+    /// </summary>
+    private void ShowConversation(IReadOnlyList<OrchestratorExchange> next)
+    {
+        if (OrchestratorConversation.ItemsSource is null) OrchestratorConversation.ItemsSource = _conversation;
+        var scroll = OrchestratorConversationScroll;
+        var following = scroll.VerticalOffset >= scroll.ScrollableHeight - 8;
+
+        var continues = next.Count >= _conversation.Count && _conversation.Select((x, i) => ReferenceEquals(x, next[i])).All(same => same);
+        if (!continues)
+        {
+            _conversation.Clear();
+            following = true;
+        }
+        var added = next.Count > _conversation.Count;
+        foreach (var exchange in next.Skip(_conversation.Count)) _conversation.Add(exchange);
+
+        OrchestratorNothingYet.Text = OrchestratorBoxView.NothingYet;
+        OrchestratorNothingYet.Visibility = next.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (added && following)
+            Dispatcher.BeginInvoke(scroll.ScrollToEnd, System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     private void OrchestratorPause_Click(object sender, RoutedEventArgs e) => OrchestratorPauseRequested?.Invoke(this);

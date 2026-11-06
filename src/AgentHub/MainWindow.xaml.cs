@@ -235,7 +235,7 @@ public partial class MainWindow : Window
         }
         var o = _orchestrator;
         var view = o is null ? null : OrchestratorBoxView.For(o.State, o.IsThinking, o.CurrentIdea?.Title, o.WorkerSession, o.LatestProgress,
-            o.LastReadFromWorker, o.LastSentToWorker, o.LastSentAnswersRead);
+            o.Conversation);
         var driven = view is null ? null : o!.ActivePane;
         foreach (var pane in _panes)
         {
@@ -292,6 +292,7 @@ public partial class MainWindow : Window
             _orchestrator.ProgressChanged += _ => RefreshOrchestratorBoxes();
             _orchestrator.CurrentIdeaChanged += _ => RefreshOrchestratorBoxes();
             _orchestrator.LogAdded += _ => RefreshOrchestratorBoxes();
+            _orchestrator.ConversationChanged += RefreshOrchestratorBoxes;
         }
         var window = new IdeasWindow(
             _ideaService,

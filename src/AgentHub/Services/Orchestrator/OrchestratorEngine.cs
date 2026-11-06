@@ -142,12 +142,15 @@ public sealed class OrchestratorEngine : IDisposable
     public bool IsThinking => _thinking;
     /// <summary>The current worker session's number (1 for the first).</summary>
     public int WorkerSession => _workerSession;
-    /// <summary>The orchestrator's latest message to the worker (without AgentHub's rules).</summary>
-    public string? LastSentToWorker { get; private set; }
-    /// <summary>The worker's latest reply the orchestrator read (the reply its latest decision answers); null for a new worker.</summary>
-    public string? LastReadFromWorker { get; private set; }
-    /// <summary>The last message sent came after (in answer to) the last reply read; false when the orchestrator then chose to wait.</summary>
-    public bool LastSentAnswersRead { get; private set; }
+    /// <summary>
+    /// The current worker session's messages, oldest first: replies read, messages sent (without AgentHub's rules), waits,
+    /// steers, questions for Daniel and AgentHub's own prompts. Empty for a new worker. Replaced, never changed in place,
+    /// so a reader on another thread always gets a whole list.
+    /// </summary>
+    public IReadOnlyList<OrchestratorExchange> Conversation => _conversation;
+    private volatile IReadOnlyList<OrchestratorExchange> _conversation = [];
+    private readonly object _conversationLock = new();
+    public event Action? ConversationChanged;
     public string? CurrentRunFolder => _run?.Folder;
     public RunRecord? CurrentRun => _run?.Record;
     public SteeringService Steering { get; }
@@ -626,9 +629,8 @@ public sealed class OrchestratorEngine : IDisposable
             await Task.Delay(1000);
         }
 
-        // A new worker is briefed from the spec and the handoff, not from a reply.
-        LastReadFromWorker = null;
-        LastSentToWorker = null;
+        // A new worker is briefed from the spec and the handoff, not from a reply: its conversation starts empty.
+        ClearConversation();
         var handoff = ReadHandoff(idea);
         var input = new OrchestratorInput(evt)
         {
@@ -790,7 +792,7 @@ public sealed class OrchestratorEngine : IDisposable
                 RecentCommits = await CommitsSinceAsync(idea.TargetDirectory, run.Record.StartedAt, 8)
             };
             var message = OrchestratorMessages.Compose(input);
-            if (!string.IsNullOrWhiteSpace(input.WorkerReply)) { LastReadFromWorker = input.WorkerReply; LastSentAnswersRead = false; }
+            if (!string.IsNullOrWhiteSpace(input.WorkerReply)) AddExchange(ExchangeKind.Read, input.WorkerReply);
 
             SetThinking(true);
             BrainReply reply;
@@ -822,6 +824,8 @@ public sealed class OrchestratorEngine : IDisposable
             {
                 await Steering.MarkDeliveredAsync(steers);
                 run.Record.Steers += steers.Count;
+                // Listed once the orchestrator has them: a failed decision leaves them pending to be read again.
+                foreach (var steer in steers) AddExchange(ExchangeKind.Steer, (input.UrgentSteer ? "URGENT: " : "") + steer.Text);
             }
             run.Record.OrchestratorCalls++;
             if (input.Event == OrchestratorEvent.WorkerTurnEnded) { _lastReplyHandled = input.WorkerReply; _sentSinceLastTurn = false; _turnEndedWhileThinking = false; }
@@ -869,8 +873,7 @@ public sealed class OrchestratorEngine : IDisposable
                         _turnEndedWhileThinking = false;
                         _waitingSince = null;
                         _idleAsks = 0;
-                        LastSentToWorker = d.ToWorker;
-                        LastSentAnswersRead = LastReadFromWorker != null;
+                        AddExchange(ExchangeKind.Sent, d.ToWorker!);
                         Log($"🧠 → worker: {OneLine(d.ToWorker!, 160)}");
                     }
                     else
@@ -883,6 +886,7 @@ public sealed class OrchestratorEngine : IDisposable
 
                 case OrchestratorAction.Wait:
                     _waitingSince ??= DateTimeOffset.Now;
+                    AddExchange(ExchangeKind.Wait, d.Reason);
                     Log($"🧠 waits: {OneLine(d.Reason, 160)}");
                     break;
 
@@ -1008,6 +1012,7 @@ public sealed class OrchestratorEngine : IDisposable
             idea.StatusNote = "Waiting for Daniel: " + OneLine(question, 200);
             await _ideaService.UpdateIdeaAsync(idea);
         }
+        AddExchange(ExchangeKind.Question, question);
         SetState(OrchestratorState.Paused);
         SetProgress("Waiting for you: " + question);
         Log($"⏸ Build paused for you: {question}", "Warn");
@@ -1023,8 +1028,7 @@ public sealed class OrchestratorEngine : IDisposable
         Log($"Handoff: {reason}", forced ? "Warn" : "Info");
         await AddEventAsync(new RunEvent { Kind = forced ? "forced_handoff" : "handoff", Detail = reason, Flag = forced });
         _lastSubmitAt = DateTimeOffset.Now;
-        LastSentToWorker = "[AgentHub] Time to hand off: write .agenthub/handoff.md and commit.";
-        LastSentAnswersRead = true;
+        AddExchange(ExchangeKind.AgentHub, OrchestratorMessages.HandoffPrompt);
         await w.SubmitAsync(OrchestratorMessages.HandoffPrompt);
         if (_run != null) _run.Record.MessagesToWorker++;
     }
@@ -1235,6 +1239,7 @@ public sealed class OrchestratorEngine : IDisposable
 
             if (_state is OrchestratorState.Building or OrchestratorState.HandoffPending && _worker is { IsRunning: true } w)
             {
+                AddExchange(ExchangeKind.AgentHub, OrchestratorMessages.UsageWrapUpPrompt);
                 await w.SubmitAsync(OrchestratorMessages.UsageWrapUpPrompt);
                 await Task.Delay(TimeSpan.FromSeconds(90));
                 if (w.IsRunning) { _expectWorkerExit = true; w.Stop(); }
@@ -1423,6 +1428,23 @@ public sealed class OrchestratorEngine : IDisposable
         if (_thinking == thinking) return;
         _thinking = thinking;
         ThinkingChanged?.Invoke(thinking);
+    }
+
+    private void AddExchange(ExchangeKind kind, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        lock (_conversationLock) _conversation = [.. _conversation, new OrchestratorExchange(DateTimeOffset.Now, kind, text.Trim())];
+        ConversationChanged?.Invoke();
+    }
+
+    private void ClearConversation()
+    {
+        lock (_conversationLock)
+        {
+            if (_conversation.Count == 0) return;
+            _conversation = [];
+        }
+        ConversationChanged?.Invoke();
     }
 
     private void SetProgress(string progress)
