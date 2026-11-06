@@ -1,0 +1,111 @@
+{
+  "formatVersion": 1,
+  "runId": "2026-11-06_1008_raptor-staging-orchestrator_8c3278",
+  "ideaId": "dd0bdfd640b3418890e02e41b9fd868d",
+  "ideaTitle": "Raptor Staging Orchestrator",
+  "spec": "begin, find which stage we are up to and run the system to completion or until an important decision needs to be made. Remember that data is incredibly important and could lead to decisions like drill that cost a lot of money.",
+  "targetDirectory": "C:\\Users\\daniel.wallis-barker\\OneDrive - IGO Limited\\Projects\\Raptor Project\\raptor-project",
+  "workerCommand": "claude",
+  "orchestratorModel": "sonnet",
+  "workflow": "Data Processing Raptor",
+  "workflowId": "data-processing-my-copy",
+  "workflowVersion": "35b00702",
+  "currentStage": "1.17 Collar comments",
+  "stagesDone": [
+    "1.13 Fix header text read as data",
+    "1.14 Gravel samples filed as holes",
+    "1.15 Project name and code",
+    "1.16 Target commodity",
+    "1.17 Collar comments"
+  ],
+  "reopened": 2,
+  "orchestratorSessionId": "15d22267-7d97-4627-8936-8b29b6a51598",
+  "agentHubBuild": "1.0.0\u002B8bbab48606db22345f381b7906082f8a7e23a666",
+  "startedAt": "2026-11-06T10:08:12.8922263+08:00",
+  "endedAt": "2026-11-06T16:14:03.3894143+08:00",
+  "outcome": "interrupted",
+  "outcomeDetail": "The idea was deleted while the run was open.",
+  "lastProgress": "Fresh worker reporting on 1.17 before 1.18.",
+  "orchestratorCalls": 39,
+  "messagesToWorker": 22,
+  "steers": 7,
+  "handoffs": 4,
+  "flags": 1,
+  "targetHeadAtStart": "ca110bb",
+  "workerCommits": [
+    "3f14708 docs(agenthub): handoff after 1.17, tracker_edit.py location, status lines",
+    "7d80c1d docs: stage 1.17 filled in Snowflake (run 20261106-075102Z), report, tracker, handoff",
+    "b4f164e feat(templates): 1.17 collar comments, each part\u0027s source said",
+    "092054d docs: stage 1.16 filled in Snowflake (run 20261106-062548Z), report, PDF, tracker, handoff",
+    "6ae9fb8 fix(snowflake): raptor.py logs the session user, refuses an admin sign-in",
+    "628e5a7 fix(templates): 1.16 abstract target only from explore-for and target-commodity phrases",
+    "e355cd0 feat(templates): 1.16 target commodity, every cell\u0027s source said",
+    "36d67c1 chore: tidy after 1.15: summary sheet labels, tracker 1.15 text, stale serve.py lines",
+    "6bbc7db docs(agenthub): handoff after 1.15, next 1.16; architecture, decisions, warnings rewritten",
+    "526a1a4 docs: stage 1.15 filled in Snowflake (run 20261106-041337Z), report, PDF, tracker notes 1.01-1.15, handoff",
+    "d33ae7e feat(templates): 1.15 project name and code, every cell\u0027s source said",
+    "6f5398e docs(agenthub): fix next-tasks line break",
+    "6d90de3 docs(agenthub): handoff after 1.14, next 1.15; push rule in CLAUDE.md",
+    "b9523e1 docs(agenthub): standing rule, push branch after every finished stage",
+    "7a144fd docs: stage 1.14 filled in Snowflake (run 20261106-031937Z), stage report, tracker ticked, PDF rebuilt, handoff",
+    "20fd331 feat(templates): 1.14 gravel samples filed as holes -\u003E Surface sheet",
+    "460768e docs: fix stale tracker paths, unpushed count, 1.13 tracker output text",
+    "be53427 docs(agenthub): handoff for next session, 1.13 done, 1.14 next",
+    "3537434 docs: repair STRIKE downloads path in CLAUDE.md",
+    "b8b3a41 docs: fix mangled path in handoff",
+    "587408e docs: stage 1.13 filled in Snowflake (run 20261106-023141Z), stage report, tracker ticked, PDF rebuilt, handoff",
+    "78cd156 feat(snowflake): stage 1.13 header lines read by label, not number",
+    "7da5bb0 docs(agenthub): stage list, current stage 1.13, evidence and open decisions"
+  ],
+  "workerSessions": [
+    {
+      "number": 1,
+      "startedAt": "2026-11-06T10:08:24.7030059+08:00",
+      "endedAt": "2026-11-06T10:51:01.1717201+08:00",
+      "endReason": "handoff",
+      "transcriptPath": "C:\\Users\\daniel.wallis-barker\\.claude\\projects\\C--Users-daniel-wallis-barker-OneDrive---IGO-Limited-Projects-Raptor-Project-raptor-project\\b2ada181-23fe-49ff-a968-c5de2a9d3fbd.jsonl"
+    },
+    {
+      "number": 2,
+      "startedAt": "2026-11-06T10:51:13.0592052+08:00",
+      "endedAt": "2026-11-06T11:13:38.7087199+08:00",
+      "endReason": "suspended",
+      "transcriptPath": "C:\\Users\\daniel.wallis-barker\\.claude\\projects\\C--Users-daniel-wallis-barker-OneDrive---IGO-Limited-Projects-Raptor-Project-raptor-project\\961b4f1f-8c57-4191-8e43-e4daa5800e8e.jsonl"
+    },
+    {
+      "number": 3,
+      "startedAt": "2026-11-06T11:14:46.8251836+08:00",
+      "endedAt": "2026-11-06T11:40:06.1890594+08:00",
+      "endReason": "handoff",
+      "transcriptPath": "C:\\Users\\daniel.wallis-barker\\.claude\\projects\\C--Users-daniel-wallis-barker-OneDrive---IGO-Limited-Projects-Raptor-Project-raptor-project\\1fa37ae4-ff99-4494-9c71-2c118110233c.jsonl"
+    },
+    {
+      "number": 4,
+      "startedAt": "2026-11-06T11:40:20.4017385+08:00",
+      "endedAt": "2026-11-06T12:56:27.0337951+08:00",
+      "endReason": "handoff",
+      "transcriptPath": "C:\\Users\\daniel.wallis-barker\\.claude\\projects\\C--Users-daniel-wallis-barker-OneDrive---IGO-Limited-Projects-Raptor-Project-raptor-project\\4e438224-cdd1-4a04-8a26-9438918da8cc.jsonl"
+    },
+    {
+      "number": 5,
+      "startedAt": "2026-11-06T12:56:36.8036695+08:00",
+      "endedAt": "2026-11-06T14:52:38.620536+08:00",
+      "endReason": "suspended",
+      "transcriptPath": "C:\\Users\\daniel.wallis-barker\\.claude\\projects\\C--Users-daniel-wallis-barker-OneDrive---IGO-Limited-Projects-Raptor-Project-raptor-project\\31d5a2d4-609e-48f6-8bb1-91c7a3eed5df.jsonl"
+    },
+    {
+      "number": 6,
+      "startedAt": "2026-11-06T15:15:30.8019217+08:00",
+      "endedAt": "2026-11-06T16:12:11.2716236+08:00",
+      "endReason": "handoff",
+      "transcriptPath": "C:\\Users\\daniel.wallis-barker\\.claude\\projects\\C--Users-daniel-wallis-barker-OneDrive---IGO-Limited-Projects-Raptor-Project-raptor-project\\45c17c23-d958-4979-beed-342655f8d509.jsonl"
+    },
+    {
+      "number": 7,
+      "startedAt": "2026-11-06T16:12:30.0813014+08:00",
+      "endedAt": "2026-11-06T16:14:03.3894211+08:00",
+      "endReason": "suspended",
+      "transcriptPath": "C:\\Users\\daniel.wallis-barker\\.claude\\projects\\C--Users-daniel-wallis-barker-OneDrive---IGO-Limited-Projects-Raptor-Project-raptor-project\\8899a15f-f032-414a-a073-2120cb0b17ba.jsonl"
+    }
+  ]
+}
