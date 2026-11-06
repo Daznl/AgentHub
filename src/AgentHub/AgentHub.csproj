@@ -16,6 +16,8 @@
     <Resource Include="Assets\AppIcon.png" />
     <Resource Include="Assets\HeaderLogo.png" />
     <Resource Include="Assets\AgentHub.ico" />
+    <!-- Crab mascot sprite strips, 80x80 cells (Controls/CrabMascot) -->
+    <Resource Include="Assets\Crab\*.png" />
   </ItemGroup>
 
   <ItemGroup>

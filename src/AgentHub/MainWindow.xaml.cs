@@ -94,6 +94,8 @@ public partial class MainWindow : Window
         Activate();
         _settings = await _settingsService.LoadAsync();
         Backdrop.SetAnimated(_settings.AnimatedBackground);
+        Mascot.Visibility = _settings.CrabMascot ? Visibility.Visible : Visibility.Collapsed;
+        Mascot.SetAnimated(_settings.AnimatedBackground);
         ApplyUsagePanelVisibility();
 
         if (_settings.Repositories.Count == 0)
@@ -1084,8 +1086,12 @@ public partial class MainWindow : Window
     }
 
     // The separator only divides the groups while they share a row; once the actions wrap below, it would dangle.
-    private void HeaderButtons_SizeChanged(object sender, SizeChangedEventArgs e) =>
+    // The crab roams only the header strip the buttons leave free.
+    private void HeaderButtons_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
         NavSeparator.Opacity = HeaderButtons.ActualHeight > NavButtons.ActualHeight + 1 ? 0 : 1;
+        Mascot.ReservedRight = HeaderButtons.ActualWidth;
+    }
 
     private void ViewCockpitBtn_Click(object sender, RoutedEventArgs e)
     {

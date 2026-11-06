@@ -218,6 +218,7 @@ Defaults:
   "usageRefreshMinutes": 2,
   "preferWindowsTerminal": true,
   "animatedBackground": true,
+  "crabMascot": true,
   "showUsagePanel": true,
   "hiddenUsageCards": [],
   "attentionFlashEnabled": true,
@@ -232,6 +233,7 @@ Defaults:
 | `usageRefreshMinutes` | How often usage cards refresh. |
 | `preferWindowsTerminal` | Launch external sessions in Windows Terminal when `wt.exe` is available. |
 | `animatedBackground` | Drifting glow, scrolling grid and scan sweep behind the main window. Set to `false` for a static backdrop on Remote Desktop, battery or reduced-motion setups. |
+| `crabMascot` | The pixel-art crab at the top right of the header. It rests beside the buttons; every 12 to 32 seconds it scuttles, rolls, pinches, waves or dances along the free header strip; a click makes it hop and do a trick; after 5 minutes with no input it falls asleep and wakes on the next mouse move or key. It stays still when `animatedBackground` is `false` or Windows animations are off, and stops drawing while AgentHub is minimised. Set to `false` to hide it. |
 | `showUsagePanel` | Whether the usage section above the terminals is visible. Toggled by the **📊 Usage** header button. |
 | `hiddenUsageCards` | Provider ids whose card you have closed. Reopen from the chips beside "Usage limits". |
 | `attentionFlashEnabled` | Enable the waiting-for-you pane and taskbar alert. |
