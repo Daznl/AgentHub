@@ -24,6 +24,8 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <Image Grid.Column="0" Source="Assets/HeaderLogo.png" Width="72" Height="72" HorizontalAlignment="Left" VerticalAlignment="Top" RenderOptions.BitmapScalingMode="HighQuality" />
+                <!-- The crab mascot: rests at the top right beside the buttons and roams the free header strip towards the logo -->
+                <controls:CrabMascot x:Name="Mascot" Grid.Column="1" Height="72" VerticalAlignment="Top" />
 
                 <!-- One row of buttons: view actions, then navigation at the far right. Filled right to left so that when the
                      window is too narrow, navigation keeps the top-right spot and the view actions drop to a right-aligned second line. -->

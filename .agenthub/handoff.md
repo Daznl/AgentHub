@@ -1,5 +1,7 @@
 # AgentHub Handoff Context
 
+**Crab mascot (2026-11-06 16:30):** branch `feature/crab-mascot` (worktree `C:\data\agenthub\worktrees\AgentHub\crab-mascot`, off `main`, not pushed, no pull request yet: `git fetch` said the repository `Daznl/AgentHub` was not found). It adds `Controls/CrabMascot`, a PixelLab pixel-art crab at the top right of the header with 8 animations (`Assets/Crab`, prompt and steps in `docs/brand/crab/README.md`), and the setting `crabMascot`. Daniel's taskbar build (`src\AgentHub\bin\Release\net8.0-windows\win-x64\publish` in `Desktop\AgentHub-main`) now runs `deploy/taskbar-helper-crab` (`85c91d9`) = the earlier taskbar build `21a29c6` (app helper, context helper, host fix) plus this branch. The previous build is backed up at `C:\data\agenthub\publish-backup\21a29c6`. Next: when `feature/app-helper` is merged, decide whether a click on the crab opens the helper (the control raises `Poked`) and whether the helper's round crab button then goes.
+
 **Updated:** 2026-11-05 15:50 (session handoff). Newest work is on branch `feature/workflow-catalogue` (head `9b35272`), stacked on `feature/claude-orchestrator` and `feature/ideas-autobuilder`. Daniel asked to merge and push at 15:55: main was fast-forwarded to it and pushed to origin (Daznl/AgentHub). The archive branch agenthub-workflows is still local only. Merge or push only when Daniel asks.
 
 **Where things stand:**

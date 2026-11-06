@@ -46,6 +46,9 @@ public sealed class AppSettings
     /// </summary>
     public bool AnimatedBackground { get; set; } = true;
 
+    /// <summary>The pixel-art crab beside the header logo. It only moves while <see cref="AnimatedBackground"/> and Windows animations are on.</summary>
+    public bool CrabMascot { get; set; } = true;
+
     /// <summary>Whether the usage section above the terminals is shown. Toggled by the 📊 Usage header button.</summary>
     public bool ShowUsagePanel { get; set; } = true;
 
