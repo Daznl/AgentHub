@@ -103,7 +103,8 @@ public static class InstructionReview
         return reply is null ? null : ReadSuggestion(reply.RootElement);
     }
 
-    private static ReviewSuggestion ReadSuggestion(JsonElement element)
+    /// <summary>Reads a schema-checked reply into a suggestion; shared with <see cref="InstructionRequest"/>.</summary>
+    internal static ReviewSuggestion ReadSuggestion(JsonElement element)
     {
         var summary = element.TryGetProperty("summary", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() ?? "" : "";
         var edits = new List<ReviewEdit>();

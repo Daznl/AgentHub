@@ -5,6 +5,99 @@
         Icon="Assets/AppIcon.png" WindowStartupLocation="CenterOwner"
         Background="{StaticResource WindowBackgroundBrush}" Foreground="{StaticResource TextBrush}" FontFamily="Segoe UI">
     <Window.Resources>
+        <!-- The context helper's orange crab, drawn as vectors: WPF renders emoji in one flat colour only -->
+        <SolidColorBrush x:Key="CrabBrush" Color="#FF7A45" />
+        <DrawingImage x:Key="CrabIcon">
+            <DrawingImage.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Brush="Transparent" Geometry="M 0,0 H 24 V 24 H 0 Z" />
+                    <!-- Legs, arms and eye stalks -->
+                    <GeometryDrawing Geometry="M 7,15 L 3.4,16.4 M 7.6,16.7 L 4.6,19.4 M 9.2,17.7 L 7.4,20.6 M 17,15 L 20.6,16.4 M 16.4,16.7 L 19.4,19.4 M 14.8,17.7 L 16.6,20.6 M 4.4,9 L 7,12.4 M 19.6,9 L 17,12.4 M 10,10.6 L 9.4,7.6 M 14,10.6 L 14.6,7.6">
+                        <GeometryDrawing.Pen>
+                            <Pen Brush="{StaticResource CrabBrush}" Thickness="1.5" StartLineCap="Round" EndLineCap="Round" />
+                        </GeometryDrawing.Pen>
+                    </GeometryDrawing>
+                    <!-- Body, open pincers, eyes -->
+                    <GeometryDrawing Brush="{StaticResource CrabBrush}">
+                        <GeometryDrawing.Geometry>
+                            <GeometryGroup FillRule="Nonzero">
+                                <EllipseGeometry Center="12,14" RadiusX="6.4" RadiusY="4.4" />
+                                <PathGeometry Figures="M 2.4,9.6 C 0.2,7.8 0.8,3.8 3.8,3.4 L 3.9,6.3 L 6.4,4.9 C 7,7.7 5.3,10.1 2.4,9.6 Z" />
+                                <PathGeometry Figures="M 21.6,9.6 C 23.8,7.8 23.2,3.8 20.2,3.4 L 20.1,6.3 L 17.6,4.9 C 17,7.7 18.7,10.1 21.6,9.6 Z" />
+                                <EllipseGeometry Center="9.3,7.1" RadiusX="1.5" RadiusY="1.5" />
+                                <EllipseGeometry Center="14.7,7.1" RadiusX="1.5" RadiusY="1.5" />
+                            </GeometryGroup>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                    <!-- Pupils and a smile -->
+                    <GeometryDrawing Brush="#1A0E08">
+                        <GeometryDrawing.Geometry>
+                            <GeometryGroup>
+                                <EllipseGeometry Center="9.5,7" RadiusX="0.65" RadiusY="0.65" />
+                                <EllipseGeometry Center="14.5,7" RadiusX="0.65" RadiusY="0.65" />
+                            </GeometryGroup>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                    <GeometryDrawing Geometry="M 10.2,14.6 Q 12,16 13.8,14.6">
+                        <GeometryDrawing.Pen>
+                            <Pen Brush="#1A0E08" Thickness="0.9" StartLineCap="Round" EndLineCap="Round" />
+                        </GeometryDrawing.Pen>
+                    </GeometryDrawing>
+                </DrawingGroup>
+            </DrawingImage.Drawing>
+        </DrawingImage>
+
+        <!-- Round crab button that opens and closes the helper; lit while the helper is open -->
+        <Style x:Key="CrabToggle" TargetType="ToggleButton">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Width" Value="38" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Disc" CornerRadius="19" Background="#24160F" BorderBrush="#5A3320" BorderThickness="1">
+                            <Image Source="{StaticResource CrabIcon}" Width="26" Height="26" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Disc" Property="Background" Value="#3D2214" />
+                                <Setter TargetName="Disc" Property="BorderBrush" Value="{StaticResource CrabBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Disc" Property="BorderBrush" Value="{StaticResource CrabBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Disc" Property="BorderBrush" Value="{StaticResource CrabBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Example requests shown in an empty helper; a click puts the text in the request box -->
+        <Style x:Key="ExampleChip" TargetType="Button">
+            <Setter Property="Foreground" Value="#C9D4E5" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chip" CornerRadius="8" Background="#121B28" BorderBrush="#1E2C40" BorderThickness="1" Padding="10,6">
+                            <TextBlock Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}" TextWrapping="Wrap" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource CrabBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- File tabs: lit when that file is the one being edited -->
         <Style x:Key="FileTab" TargetType="RadioButton">
             <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
@@ -108,7 +201,13 @@
         <CommandBinding Command="ApplicationCommands.Save" Executed="SaveCommand_Executed" />
     </Window.CommandBindings>
 
-    <Grid Margin="16,14,16,16">
+    <Grid>
+    <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+    </Grid.ColumnDefinitions>
+
+    <Grid Grid.Column="0" Margin="16,14,16,16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -117,10 +216,15 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Margin="0,0,0,10">
-            <TextBlock x:Name="HeadingText" FontSize="18" FontWeight="SemiBold" />
-            <TextBlock x:Name="SubheadingText" Margin="0,3,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
-        </StackPanel>
+        <DockPanel Grid.Row="0" Margin="0,0,0,10" LastChildFill="True">
+            <ToggleButton x:Name="CrabBtn" DockPanel.Dock="Right" Style="{StaticResource CrabToggle}" VerticalAlignment="Top" Margin="12,0,0,0"
+                          Click="Crab_Click" AutomationProperties.Name="Context helper"
+                          ToolTip="Context helper: say what to add or change in this file. Claude Code suggests the edits and you choose which go in." />
+            <StackPanel>
+                <TextBlock x:Name="HeadingText" FontSize="18" FontWeight="SemiBold" />
+                <TextBlock x:Name="SubheadingText" Margin="0,3,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+        </DockPanel>
 
         <WrapPanel x:Name="TabsPanel" Grid.Row="1" Margin="0,0,0,4" />
 
@@ -189,5 +293,72 @@
             </StackPanel>
             <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="2,0,12,0" />
         </DockPanel>
+    </Grid>
+
+    <!-- Context helper: ask in plain words for something to add; the suggested edits appear on the left with Apply boxes -->
+    <Border x:Name="HelperPanel" Grid.Column="1" Width="330" Visibility="Collapsed" Background="#0B121D"
+            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1,0,0,0">
+        <Grid Margin="14,14,14,16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <DockPanel Grid.Row="0" Margin="0,0,0,10" LastChildFill="True">
+                <Button DockPanel.Dock="Right" Click="CloseHelper_Click" Content="✕" Margin="0" Padding="8,3" FontSize="11" VerticalAlignment="Top"
+                        Background="Transparent" BorderBrush="Transparent" ToolTip="Close the helper" AutomationProperties.Name="Close helper" />
+                <Image DockPanel.Dock="Left" Source="{StaticResource CrabIcon}" Width="28" Height="28" Margin="0,0,10,0" VerticalAlignment="Top" />
+                <StackPanel>
+                    <TextBlock Text="Context helper" FontSize="15" FontWeight="SemiBold" />
+                    <TextBlock x:Name="HelperTarget" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+            </DockPanel>
+
+            <ScrollViewer x:Name="HelperScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <!-- Shown until the first request -->
+                    <StackPanel x:Name="HelperExamples">
+                        <TextBlock Foreground="#B6C2D6" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"
+                                   Text="Say what you want the agent to know or do, in your own words. Claude Code turns it into rules, puts them in the right section, and shows them on the left. You tick which to keep, then Save." />
+                        <TextBlock Text="For example" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6" />
+                        <Button Style="{StaticResource ExampleChip}" Click="Example_Click" Content="Always run the tests before committing, and fix any that fail" />
+                        <Button Style="{StaticResource ExampleChip}" Click="Example_Click" Content="Ask me before deleting files or force-pushing" />
+                        <Button Style="{StaticResource ExampleChip}" Click="Example_Click" Content="Use Australian spelling in docs and commit messages" />
+                    </StackPanel>
+                    <ItemsControl x:Name="HelperLog">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel Margin="{Binding Indent}" HorizontalAlignment="{Binding Alignment}">
+                                    <Image DockPanel.Dock="Left" Source="{StaticResource CrabIcon}" Width="20" Height="20" Margin="0,2,8,0" VerticalAlignment="Top"
+                                           Visibility="{Binding CrabVisibility}" />
+                                    <Border Background="{Binding Background}" BorderBrush="{Binding Border}" BorderThickness="1" CornerRadius="8" Padding="10,7">
+                                        <TextBlock Text="{Binding Text}" Foreground="{Binding Foreground}" FontSize="12" TextWrapping="Wrap" />
+                                    </Border>
+                                </DockPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </ScrollViewer>
+
+            <StackPanel Grid.Row="2" Margin="0,10,0,0">
+                <Grid>
+                    <TextBox x:Name="HelperInput" Style="{StaticResource Editor}" FontFamily="Segoe UI" MinHeight="64" MaxHeight="160"
+                             AcceptsTab="False" PreviewKeyDown="HelperInput_PreviewKeyDown" TextChanged="HelperInput_TextChanged"
+                             AutomationProperties.Name="Request" />
+                    <TextBlock x:Name="HelperInputHint" IsHitTestVisible="False" Margin="14,9,14,0" Foreground="#4A5A73" FontSize="13"
+                               TextWrapping="Wrap" VerticalAlignment="Top" Text="What should be added or changed?" />
+                </Grid>
+                <DockPanel Margin="0,8,0,0" LastChildFill="True">
+                    <Button x:Name="HelperSendBtn" DockPanel.Dock="Right" Click="HelperSend_Click" Content="Suggest" Margin="0" Padding="16,6"
+                            FontSize="12" FontWeight="SemiBold" Background="#9A3F17" IsEnabled="False"
+                            ToolTip="Ask Claude Code for edits that do this (Enter). Uses your Claude login; it only reads this file's text and never edits files." />
+                    <TextBlock x:Name="HelperHint" Text="Enter sends · Shift+Enter new line" Foreground="{StaticResource MutedBrush}" FontSize="11"
+                               VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,10,0" />
+                </DockPanel>
+            </StackPanel>
+        </Grid>
+    </Border>
     </Grid>
 </Window>
