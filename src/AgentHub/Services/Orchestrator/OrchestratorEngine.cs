@@ -29,10 +29,10 @@ public sealed record OrchestratorLog(
 /// <summary>
 /// Runs the idea queue with two Claude sessions. The WORKER is an interactive coding CLI in a Cockpit pane that does the
 /// building. The ORCHESTRATOR is a headless Claude Code session (<see cref="IOrchestratorBrain"/>) that gets the worker's
-/// final reply at each turn end, plus Daniel's steers, and answers with one JSON decision that this engine carries out.
+/// final reply at each turn end, plus the owner's steers, and answers with one JSON decision that this engine carries out.
 /// Hard limits stay in code where the orchestrator cannot argue with them: the Claude usage cap (wait for the reset), the
 /// context window (forced handoff into a fresh worker), a cap on decisions per run, and stop. Every run is recorded under
-/// <see cref="RunsRoot"/> and, when it ends, committed to the AgentHub repository's archive branch (<see cref="AgentHubArchive"/>). What kind of job the orchestrator runs
+/// <see cref="RunsRoot"/>, with REVIEW.md when it ends and an INDEX.md of all runs; nothing goes into a repository. What kind of job the orchestrator runs
 /// (its instructions, model, handoff policy) comes from the idea's workflow (<see cref="WorkflowCatalogue"/>).
 /// </summary>
 public sealed class OrchestratorEngine : IDisposable
@@ -74,7 +74,7 @@ public sealed class OrchestratorEngine : IDisposable
 
     /// <summary>
     /// True for the Auto-Builder lane: when its idea is done it takes the next queued one. False for a Build Now run, which
-    /// finishes with its own idea (Daniel 2026-11-06: each orchestrator works as before, just several at once).
+    /// finishes with its own idea (owner feedback 2026-11-06: each orchestrator works as before, just several at once).
     /// </summary>
     public bool FollowsQueue { get; set; } = true;
 
@@ -119,9 +119,6 @@ public sealed class OrchestratorEngine : IDisposable
     /// <summary>Where runs are written live, one folder each.</summary>
     public string RunsRoot { get; set; } = Environment.GetEnvironmentVariable("AGENTHUB_RUNS_DIR") is { Length: > 0 } d ? d : @"C:\data\agenthub\orchestrator-runs";
 
-    /// <summary>Commits finished runs (and Daniel's workflows) to the repository's archive branch; null keeps runs local only.</summary>
-    public AgentHubArchive? Archive { get; set; }
-
     /// <summary>Where each idea's workflow comes from; null runs every idea as Builder.</summary>
     public WorkflowCatalogue? Workflows { get; set; }
 
@@ -155,7 +152,7 @@ public sealed class OrchestratorEngine : IDisposable
     public event Action<OrchestratorState>? StateChanged;
     public event Action<ProjectIdea?>? CurrentIdeaChanged;
     public event Action<OrchestratorLog>? LogAdded;
-    /// <summary>The orchestrator's latest one-line progress, or its question for Daniel.</summary>
+    /// <summary>The orchestrator's latest one-line progress, or its question for the owner.</summary>
     public event Action<string>? ProgressChanged;
     public event Action<bool>? ThinkingChanged;
 
@@ -171,7 +168,7 @@ public sealed class OrchestratorEngine : IDisposable
     public int WorkerSession => _workerSession;
     /// <summary>
     /// The current worker session's messages, oldest first: replies read, messages sent (without AgentHub's rules), waits,
-    /// steers, questions for Daniel and AgentHub's own prompts. Empty for a new worker. Replaced, never changed in place,
+    /// steers, questions for the owner and AgentHub's own prompts. Empty for a new worker. Replaced, never changed in place,
     /// so a reader on another thread always gets a whole list.
     /// </summary>
     public IReadOnlyList<OrchestratorExchange> Conversation => _conversation;
@@ -204,26 +201,6 @@ public sealed class OrchestratorEngine : IDisposable
         Steering = steering ?? SteeringService.BesideIdeas(ideaService);
         _gitService = gitService;
         _runner = runner;
-    }
-
-    /// <summary>The archive for the AgentHub repository this build came from (or Desktop\AgentHub), with its own worktree.</summary>
-    public static AgentHubArchive? DefaultArchive(ProcessRunner runner)
-    {
-        var repo = Environment.GetEnvironmentVariable("AGENTHUB_RUNS_REPO") is { Length: > 0 } r ? r : FindAgentHubRepository();
-        if (repo is null) return null;
-        var worktree = Environment.GetEnvironmentVariable("AGENTHUB_RUNS_WORKTREE") is { Length: > 0 } w ? w : @"C:\data\agenthub\workflows-archive";
-        return new AgentHubArchive(runner, repo, worktree);
-    }
-
-    private static string? FindAgentHubRepository()
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "AgentHub.sln")) && Directory.Exists(Path.Combine(dir.FullName, ".git")))
-                return dir.FullName;
-        }
-        var desktop = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Desktop", "AgentHub");
-        return Directory.Exists(Path.Combine(desktop, ".git")) ? desktop : null;
     }
 
     // ---- Worker attachment ----
@@ -289,7 +266,7 @@ public sealed class OrchestratorEngine : IDisposable
     {
         await RecoverInterruptedRunsAsync();
         if (_run != null && _run.Record.IdeaId != idea.Id)
-            await SuspendRunAsync($"Daniel started \"{idea.Title}\" instead.");
+            await SuspendRunAsync($"The owner started \"{idea.Title}\" instead.");
 
         _currentIdea = idea;
         CurrentIdeaChanged?.Invoke(_currentIdea);
@@ -297,11 +274,11 @@ public sealed class OrchestratorEngine : IDisposable
         StartLoop();
         Log($"Build requested for \"{idea.Title}\".");
 
-        // Resumed after a pause (or a question for Daniel) with the worker still there: carry on in place.
+        // Resumed after a pause (or a question for the owner) with the worker still there: carry on in place.
         if (_run != null && _run.Record.IdeaId == idea.Id && _worker is { IsRunning: true })
         {
             if (idea.Status == IdeaStatus.Paused) { idea.Status = IdeaStatus.Building; idea.StatusNote = "Building"; await _ideaService.UpdateIdeaAsync(idea); }
-            await AskAsync(new OrchestratorInput(OrchestratorEvent.Resumed) { Spec = idea.Description, EventDetail = "Daniel pressed Build Now; [SPEC] is the idea's spec as it is now, possibly just updated by him" });
+            await AskAsync(new OrchestratorInput(OrchestratorEvent.Resumed) { Spec = idea.Description, EventDetail = "the owner pressed Build Now; [SPEC] is the idea's spec as it is now, possibly just updated by him" });
             return;
         }
         await LaunchWorkerSessionAsync(idea);
@@ -312,7 +289,7 @@ public sealed class OrchestratorEngine : IDisposable
         if (_state is OrchestratorState.Paused or OrchestratorState.Idle) return;
         SetState(OrchestratorState.Paused);
         Log("Auto-Builder paused. The worker is left as it is; it gets nothing new until you resume.");
-        _ = AddEventAsync(new RunEvent { Kind = "paused", Detail = "Paused by Daniel." });
+        _ = AddEventAsync(new RunEvent { Kind = "paused", Detail = "Paused by the owner." });
     }
 
     public async Task ResumeAsync()
@@ -332,8 +309,8 @@ public sealed class OrchestratorEngine : IDisposable
 
         if (_run != null && _worker is { IsRunning: false } && _currentIdea is { } current)
         {
-            // The builder's session ended while paused (closed pane): Resume is Daniel asking for a fresh one.
-            await LaunchWorkerSessionAsync(current, "Daniel resumed after the builder's session ended");
+            // The builder's session ended while paused (closed pane): Resume is the owner asking for a fresh one.
+            await LaunchWorkerSessionAsync(current, "the owner resumed after the builder's session ended");
             return;
         }
         if (_run != null && _worker is { IsRunning: true })
@@ -351,7 +328,7 @@ public sealed class OrchestratorEngine : IDisposable
         _handoffRequested = false;
         Log("Auto-Builder stopped.");
         var ideaId = _run?.Record.IdeaId ?? _currentIdea?.Id;
-        _ = EndRunAsync("stopped", "Stopped by Daniel.");
+        _ = EndRunAsync("stopped", "Stopped by the owner.");
         if (ideaId != null) _ = MarkNotBuildingAsync(ideaId, IdeaStatus.Paused, "Stopped");
     }
 
@@ -414,7 +391,7 @@ public sealed class OrchestratorEngine : IDisposable
 
     /// <summary>
     /// The folder a new or reopened run works in. The repository folder itself, unless another engine's worker works there
-    /// (Daniel 2026-11-06: a second run on the same repository gets a separate git worktree): then a worktree on a branch of
+    /// (owner feedback 2026-11-06: a second run on the same repository gets a separate git worktree): then a worktree on a branch of
     /// its own under <see cref="WorktreesRoot"/>, made if missing and reused if there. Throws when git cannot make it.
     /// </summary>
     private async Task<(string? Dir, string? Branch, bool Created)> WorkFolderAsync(ProjectIdea idea)
@@ -644,12 +621,11 @@ public sealed class OrchestratorEngine : IDisposable
             return;
         }
 
-        if (Archive == null) return;
-        try { Log(await Archive.PublishRunAsync(run.Folder)); }
-        catch (Exception ex) { Log($"Run kept locally; publishing to the repository failed: {ex.Message}", "Warn"); }
+        try { Log($"Run recorded in {run.Folder}; all runs: {await RunRecorder.WriteIndexAsync(RunsRoot)}"); }
+        catch (Exception ex) { Log($"Could not update the runs index: {ex.Message}", "Warn"); }
     }
 
-    /// <summary>Open runs whose idea is gone or already completed can never be picked up again: close and publish them.</summary>
+    /// <summary>Open runs whose idea is gone or already completed can never be picked up again: close them.</summary>
     private async Task RecoverInterruptedRunsAsync()
     {
         if (_recovered) return;
@@ -667,7 +643,7 @@ public sealed class OrchestratorEngine : IDisposable
                 var recorder = new RunRecorder(dir, record);
                 record.WorkerCommits = await CommitsSinceAsync(record.WorkingDirectory ?? record.TargetDirectory, record.StartedAt, 200);
                 await recorder.FinishAsync("interrupted", idea == null ? "The idea was deleted while the run was open." : "The idea was completed elsewhere while this run was open.");
-                if (Archive != null) Log(await Archive.PublishRunAsync(dir));
+                await RunRecorder.WriteIndexAsync(RunsRoot);
             }
             catch (Exception ex) { Log($"Could not close run {record.RunId}: {ex.Message}", "Warn"); }
         }
@@ -730,7 +706,7 @@ public sealed class OrchestratorEngine : IDisposable
                 // No worktree, so no folder of its own: working in the busy one would put two workers in one tree.
                 _workDir = null;
                 _currentIdea = idea;
-                await PauseForDanielCoreAsync($"Another orchestrator is working in {idea.TargetDirectory} and a separate git worktree could not be made: {ex.Message}");
+                await PauseForOwnerCoreAsync($"Another orchestrator is working in {idea.TargetDirectory} and a separate git worktree could not be made: {ex.Message}");
                 return;
             }
         }
@@ -836,7 +812,7 @@ public sealed class OrchestratorEngine : IDisposable
             }
             _freshWorktree = false;
             // The starter handoff copies the spec. While nobody has worked on it yet ("Not started"), rewrite it from the spec as it is
-            // now, so a spec written after the first try (Daniel 2026-11-05: Build Now on the placeholder) does not sit beside a stale Goal.
+            // now, so a spec written after the first try (owner feedback 2026-11-05: Build Now on the placeholder) does not sit beside a stale Goal.
             var untouchedStarter = existing != null
                 && existing.StartsWith("# Autonomous Project:", StringComparison.Ordinal)
                 && existing.Contains("**Status:** Not started.", StringComparison.Ordinal);
@@ -925,7 +901,7 @@ public sealed class OrchestratorEngine : IDisposable
 
             if (run.Record.OrchestratorCalls >= MaxDecisionsPerRun)
             {
-                await PauseForDanielCoreAsync($"The run reached its limit of {MaxDecisionsPerRun} orchestrator decisions. Resume to allow more, or stop it.");
+                await PauseForOwnerCoreAsync($"The run reached its limit of {MaxDecisionsPerRun} orchestrator decisions. Resume to allow more, or stop it.");
                 return;
             }
 
@@ -958,7 +934,7 @@ public sealed class OrchestratorEngine : IDisposable
                 }
                 else
                 {
-                    await PauseForDanielCoreAsync($"The orchestrator failed: {ex.Message}");
+                    await PauseForOwnerCoreAsync($"The orchestrator failed: {ex.Message}");
                 }
                 return;
             }
@@ -1080,7 +1056,7 @@ public sealed class OrchestratorEngine : IDisposable
                     await RequestHandoffAsync(f.StageDone && f.Stage != null ? $"stage {f.Stage} is done: {f.Reason}" : $"The orchestrator asked for it: {f.Reason}", forced: false);
                     break;
                 case OrchestratorAction.Complete: await CompleteIdeaAsync(f); break;
-                case OrchestratorAction.PauseForDaniel: await PauseForDanielAsync(f.Progress.Length > 0 ? f.Progress : f.Reason); break;
+                case OrchestratorAction.PauseForOwner: await PauseForOwnerAsync(f.Progress.Length > 0 ? f.Progress : f.Reason); break;
             }
         }
     }
@@ -1144,20 +1120,20 @@ public sealed class OrchestratorEngine : IDisposable
         await AdvanceQueueAsync();
     }
 
-    private async Task PauseForDanielAsync(string question)
+    private async Task PauseForOwnerAsync(string question)
     {
         await _gate.WaitAsync();
-        try { await PauseForDanielCoreAsync(question); }
+        try { await PauseForOwnerCoreAsync(question); }
         finally { _gate.Release(); }
     }
 
-    private async Task PauseForDanielCoreAsync(string question)
+    private async Task PauseForOwnerCoreAsync(string question)
     {
         // Save the idea first: the Ideas window reloads the queue when the state changes.
         if (_currentIdea is { } idea)
         {
             idea.Status = IdeaStatus.Paused;
-            idea.StatusNote = "Waiting for Daniel: " + OneLine(question, 200);
+            idea.StatusNote = "Waiting for you: " + OneLine(question, 200);
             await _ideaService.UpdateIdeaAsync(idea);
         }
         AddExchange(ExchangeKind.Question, question);
@@ -1266,14 +1242,14 @@ public sealed class OrchestratorEngine : IDisposable
         }
         if (_state != OrchestratorState.Building) return;
 
-        // A session AgentHub did not end: Daniel closed its pane (or typed /exit), or the CLI died. Never start another one on
-        // our own (Daniel 2026-11-05: "can you cancel everything it keeps running sessions" after closing panes got three
+        // A session AgentHub did not end: the owner closed its pane (or typed /exit), or the CLI died. Never start another one on
+        // our own (owner feedback 2026-11-05: "can you cancel everything it keeps running sessions" after closing panes got three
         // fresh workers in a minute). Pause; Build Now / Resume starts a fresh worker that picks up from the handoff.
         var quick = DateTimeOffset.Now - _workerStartedAt < TimeSpan.FromMinutes(1);
         await AddEventAsync(new RunEvent { Kind = "error", Detail = $"The worker session ended without AgentHub ending it{(quick ? " (within a minute of starting)" : "")}.", Flag = true });
         if (_run.Record.WorkerSessions.LastOrDefault() is { EndedAt: null } s) { s.EndedAt = DateTimeOffset.Now; s.EndReason = "exited"; s.TranscriptPath ??= _worker?.TranscriptPath; }
         Log("The builder's session ended (its pane was closed or the CLI exited). Build paused: nothing new is started until you press Build Now or Resume.", "Warn");
-        await PauseForDanielAsync(quick
+        await PauseForOwnerAsync(quick
             ? "The builder's session ended straight after it started. Check that the CLI runs in that folder, then press Build Now."
             : "The builder's session ended (pane closed or CLI exited). Press Build Now to carry on with a fresh builder.");
     }
@@ -1328,7 +1304,7 @@ public sealed class OrchestratorEngine : IDisposable
     // ---- Steering ----
 
     /// <summary>
-    /// Daniel's message for the orchestrator. It never goes to the worker directly: the orchestrator gets it at the worker's
+    /// The owner's message for the orchestrator. It never goes to the worker directly: the orchestrator gets it at the worker's
     /// next turn end (straight away when <paramref name="urgent"/>, or when the worker is already idle) and decides how
     /// to pass it on.
     /// </summary>

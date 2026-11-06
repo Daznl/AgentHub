@@ -26,7 +26,7 @@
     <None Update="Terminal\Assets\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <!-- Built-in orchestrator workflow templates (read-only in the app; Daniel copies one to make his own). -->
+    <!-- Built-in orchestrator workflow templates (read-only in the app; the owner copies one to make their own). -->
     <None Include="..\..\workflows\*.md" Link="workflows\%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

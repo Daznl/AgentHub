@@ -1,5 +1,5 @@
 ﻿# LIVE UI test: real orchestrator + real worker in a pane, tiny context window, forced handoff. Spends Claude usage.
-# ideas, archive repo and projects folder. UI Automation patterns only: no mouse, no keyboard, no focus stealing.
+# ideas, workflows folder and projects folder. UI Automation patterns only: no mouse, no keyboard, no focus stealing.
 param([string]$Exe = 'C:\data\agenthub\build-repo\AgentHub.exe')
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
@@ -65,8 +65,7 @@ function IdeaById($id) { (Ideas) | Where-Object { $_.Id -eq $id } | Select-Objec
 $Window = 90000   # a fresh Claude Code session already uses about 46k; the 75% limit is 67.5k
 $Minutes = 45
 Remove-Item $T -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force "$T\projects", "$T\archive-repo" | Out-Null
-git -C "$T\archive-repo" init -q; git -C "$T\archive-repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+New-Item -ItemType Directory -Force "$T\projects" | Out-Null
 $settings = Get-Content "$env:APPDATA\AgentHub\settings.json" -Raw | ConvertFrom-Json
 $settings.PaneLayout = @(); $settings.SessionsDirectory = "$T\sessions"; $settings.HistoryArchiveEnabled = $false; $settings.SessionsOutliveAgentHub = $false; $settings.AnimatedBackground = $false
 $settings | Add-Member -Force NoteProperty ClaudeContextWindowTokens $Window
@@ -81,14 +80,14 @@ $proj = Join-Path "$T\projects" 'Tally'
 $ideas = @(@{ Id = 'liveone'; Title = 'Tally'; Description = $spec; TargetDirectory = $proj; AgentCommand = 'claude'; ContextHandoffThreshold = 0.75; Status = 0; WorkflowId = 'template:builder' })
 [IO.File]::WriteAllText("$T\ideas.json", (ConvertTo-Json -InputObject $ideas -Depth 5))
 
-$env:AGENTHUB_SETTINGS_DIR = $T; $env:AGENTHUB_RUNS_DIR = "$T\runs"; $env:AGENTHUB_RUNS_REPO = "$T\archive-repo"
-$env:AGENTHUB_RUNS_WORKTREE = "$T\archive"; $env:AGENTHUB_PROJECTS_DIR = "$T\projects"
+$env:AGENTHUB_SETTINGS_DIR = $T; $env:AGENTHUB_RUNS_DIR = "$T\runs"
+$env:AGENTHUB_WORKFLOWS_DIR = "$T\workflows"; $env:AGENTHUB_PROJECTS_DIR = "$T\projects"
 $log = Join-Path $Shots "live-$(Get-Date -Format yyyyMMdd-HHmmss).log"
 function Say($s) { $line = "[$(Get-Date -Format HH:mm:ss)] $s"; $line
   for ($r = 0; $r -lt 10; $r++) {   # a watcher may have the log open: append with shared access
     try { $fs = New-Object IO.FileStream($log, 'Append', 'Write', 'ReadWrite'); $b = [Text.Encoding]::UTF8.GetBytes($line + "`r`n"); $fs.Write($b, 0, $b.Length); $fs.Close(); break } catch { Start-Sleep -Milliseconds 200 } } }
 # Run from a Claude Code shell, the app would hand its CLAUDECODE/CLAUDE_*/AI_AGENT variables (and any API key) to the worker,
-# whose claude then runs in print mode and exits at once. Daniel starts AgentHub from the taskbar without them.
+# whose claude then runs in print mode and exits at once. the owner starts AgentHub from the taskbar without them.
 Get-ChildItem env: | Where-Object { $_.Name -like 'CLAUDE*' -or $_.Name -like 'ANTHROPIC*' -or $_.Name -eq 'AI_AGENT' } | ForEach-Object { Remove-Item "env:$($_.Name)" }
 $p = Start-Process $Exe -PassThru; $script:procId = $p.Id
 try {

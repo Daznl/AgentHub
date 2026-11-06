@@ -281,7 +281,7 @@ public sealed partial class GitHubService
     [GeneratedRegex(@"(?<url>https?://\S+/login/device\S*)", RegexOptions.IgnoreCase)]
     private static partial Regex VerificationUrlRegex();
 
-    // "(check) Logged in as DanielWallisBarker"
+    // "(check) Logged in as octocat"
     [GeneratedRegex(@"Logged in as\s+(?<login>[A-Za-z0-9][A-Za-z0-9-]*)", RegexOptions.IgnoreCase)]
     private static partial Regex LoggedInAsRegex();
 }

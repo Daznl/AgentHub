@@ -32,7 +32,9 @@ public class OrchestratorDecisionTests
         var d = Parse("""{"action":"wait","to_worker":"ignored","steer_handling":"none","reason":"training","progress":"p"}""");
         Assert.Equal(OrchestratorAction.Wait, d.Action);
         Assert.Null(d.ToWorker);
-        Assert.Equal(OrchestratorAction.PauseForDaniel, Parse("""{"action":"pause_for_daniel","to_worker":null,"steer_handling":"none","reason":"r","progress":"Pay for the API?"}""").Action);
+        Assert.Equal(OrchestratorAction.PauseForOwner, Parse("""{"action":"pause_for_owner","to_worker":null,"steer_handling":"none","reason":"r","progress":"Pay for the API?"}""").Action);
+        // The old name still parses: an orchestrator session resumed from a run started before the rename may use it.
+        Assert.Equal(OrchestratorAction.PauseForOwner, Parse("""{"action":"pause_for_daniel","to_worker":null,"steer_handling":"none","reason":"r","progress":"Pay for the API?"}""").Action);
     }
 
     [Theory]
@@ -83,7 +85,7 @@ public class OrchestratorMessagesTests
         Assert.Contains("[STATUS] worker session 1 · decision 3", msg);
         Assert.Contains("[RECENT COMMITS] newest first\nabc123 Stage 1", msg);
         Assert.Contains("[WORKER FINAL REPLY]\nStage 1 done, 31 tests pass.", msg);
-        Assert.Contains("[STEER FROM DANIEL]\n1. (09:05) Use pytest", msg);
+        Assert.Contains("[STEER FROM OWNER]\n1. (09:05) Use pytest", msg);
         Assert.DoesNotContain("URGENT", msg);
         Assert.EndsWith("Reply with the decision JSON.", msg);
     }
@@ -93,7 +95,7 @@ public class OrchestratorMessagesTests
     {
         var urgent = OrchestratorMessages.Compose(new OrchestratorInput(OrchestratorEvent.SteerReceived)
         { Steers = [new SteeringNote { Text = "Stop training" }], UrgentSteer = true, WorkerBusy = true });
-        Assert.Contains("[STEER FROM DANIEL] URGENT: relay now", urgent);
+        Assert.Contains("[STEER FROM OWNER] URGENT: relay now", urgent);
         Assert.Contains("mid-turn", urgent);
         Assert.DoesNotContain("[WORKER FINAL REPLY]", urgent);
 
@@ -116,7 +118,7 @@ public class OrchestratorMessagesTests
     public void Worker_rules_and_system_prompt_say_who_is_who()
     {
         var sys = OrchestratorMessages.SystemPrompt("Bot", @"C:\x");
-        Assert.Contains("Daniel is not in this conversation", sys);
+        Assert.Contains("The owner is not in this conversation", sys);
         Assert.Contains("The worker only sees \"to_worker\"", sys);
         Assert.Contains("orchestrator, not a person", OrchestratorMessages.AutonomyRules);
     }
@@ -197,55 +199,26 @@ public class RunArchiveTests : IDisposable
         return (r.ExitCode, r.StdOut.Trim() + r.StdErr.Trim());
     }
 
+    /// <summary>2026-11-06: runs never go into a repository (they hold the owner's projects); an index sits beside them.</summary>
     [Fact]
-    public async Task Publisher_commits_runs_to_their_own_branch_without_touching_the_working_branch()
+    public async Task Finished_runs_get_an_index_beside_them_and_nothing_goes_into_a_repository()
     {
-        // Repository with a space in its path, on a feature branch with an uncommitted change.
-        var repo = Path.Combine(_dir, "Agent Hub repo");
-        Directory.CreateDirectory(repo);
-        await Git(repo, "init", "-q", "-b", "main");
-        await Git(repo, "config", "user.email", "t@example.com");
-        await Git(repo, "config", "user.name", "Test");
-        await File.WriteAllTextAsync(Path.Combine(repo, "app.txt"), "v1");
-        await Git(repo, "add", ".");
-        await Git(repo, "commit", "-q", "-m", "init");
-        await Git(repo, "switch", "-q", "-c", "feature/x");
-        await File.WriteAllTextAsync(Path.Combine(repo, "app.txt"), "work in progress");
-
         var runs = Path.Combine(_dir, "runs");
         foreach (var (id, title) in new[] { ("2026-11-06_0900_bot_aaaaaa", "Bot"), ("2026-11-06_1000_app_bbbbbb", "App") })
         {
             var rec = new RunRecorder(Path.Combine(runs, id), Record(id, title));
             await rec.AddAsync(new RunEvent { At = DateTimeOffset.Now, Kind = "note", Detail = "x" });
             await rec.FinishAsync("completed", null, Path.Combine(_dir, "no-projects"));
-            await File.WriteAllTextAsync(Path.Combine(rec.Folder, "worker-transcript.jsonl"), "secret");
         }
 
-        var publisher = new AgentHubArchive(new ProcessRunner(), repo, Path.Combine(_dir, "archive worktree"));
-        var first = await publisher.PublishRunAsync(Path.Combine(runs, "2026-11-06_0900_bot_aaaaaa"));
-        var second = await publisher.PublishRunAsync(Path.Combine(runs, "2026-11-06_1000_app_bbbbbb"));
-        Assert.Contains("not pushed", first);
-        Assert.Contains("not pushed", second);
+        var index = await RunRecorder.WriteIndexAsync(runs);
 
-        Assert.Equal((0, "feature/x"), await Git(repo, "rev-parse", "--abbrev-ref", "HEAD"));
-        Assert.Equal("work in progress", await File.ReadAllTextAsync(Path.Combine(repo, "app.txt")));
-        Assert.False(Directory.Exists(Path.Combine(repo, AgentHubArchive.RunsFolder)));
-
-        var (_, files) = await Git(repo, "ls-tree", "-r", "--name-only", AgentHubArchive.Branch);
-        Assert.Contains("README.md", files);
-        Assert.Contains("runs/INDEX.md", files);
-        Assert.Contains("runs/2026-11-06_0900_bot_aaaaaa/REVIEW.md", files);
-        Assert.Contains("runs/2026-11-06_1000_app_bbbbbb/run.json", files);
-        Assert.DoesNotContain("worker-transcript", files);
-
-        var (_, log) = await Git(repo, "log", "--format=%s", AgentHubArchive.Branch);
-        Assert.Contains("Orchestrator run 2026-11-06_1000_app_bbbbbb: App (completed)", log);
-        var (_, mainLog) = await Git(repo, "log", "--format=%s", "main");
-        Assert.Equal("init", mainLog);
-
-        var index = await File.ReadAllTextAsync(Path.Combine(publisher.RunsPath, "INDEX.md"));
-        Assert.Contains("[Bot](2026-11-06_0900_bot_aaaaaa/REVIEW.md)", index);
-        Assert.Contains("[App](2026-11-06_1000_app_bbbbbb/REVIEW.md)", index);
+        Assert.Equal(Path.Combine(runs, "INDEX.md"), index);
+        var text = await File.ReadAllTextAsync(index);
+        Assert.Contains("[Bot](2026-11-06_0900_bot_aaaaaa/REVIEW.md)", text);
+        Assert.Contains("[App](2026-11-06_1000_app_bbbbbb/REVIEW.md)", text);
+        Assert.True(File.Exists(Path.Combine(runs, "2026-11-06_0900_bot_aaaaaa", "REVIEW.md")));
+        Assert.False(Directory.Exists(Path.Combine(runs, ".git")));
     }
 }
 
@@ -588,7 +561,7 @@ public class OrchestratorLoopTests : IDisposable
         }
     }
 
-    /// <summary>Daniel 2026-11-06: the box shows only the current worker session; a fresh worker starts it over.</summary>
+    /// <summary>Owner feedback 2026-11-06: the box shows only the current worker session; a fresh worker starts it over.</summary>
     [Fact]
     public async Task A_fresh_worker_starts_the_conversation_over()
     {
@@ -622,11 +595,11 @@ public class OrchestratorLoopTests : IDisposable
     }
 
     [Fact]
-    public async Task A_question_for_Daniel_pauses_the_build_and_resuming_asks_the_orchestrator_again()
+    public async Task A_question_for_the_owner_pauses_the_build_and_resuming_asks_the_orchestrator_again()
     {
         var brain = new ScriptedBrain(
             Send("Start."),
-            new OrchestratorDecision(OrchestratorAction.PauseForDaniel, null, "none", "Needs a paid key", "Should I buy a market data subscription?"),
+            new OrchestratorDecision(OrchestratorAction.PauseForOwner, null, "none", "Needs a paid key", "Should I buy a market data subscription?"),
             Send("Use the free data source.", steer: "relayed"));
         var (engine, ideas, idea) = Setup(brain);
         await ideas.AddIdeaAsync(idea);
@@ -652,9 +625,9 @@ public class OrchestratorLoopTests : IDisposable
     }
 
     [Fact]
-    public async Task Closing_the_builders_pane_pauses_the_build_and_starts_nothing_until_Daniel_resumes()
+    public async Task Closing_the_builders_pane_pauses_the_build_and_starts_nothing_until_the_owner_resumes()
     {
-        // Daniel 2026-11-05: closing the builder's pane got three fresh workers in a minute ("it keeps running sessions").
+        // Owner feedback 2026-11-05: closing the builder's pane got three fresh workers in a minute ("it keeps running sessions").
         var brain = new ScriptedBrain(Send("Build slice 1."), Send("Carry on from the handoff."));
         var (engine, ideas, idea) = Setup(brain);
         await ideas.AddIdeaAsync(idea);
@@ -683,9 +656,9 @@ public class OrchestratorLoopTests : IDisposable
     [Fact]
     public async Task Writing_the_spec_after_a_question_and_pressing_Build_Now_hands_the_new_spec_to_the_orchestrator()
     {
-        // Daniel 2026-11-05: Build Now on the placeholder spec, the orchestrator asked "What should New App #1 be?", he wrote it.
+        // Owner feedback 2026-11-05: Build Now on the placeholder spec, the orchestrator asked "What should New App #1 be?", they wrote it.
         var brain = new ScriptedBrain(
-            new OrchestratorDecision(OrchestratorAction.PauseForDaniel, null, "none", "Spec is only the placeholder", "What should New App #1 be?"),
+            new OrchestratorDecision(OrchestratorAction.PauseForOwner, null, "none", "Spec is only the placeholder", "What should New App #1 be?"),
             Send("Build the habit tracker: start with the data model."));
         var (engine, ideas, idea) = Setup(brain);
         idea.Description = "Describe the goal, architecture, features, and requirements for this application.";
@@ -695,7 +668,7 @@ public class OrchestratorLoopTests : IDisposable
         using (engine)
         {
             await engine.BuildIdeaImmediatelyAsync(idea, worker);
-            await Until(() => engine.State == OrchestratorState.Paused, "question for Daniel");
+            await Until(() => engine.State == OrchestratorState.Paused, "question for the owner");
 
             var updated = (await ideas.LoadAsync()).Single(i => i.Id == idea.Id);
             updated.Description = "A habit tracker: daily habits, streaks, a weekly chart.";

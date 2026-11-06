@@ -306,7 +306,7 @@
         <!-- Drag to give the monitor (or the editor) more room. -->
         <GridSplitter Grid.Row="2" Height="12" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="Transparent" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" Cursor="SizeNS" ToolTip="Drag to resize" />
 
-        <!-- BOTTOM PANEL: THE ORCHESTRATION OF THE IDEA SELECTED ON THE LEFT (Daniel 2026-11-06: one monitor per selected run, not one global status) -->
+        <!-- BOTTOM PANEL: THE ORCHESTRATION OF THE IDEA SELECTED ON THE LEFT (owner feedback 2026-11-06: one monitor per selected run, not one global status) -->
         <Border Grid.Row="3" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,10">
             <Grid>
                 <Grid.ColumnDefinitions>

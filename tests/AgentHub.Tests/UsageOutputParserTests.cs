@@ -163,7 +163,7 @@ public class UsageOutputParserTests
         var raw = """
             ╭─── Claude Code v2.1.163 ────────────────────────────────────────╮
             │ Tips for getting started                                        │
-            │ Welcome back Daniel! Run /init to create a CLAUDE.md file       │
+            │ Welcome back Ada! Run /init to create a CLAUDE.md file       │
             │ What's new                                                      │
             │ Added requiredMinimumVersion and requiredMaximumVersion         │
             ╰─────────────────────────────────────────────────────────────────╯
@@ -189,7 +189,7 @@ public class UsageOutputParserTests
         var extracted = UsageOutputParser.ExtractRelevantScreen(raw, "claude");
 
         Assert.DoesNotContain("Tips for getting started", extracted);
-        Assert.DoesNotContain("Welcome back Daniel", extracted);
+        Assert.DoesNotContain("Welcome back Ada", extracted);
         Assert.DoesNotContain("What's new", extracted);
         Assert.Contains("Session", extracted);
         Assert.Contains("Current session", extracted);
@@ -203,7 +203,7 @@ public class UsageOutputParserTests
     {
         var raw = """
             ╭─── Claude Code v2.1.163 ────────────────────────────────────────╮
-            │ Welcome back Daniel!                                            │
+            │ Welcome back Ada!                                            │
             ╰─────────────────────────────────────────────────────────────────╯
             > /status
 
@@ -212,7 +212,7 @@ public class UsageOutputParserTests
 
         var extracted = UsageOutputParser.ExtractRelevantScreen(raw, "claude");
 
-        Assert.DoesNotContain("Welcome back Daniel", extracted);
+        Assert.DoesNotContain("Welcome back Ada", extracted);
         Assert.Contains("Loading your Claude Code stats", extracted);
     }
 

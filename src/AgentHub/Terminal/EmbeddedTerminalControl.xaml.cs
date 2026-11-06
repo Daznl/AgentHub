@@ -486,7 +486,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     private bool _promptSent;
 
     /// <summary>Set just before <see cref="StartSession"/> for an orchestrator worker: that session answers Claude Code's
-    /// folder trust check with yes (Daniel chose the folder for the build). Applies to the next session only.</summary>
+    /// folder trust check with yes (the owner chose the folder for the build). Applies to the next session only.</summary>
     public bool AnswerFolderTrust { get; set; }
 
     /// <summary>Whether the program in this terminal accepts bracketed pastes (agent prompts are sent as one).</summary>

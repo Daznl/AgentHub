@@ -12,12 +12,12 @@ public enum OrchestratorAction
     Handoff,
     /// <summary>The idea is finished: stop the worker and close the run.</summary>
     Complete,
-    /// <summary>Only Daniel can decide something: pause the build and show <see cref="OrchestratorDecision.Progress"/>.</summary>
-    PauseForDaniel
+    /// <summary>Only the owner can decide something: pause the build and show <see cref="OrchestratorDecision.Progress"/>.</summary>
+    PauseForOwner
 }
 
 /// <summary>
-/// The orchestrator's one and only output, per message it is sent. The orchestrator never talks to Daniel or the worker
+/// The orchestrator's one and only output, per message it is sent. The orchestrator never talks to the owner or the worker
 /// directly: AgentHub carries the decision out.
 /// </summary>
 public sealed record OrchestratorDecision(
@@ -35,7 +35,7 @@ public sealed record OrchestratorDecision(
         OrchestratorAction.Wait => "wait",
         OrchestratorAction.Handoff => "handoff",
         OrchestratorAction.Complete => "complete",
-        _ => "pause_for_daniel"
+        _ => "pause_for_owner"
     };
 
     /// <summary>JSON schema handed to <c>claude -p --json-schema</c>.</summary>
@@ -44,11 +44,11 @@ public sealed record OrchestratorDecision(
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "action": { "type": "string", "enum": ["send", "wait", "handoff", "complete", "pause_for_daniel"] },
+            "action": { "type": "string", "enum": ["send", "wait", "handoff", "complete", "pause_for_owner"] },
             "to_worker": { "type": ["string", "null"], "description": "The exact message for the worker. Required for send, null otherwise." },
             "steer_handling": { "type": "string", "enum": ["relayed", "held", "none"], "description": "What you did with steers in this message: relayed in to_worker, held for a later message, or none received." },
             "reason": { "type": "string", "description": "One sentence: why this action now." },
-            "progress": { "type": "string", "description": "One line on where the build stands, shown in AgentHub. For pause_for_daniel: the question for Daniel." },
+            "progress": { "type": "string", "description": "One line on where the build stands, shown in AgentHub. For pause_for_owner: the question for the owner." },
             "stage": { "type": ["string", "null"], "description": "The stage or phase the work is in, when the workflow has stages; null otherwise." },
             "stage_done": { "type": "boolean", "description": "True only in the reply where you confirm that stage is finished and checked." }
           },
@@ -74,8 +74,8 @@ public sealed record OrchestratorDecision(
             "wait" => OrchestratorAction.Wait,
             "handoff" => OrchestratorAction.Handoff,
             "complete" => OrchestratorAction.Complete,
-            "pause_for_daniel" => OrchestratorAction.PauseForDaniel,
-            _ => throw new FormatException($"\"action\" must be one of send, wait, handoff, complete, pause_for_daniel (got \"{actionText}\").")
+            "pause_for_owner" or "pause_for_daniel" => OrchestratorAction.PauseForOwner, // the old name, from runs started before 2026-11-06
+            _ => throw new FormatException($"\"action\" must be one of send, wait, handoff, complete, pause_for_owner (got \"{actionText}\").")
         };
 
         var toWorker = Str("to_worker")?.Trim();

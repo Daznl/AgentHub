@@ -172,6 +172,25 @@ public sealed class RunRecorder
         return list;
     }
 
+    /// <summary>
+    /// Rewrites INDEX.md (every run, newest first) in the runs folder and returns its path. Runs stay on this computer:
+    /// they hold the worker's reports and the owner's steers, so they never go into a repository (2026-11-06, before
+    /// AgentHub was shared with coworkers).
+    /// </summary>
+    public static async Task<string> WriteIndexAsync(string runsRoot)
+    {
+        Directory.CreateDirectory(runsRoot);
+        var records = Directory.EnumerateDirectories(runsRoot)
+            .Select(d => ReadRecord(Path.Combine(d, "run.json")))
+            .OfType<RunRecord>()
+            .ToList();
+        var index = Path.Combine(runsRoot, "INDEX.md");
+        var temp = index + ".tmp";
+        await File.WriteAllTextAsync(temp, RunReview.RenderIndex(records));
+        await SharedFile.ReplaceAsync(temp, index);
+        return index;
+    }
+
     public static RunRecord? ReadRecord(string recordPath)
     {
         try { return File.Exists(recordPath) ? JsonSerializer.Deserialize<RunRecord>(File.ReadAllText(recordPath), Json) : null; }
@@ -196,7 +215,10 @@ public sealed class RunRecorder
             var transcript = FindTranscript(Record.OrchestratorSessionId, claudeProjectsRoot);
             if (transcript is not null) File.Copy(transcript, Path.Combine(Folder, "orchestrator.jsonl"), overwrite: true);
 
-            await File.WriteAllTextAsync(Path.Combine(Folder, "REVIEW.md"), RunReview.Render(Record, ReadEvents(EventsPath)));
+            // Whole or not at all: a reader (the runs index, a test, an editor) may open it the moment it appears.
+            var review = Path.Combine(Folder, "REVIEW.md");
+            await File.WriteAllTextAsync(review + ".tmp", RunReview.Render(Record, ReadEvents(EventsPath)));
+            await SharedFile.ReplaceAsync(review + ".tmp", review);
         }
         finally { _lock.Release(); }
     }
@@ -270,7 +292,7 @@ public static class RunReview
                 if (e.WorkerReply is not null) sb.Append("**Worker reported:**\n\n").Append(Quote(OrchestratorMessages.Cut(e.WorkerReply, 1500, keepTail: true))).Append("\n\n");
                 if (e.Steers is { Count: > 0 })
                 {
-                    sb.Append("**Steer from Daniel:**\n\n");
+                    sb.Append("**Steer from the owner:**\n\n");
                     foreach (var s in e.Steers) sb.Append("> ").Append(OneLine(s)).Append('\n');
                     sb.Append("\n_Handling: ").Append(e.SteerHandling).Append("_\n\n");
                 }

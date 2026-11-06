@@ -8,11 +8,11 @@ using AgentHub.Terminal;
 namespace AgentHub.Services.Orchestrator;
 
 /// <summary>
-/// Every orchestrator AgentHub runs, side by side (Daniel 2026-11-06: starting a second orchestration suspended the first;
+/// Every orchestrator AgentHub runs, side by side (owner feedback 2026-11-06: starting a second orchestration suspended the first;
 /// "can we make this as many as we want?"). Each is an <see cref="OrchestratorEngine"/> with its own worker pane, run,
 /// conversation and log, working exactly as a lone one did. Build Now starts one per idea; the Auto-Builder is one more that
 /// works through the queue, skipping ideas another is building. Runs on the same repository get separate git worktrees.
-/// The fleet holds what they share: one usage reading for the one Claude account, the run archive, the workflows, and the
+/// The fleet holds what they share: one usage reading for the one Claude account, the workflows, and the
 /// tidy-up after a restart.
 /// </summary>
 public sealed class OrchestratorFleet : IDisposable
@@ -24,7 +24,7 @@ public sealed class OrchestratorFleet : IDisposable
     private readonly object _sync = new();
     private bool _recovered;
 
-    /// <param name="newEngine">Makes an engine with AgentHub's settings (archive, workflows, repository hook) and the given steering store; the fleet wires the rest.</param>
+    /// <param name="newEngine">Makes an engine with AgentHub's settings (workflows, repository hook) and the given steering store; the fleet wires the rest.</param>
     public OrchestratorFleet(IdeaService ideaService, Func<SteeringService, OrchestratorEngine> newEngine, SteeringService? steering = null)
     {
         _newEngine = newEngine;
@@ -36,8 +36,6 @@ public sealed class OrchestratorFleet : IDisposable
 
     /// <summary>Where every engine's workflows come from (set to the same catalogue the engine factory uses).</summary>
     public WorkflowCatalogue? Workflows { get; init; }
-    /// <summary>The run archive every engine publishes to (set to the same one the engine factory uses).</summary>
-    public AgentHubArchive? Archive { get; init; }
     /// <summary>Where runs are written live.</summary>
     public string RunsRoot { get; init; } = Environment.GetEnvironmentVariable("AGENTHUB_RUNS_DIR") is { Length: > 0 } d ? d : @"C:\data\agenthub\orchestrator-runs";
 
@@ -79,7 +77,7 @@ public sealed class OrchestratorFleet : IDisposable
 
     /// <summary>
     /// Builds the idea now in its own orchestrator, beside any others. The idea's engine is reused when it has one (a pause,
-    /// a question for Daniel, or a finished run); otherwise a new one. Never touches another idea's run.
+    /// a question for the owner, or a finished run); otherwise a new one. Never touches another idea's run.
     /// </summary>
     public async Task<OrchestratorEngine> BuildNowAsync(ProjectIdea idea, Func<OrchestratorEngine?, TerminalPaneControl?> pane)
     {
@@ -147,7 +145,7 @@ public sealed class OrchestratorFleet : IDisposable
         void Keep(OrchestratorLog entry) => Logs.Add(entry);
     }
 
-    /// <summary>Pauses every running orchestrator (Daniel's "stop everything"): each worker is left as it is.</summary>
+    /// <summary>Pauses every running orchestrator (the owner's "stop everything"): each worker is left as it is.</summary>
     public void PauseAll()
     {
         foreach (var e in Active) e.Pause();

@@ -5,7 +5,7 @@ namespace AgentHub.Terminal;
 /// <summary>
 /// Spots Claude Code's "Do you trust this folder?" check on screen and gives the keys that answer yes. Its default answer
 /// is "No, exit", so a prompt typed at it followed by Enter ends the session (2026-11-05: every orchestrated build in a new
-/// project folder stopped there and paused). Only orchestrator workers answer it on their own: Daniel picked the folder
+/// project folder stopped there and paused). Only orchestrator workers answer it on their own: the owner picked the folder
 /// for the build. Panes he starts himself still ask him.
 /// </summary>
 public sealed class FolderTrustPrompt

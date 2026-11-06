@@ -1,5 +1,5 @@
 ﻿# UI test for the Orchestration window's Repository picker and New project, on a TEST AgentHub with its own settings,
-# ideas, archive repo and projects folder. UI Automation patterns only: no mouse, no keyboard, no focus stealing.
+# ideas, workflows folder and projects folder. UI Automation patterns only: no mouse, no keyboard, no focus stealing.
 param([string]$Exe = 'C:\data\agenthub\build-repo\AgentHub.exe')
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
@@ -55,16 +55,15 @@ function Repos { (Get-Content "$T\settings.json" -Raw | ConvertFrom-Json).Reposi
 
 # ---- fresh test state ----
 Remove-Item $T -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force "$T\projects", "$T\unlisted-folder", "$T\archive-repo" | Out-Null
-git -C "$T\archive-repo" init -q; git -C "$T\archive-repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+New-Item -ItemType Directory -Force "$T\projects", "$T\unlisted-folder" | Out-Null
 $settings = Get-Content "$env:APPDATA\AgentHub\settings.json" -Raw | ConvertFrom-Json
 $settings.PaneLayout = @(); $settings.SessionsDirectory = "$T\sessions"; $settings.HistoryArchiveEnabled = $false; $settings.SessionsOutliveAgentHub = $false; $settings.AnimatedBackground = $false
 [IO.File]::WriteAllText("$T\settings.json", ($settings | ConvertTo-Json -Depth 20))
 [IO.File]::WriteAllText("$T\ideas.json", '[]')
 $repoCountAtStart = @(Repos).Count
 
-$env:AGENTHUB_SETTINGS_DIR = $T; $env:AGENTHUB_RUNS_DIR = "$T\runs"; $env:AGENTHUB_RUNS_REPO = "$T\archive-repo"
-$env:AGENTHUB_RUNS_WORKTREE = "$T\archive"; $env:AGENTHUB_PROJECTS_DIR = "$T\projects"
+$env:AGENTHUB_SETTINGS_DIR = $T; $env:AGENTHUB_RUNS_DIR = "$T\runs"
+$env:AGENTHUB_WORKFLOWS_DIR = "$T\workflows"; $env:AGENTHUB_PROJECTS_DIR = "$T\projects"
 $p = Start-Process $Exe -PassThru; $script:procId = $p.Id
 try {
   $main = $null
@@ -93,7 +92,7 @@ try {
   Click (FindName $orch '*Save Changes'); Start-Sleep 1
   $ok = Dialog 'Saved'; $ok.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close(); Start-Sleep 1
   $idea = (Ideas)[0]
-  Check ($idea.TargetDirectory -eq 'C:\Users\danie\Desktop\ClaudeCProjects\Pie') "ideas.json has Pie's folder (got '$($idea.TargetDirectory)')"
+  Check ($idea.TargetDirectory -eq "$env:USERPROFILE\Desktop\ClaudeCProjects\Pie") "ideas.json has Pie's folder (got '$($idea.TargetDirectory)')"
   Check ((Selected $combo) -eq 'Pie') "still Pie after the save reload (got '$(Selected $combo)')"
 
   "3. A folder that is not one of AgentHub's repositories"

@@ -89,7 +89,7 @@ public class DiskUsageReaderTests
 
             var newestPath = Path.Combine(nested, "rollout-new-without-limits.jsonl");
             File.WriteAllText(newestPath,
-                "{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"C:\\\\Users\\\\danie\\\\Desktop\\\\AgentHub\"}}\n");
+                "{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"C:\\\\Users\\\\me\\\\Desktop\\\\AgentHub\"}}\n");
             File.SetLastWriteTimeUtc(newestPath, DateTime.UtcNow.AddMinutes(5));
 
             var snapshot = CodexUsageReader.Read(CodexProvider(), dir);

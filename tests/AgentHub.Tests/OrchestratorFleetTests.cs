@@ -9,7 +9,7 @@ using Xunit;
 namespace AgentHub.Tests;
 
 /// <summary>
-/// Daniel 2026-11-06: starting a second orchestration suspended the first ("can we make this as many as we want?").
+/// Owner feedback 2026-11-06: starting a second orchestration suspended the first ("can we make this as many as we want?").
 /// Orchestrators now run side by side; a second run on the same repository gets a git worktree of its own.
 /// </summary>
 public class OrchestratorFleetTests : IDisposable

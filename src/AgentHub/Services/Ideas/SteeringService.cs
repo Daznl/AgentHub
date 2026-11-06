@@ -6,7 +6,7 @@ using AgentHub.Models;
 namespace AgentHub.Services.Ideas;
 
 /// <summary>
-/// Stores steering notes (Daniel's messages for the orchestrator) in steering.json next to ideas.json. Kept apart from <see cref="ProjectIdea"/> on
+/// Stores steering notes (the owner's messages for the orchestrator) in steering.json next to ideas.json. Kept apart from <see cref="ProjectIdea"/> on
 /// purpose: the orchestrator and the Ideas window each hold their own copy of an idea and save it whole,
 /// so a note stored on the idea could be overwritten by the other side's next save.
 /// </summary>

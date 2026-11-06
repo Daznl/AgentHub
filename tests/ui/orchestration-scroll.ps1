@@ -1,5 +1,5 @@
 ﻿# UI test: the Orchestration editor scrolls on a short window and the handoff box is never cut off, on a TEST AgentHub with its own settings,
-# ideas, archive repo and projects folder. UI Automation patterns only: no mouse, no keyboard, no focus stealing.
+# ideas, workflows folder and projects folder. UI Automation patterns only: no mouse, no keyboard, no focus stealing.
 param([string]$Exe = 'C:\data\agenthub\build-repo\AgentHub.exe')
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
@@ -62,16 +62,15 @@ function Rect($el) { $el.Current.BoundingRectangle }
 
 # ---- fresh test state: one idea whose folder has a long handoff ----
 Remove-Item $T -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force "$T\projects", "$T\archive-repo", "$T\proj\.agenthub" | Out-Null
-git -C "$T\archive-repo" init -q; git -C "$T\archive-repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+New-Item -ItemType Directory -Force "$T\projects", "$T\proj\.agenthub" | Out-Null
 $settings = Get-Content "$env:APPDATA\AgentHub\settings.json" -Raw | ConvertFrom-Json
 $settings.PaneLayout = @(); $settings.SessionsDirectory = "$T\sessions"; $settings.HistoryArchiveEnabled = $false; $settings.SessionsOutliveAgentHub = $false; $settings.AnimatedBackground = $false
 [IO.File]::WriteAllText("$T\settings.json", ($settings | ConvertTo-Json -Depth 20))
 [IO.File]::WriteAllText("$T\proj\.agenthub\handoff.md", "# Handoff marker`n" + ((1..200 | ForEach-Object { "line $_ of the handoff" }) -join "`n"))
 [IO.File]::WriteAllText("$T\ideas.json", ('[{"Id":"uitestidea","Title":"Scroll test","Description":"x","TargetDirectory":"' + ("$T\proj" -replace '\\', '\\') + '","AgentCommand":"claude","ContextHandoffThreshold":0.75,"Status":0,"WorkflowId":"template:builder"}]'))
 
-$env:AGENTHUB_SETTINGS_DIR = $T; $env:AGENTHUB_RUNS_DIR = "$T\runs"; $env:AGENTHUB_RUNS_REPO = "$T\archive-repo"
-$env:AGENTHUB_RUNS_WORKTREE = "$T\archive"; $env:AGENTHUB_PROJECTS_DIR = "$T\projects"
+$env:AGENTHUB_SETTINGS_DIR = $T; $env:AGENTHUB_RUNS_DIR = "$T\runs"
+$env:AGENTHUB_WORKFLOWS_DIR = "$T\workflows"; $env:AGENTHUB_PROJECTS_DIR = "$T\projects"
 $p = Start-Process $Exe -PassThru; $script:procId = $p.Id
 try {
   $main = $null

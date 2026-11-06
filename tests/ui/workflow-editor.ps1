@@ -1,5 +1,5 @@
 ﻿# UI test for the workflow editor (edit a template, save as own workflow, use it), on a TEST AgentHub with its own settings,
-# ideas, archive repo and projects folder. UI Automation patterns only: no mouse, no keyboard, no focus stealing.
+# ideas, workflows folder and projects folder. UI Automation patterns only: no mouse, no keyboard, no focus stealing.
 param([string]$Exe = 'C:\data\agenthub\build-repo\AgentHub.exe')
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
@@ -59,17 +59,16 @@ function SetText($el, $text) { $el.GetCurrentPattern($Val).SetValue($text) }
 
 # ---- fresh test state: one idea, no own workflows ----
 Remove-Item $T -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force "$T\projects", "$T\archive-repo" | Out-Null
-git -C "$T\archive-repo" init -q; git -C "$T\archive-repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+New-Item -ItemType Directory -Force "$T\projects" | Out-Null
 $settings = Get-Content "$env:APPDATA\AgentHub\settings.json" -Raw | ConvertFrom-Json
 $settings.PaneLayout = @(); $settings.SessionsDirectory = "$T\sessions"; $settings.HistoryArchiveEnabled = $false; $settings.SessionsOutliveAgentHub = $false; $settings.AnimatedBackground = $false
 [IO.File]::WriteAllText("$T\settings.json", ($settings | ConvertTo-Json -Depth 20))
-[IO.File]::WriteAllText("$T\ideas.json", '[{"Id":"uitestidea","Title":"Sales data","Description":"Process the sales data","TargetDirectory":"C:\\Users\\danie\\Desktop\\ClaudeCProjects\\Pie","AgentCommand":"claude","ContextHandoffThreshold":0.75,"Status":0,"WorkflowId":"template:builder"}]')
+[IO.File]::WriteAllText("$T\ideas.json", '[{"Id":"uitestidea","Title":"Sales data","Description":"Process the sales data","TargetDirectory":"C:\\Work\\Pie","AgentCommand":"claude","ContextHandoffThreshold":0.75,"Status":0,"WorkflowId":"template:builder"}]')
 $templateFile = Join-Path (Split-Path $Exe) 'workflows\data-processing.md'
 $templateBefore = (Get-FileHash $templateFile).Hash
 
-$env:AGENTHUB_SETTINGS_DIR = $T; $env:AGENTHUB_RUNS_DIR = "$T\runs"; $env:AGENTHUB_RUNS_REPO = "$T\archive-repo"
-$env:AGENTHUB_RUNS_WORKTREE = "$T\archive"; $env:AGENTHUB_PROJECTS_DIR = "$T\projects"
+$env:AGENTHUB_SETTINGS_DIR = $T; $env:AGENTHUB_RUNS_DIR = "$T\runs"
+$env:AGENTHUB_WORKFLOWS_DIR = "$T\workflows"; $env:AGENTHUB_PROJECTS_DIR = "$T\projects"
 $p = Start-Process $Exe -PassThru; $script:procId = $p.Id
 try {
   $main = $null
@@ -104,7 +103,7 @@ try {
   Pick $model 'opus'
   Check ((Selected $model) -eq 'opus') "model now opus (got '$(Selected $model)')"
   Click (Find $wf 'SaveBtn'); Start-Sleep 3
-  $saved = "$T\archive\workflows\sales-pipeline.md"
+  $saved = "$T\workflows\sales-pipeline.md"
   Check (Test-Path $saved) 'saved as workflows/sales-pipeline.md'
   $text = if (Test-Path $saved) { Get-Content $saved -Raw } else { '' }
   Check ($text -match 'model: opus') 'file has model: opus'
@@ -112,7 +111,6 @@ try {
   Check ($text -match 'compare row counts') 'file has the added instructions'
   Check ($text -match 'based-on: Data Processing') 'file says it is based on Data Processing'
   Check ((Get-FileHash $templateFile).Hash -eq $templateBefore) 'template file unchanged'
-  Check ((git -C "$T\archive-repo" log --format=%s agenthub-workflows) -match 'Sales pipeline') 'committed to the archive branch'
   Check ((Find $wf 'SaveBtn').Current.Name -eq '💾 Save') "now editing the own copy (button '$((Find $wf 'SaveBtn').Current.Name)')"
   Shot $wf 'w-saved.png'
 

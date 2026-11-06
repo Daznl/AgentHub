@@ -87,7 +87,7 @@
     </Grid.RowDefinitions>
 
     <!-- The orchestrator driving this pane's session, in a small box above it. Only on the pane an orchestration run
-         controls; every other pane (Daniel's own terminals) never shows it. -->
+         controls; every other pane (the owner's own terminals) never shows it. -->
     <Border x:Name="OrchestratorBox" Grid.Row="0" Visibility="Collapsed" Background="#151129" BorderBrush="#4C3A8C" BorderThickness="1"
             CornerRadius="8" Padding="10,6" Margin="0,0,0,6">
         <Grid>

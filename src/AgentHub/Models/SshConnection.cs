@@ -30,7 +30,7 @@ public sealed partial class SshConnection
     {
         var match = TargetPattern().Match(target.Trim());
         if (!match.Success)
-            return "Enter the address as user@host or user@host:port, for example daniel@192.168.8.186.";
+            return "Enter the address as user@host or user@host:port, for example me@buildbox or me@192.168.1.20:2222.";
         if (match.Groups["port"].Success && (!int.TryParse(match.Groups["port"].Value, out var port) || port is < 1 or > 65535))
             return "The port must be between 1 and 65535.";
         return null;

@@ -7,9 +7,9 @@ public class SquashMatcherTests
     private static readonly DateTimeOffset Day = new(2026, 11, 4, 9, 0, 0, TimeSpan.FromHours(8));
     private static string Full(string hash) => hash.PadRight(40, '0');
     private static TimelineCommit Commit(string hash, double hours, string subject, params string[] parents) =>
-        new(Full(hash), parents.Select(Full).ToList(), Day.AddHours(hours), "Daniel", subject);
+        new(Full(hash), parents.Select(Full).ToList(), Day.AddHours(hours), "Ada", subject);
     private static PullRequestFact Merged(int number, string head, string? mergeCommit) =>
-        new(number, "title", head, "main", "daniel", "daniel", Day.AddHours(number), mergeCommit, 0, false, "MERGED");
+        new(number, "title", head, "main", "ada", "ada", Day.AddHours(number), mergeCommit, 0, false, "MERGED");
 
     [Fact]
     public void Squash_subjects_are_the_pull_request_number_at_the_end()

@@ -187,7 +187,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     private readonly ObservableCollection<OrchestratorExchange> _conversation = [];
 
-    /// <summary>Shows the run's conversation; follows the newest message unless Daniel scrolled up.</summary>
+    /// <summary>Shows the run's conversation; follows the newest message unless the owner scrolled up.</summary>
     private void ShowConversation(IReadOnlyList<OrchestratorExchange> next)
     {
         if (OrchestratorConversation.ItemsSource is null) OrchestratorConversation.ItemsSource = _conversation;

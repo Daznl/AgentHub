@@ -73,9 +73,9 @@
   - Context window handoff loop: monitors transcript token consumption via `ContextWindowTracker`, prompts clean handoff documentation to `.agenthub/handoff.md` when reaching threshold (e.g. 75%), terminates bloated session cleanly, and launches a fresh session continuing from handoff notes
   - GitHub synchronization: 1-click fetch/pull/compile for AgentHub directly from GitHub
 - [x] **Claude orchestrator** (`ClaudeOrchestratorBrain`, `OrchestratorMessages`, `OrchestratorDecision`): a headless Sonnet Claude Code session directs the worker turn by turn with JSON decisions; steers go to it, not the worker; hard limits (usage cap, context handoff, decision cap) stay in code
-- [x] **Run archive** (`RunRecorder`, `RunReview`, `AgentHubArchive`): every run recorded live, REVIEW.md + INDEX.md, committed under `runs/` on the `agenthub-workflows` branch through a dedicated worktree
+- [x] **Run archive** (`RunRecorder`, `RunReview`): every run recorded live, REVIEW.md + INDEX.md beside it; kept on this computer, never committed
 - [x] **Workflow catalogue** (`OrchestratorWorkflow`, `WorkflowCatalogue`, 📚 `WorkflowsWindow`):
-  - Builder, Data Processing and Demo Builder templates; duplicate, fill in inputs and save your own (kept on the archive branch); one workflow per idea
+  - Builder, Data Processing and Demo Builder templates; duplicate, fill in inputs and save your own (in git-ignored `workflows/local/`); one workflow per idea
   - stages with a fresh worker after each one
   - runs suspended on close and reopened on the next build
 - [x] **Parallel orchestrations** (`OrchestratorFleet`): one engine per Build Now plus the Auto-Builder lane, side by side; shared usage reading and steering; a second run on a busy repository gets its own git worktree and branch; the Orchestration window monitors the selected idea's run

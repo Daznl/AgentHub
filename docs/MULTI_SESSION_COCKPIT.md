@@ -1,11 +1,11 @@
-# Multi-Session Embedded Cockpit Architecture & Staging Plan
+﻿# Multi-Session Embedded Cockpit Architecture & Staging Plan
 
 ## 1. Key Architectural Requirements
 
 ### 1.1 Multi-Session Orchestration
 - **Concurrent Session Management:** AgentHub concurrently manages, monitors, and interacts with multiple running agent CLI sessions (e.g., Antigravity `agy`, Claude Code `claude`, OpenAI Codex `codex`, or PowerShell scripts) across separate repositories or worktrees.
 - **Durable Session Lifecycle:** Each session transitions through explicit states:
-  - `Starting` → `Running` → `NeedsAttention` (awaiting user confirmation) → `Completed` | `Failed` | `Terminated`.
+  - `Starting` â†’ `Running` â†’ `NeedsAttention` (awaiting user confirmation) â†’ `Completed` | `Failed` | `Terminated`.
 - **Session Metadata:** Track for every session:
   - Unique session ID, repository ID, target branch, and isolated working directory path.
   - Active agent definition (binary, arguments, working tree).
@@ -45,27 +45,27 @@
 ### 2.1 Component Architecture
 
 ```text
-┌────────────────────────────────────────────────────────────────────────┐
-│                          AgentHub WPF Client                           │
-│                                                                        │
-│   ┌─────────────────────┐  ┌───────────────────────────────────────┐   │
-│   │   SessionSidebar    │  │       TerminalGrid / Multiplexer      │   │
-│   │                     │  │                                       │   │
-│   │ [●] Repo A (agy)    │  │ ┌─────────────────┬─────────────────┐ │   │
-│   │ [🔔] Repo B (claude) │  │ │ Embedded Term 1 │ Embedded Term 2 │ │   │
-│   │                     │  │ └────────▲────────┴────────▲────────┘ │   │
-│   └──────────┬──────────┘  └──────────┼─────────────────┼──────────┘   │
-│              │                        │ I/O Events      │              │
-└──────────────┼────────────────────────┼─────────────────┼──────────────┘
-               │                        │                 │
-    ┌──────────▼──────────┐   ┌─────────▼────────┐ ┌──────▼──────────┐
-    │   SessionService    │   │  ConPtySession 1 │ │ ConPtySession 2 │
-    │  & AttentionDetector│   └─────────▲────────┘ └──────▲──────────┘
-    └──────────┬──────────┘             │ Pipes           │ Pipes
-               │              ┌─────────▼────────┐ ┌──────▼──────────┐
-    ┌──────────▼──────────┐   │  Antigravity CLI │ │ Claude Code CLI │
-    │   WorktreeService   │   │  (in Worktree A) │ │ (in Worktree B) │
-    └─────────────────────┘   └──────────────────┘ └─────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                          AgentHub WPF Client                           â”‚
+â”‚                                                                        â”‚
+â”‚   â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
+â”‚   â”‚   SessionSidebar    â”‚  â”‚       TerminalGrid / Multiplexer      â”‚   â”‚
+â”‚   â”‚                     â”‚  â”‚                                       â”‚   â”‚
+â”‚   â”‚ [â—] Repo A (agy)    â”‚  â”‚ â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â” â”‚   â”‚
+â”‚   â”‚ [ðŸ””] Repo B (claude) â”‚  â”‚ â”‚ Embedded Term 1 â”‚ Embedded Term 2 â”‚ â”‚   â”‚
+â”‚   â”‚                     â”‚  â”‚ â””â”€â”€â”€â”€â”€â”€â”€â”€â–²â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â–²â”€â”€â”€â”€â”€â”€â”€â”€â”˜ â”‚   â”‚
+â”‚   â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
+â”‚              â”‚                        â”‚ I/O Events      â”‚              â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+               â”‚                        â”‚                 â”‚
+    â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â” â”Œâ”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+    â”‚   SessionService    â”‚   â”‚  ConPtySession 1 â”‚ â”‚ ConPtySession 2 â”‚
+    â”‚  & AttentionDetectorâ”‚   â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â–²â”€â”€â”€â”€â”€â”€â”€â”€â”˜ â””â”€â”€â”€â”€â”€â”€â–²â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+    â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜             â”‚ Pipes           â”‚ Pipes
+               â”‚              â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â” â”Œâ”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+    â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚  Antigravity CLI â”‚ â”‚ Claude Code CLI â”‚
+    â”‚   WorktreeService   â”‚   â”‚  (in Worktree A) â”‚ â”‚ (in Worktree B) â”‚
+    â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜ â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 ### 2.2 Core Data Models
@@ -106,20 +106,20 @@ was always a registered repo's `LocalPath` (or the process CWD when none existed
 plain PowerShell in any folder without registering it as a repository first.
 
 ```text
-Cockpit toolbar "📂 PowerShell in Folder…"          Pane toolbar "📂"
-        │                                                  │  (event: FolderLaunchRequested)
-        ▼                                                  ▼
+Cockpit toolbar "ðŸ“‚ PowerShell in Folderâ€¦"          Pane toolbar "ðŸ“‚"
+        â”‚                                                  â”‚  (event: FolderLaunchRequested)
+        â–¼                                                  â–¼
 MainWindow.OpenPowerShellInFolder_Click        MainWindow.OnPaneFolderLaunchRequested
-        │                                                  │  confirm if pane.IsRunning
-        └──────────────► PickWorkingFolderAsync ◄──────────┘
-                          │  Forms.FolderBrowserDialog (Vista-style Explorer picker)
-                          │  starts at settings.LastTerminalFolder, else Desktop
-                          │  persists the chosen folder (best-effort SaveAsync)
-                          ▼
+        â”‚                                                  â”‚  confirm if pane.IsRunning
+        â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–º PickWorkingFolderAsync â—„â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                          â”‚  Forms.FolderBrowserDialog (Vista-style Explorer picker)
+                          â”‚  starts at settings.LastTerminalFolder, else Desktop
+                          â”‚  persists the chosen folder (best-effort SaveAsync)
+                          â–¼
               new pane (<6) or first idle pane      pane.StartSession(pane.SelectedShell ?? PowerShell,
-              StartSession("powershell.exe -NoLogo",                  folder, "Terminal N · <shell>", <folder name>)
-                           folder, "Terminal N · PowerShell", <folder name>)
-                          ▼
+              StartSession("powershell.exe -NoLogo",                  folder, "Terminal N Â· <shell>", <folder name>)
+                           folder, "Terminal N Â· PowerShell", <folder name>)
+                          â–¼
               TerminalPaneControl.StartSession -> EmbeddedTerminalControl -> ConPtySession (cwd = folder)
 ```
 
@@ -129,14 +129,14 @@ Behaviour and rules:
   6-pane cap is reached the first pane with no running process is reused; if every pane is busy the
   user is told to close one or use the per-pane button. A running agent session is never replaced
   silently.
-- **Per-pane 📂 = that pane's selected shell/agent** (PowerShell, cmd, Codex, Claude Code, Antigravity
+- **Per-pane ðŸ“‚ = that pane's selected shell/agent** (PowerShell, cmd, Codex, Claude Code, Antigravity
   as configured in settings). If the pane is running, a Yes/No prompt precedes replacement.
 - **Folder memory:** `AppSettings.LastTerminalFolder` is the only new persisted field. It is
   validated with `Directory.Exists` before use so a deleted folder falls back to the Desktop.
 - **Repo dropdown stays consistent:** `TerminalPaneControl.StartSession` already selects the matching
   registered repository when the chosen folder equals a repo's `LocalPath`; otherwise the dropdown is
   left as-is and the header shows the folder name as the subtitle.
-- **Paths with spaces** (e.g. `OneDrive - IGO Limited\Projects\…`) are passed to ConPTY as the
+- **Paths with spaces** (e.g. `OneDrive - Company\Projects\â€¦`) are passed to ConPTY as the
   working directory, not embedded in a command line, so no quoting is involved.
 
 Code: `MainWindow.xaml.cs` (`PickWorkingFolderAsync`, `FolderDisplayName`,

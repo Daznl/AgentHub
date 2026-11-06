@@ -9,9 +9,9 @@ public enum ExchangeKind
     Sent,
     /// <summary>The orchestrator chose to send nothing yet; the text is its reason.</summary>
     Wait,
-    /// <summary>A steer from Daniel the orchestrator received.</summary>
+    /// <summary>A steer from the owner the orchestrator received.</summary>
     Steer,
-    /// <summary>The orchestrator paused the build for Daniel; the text is its question.</summary>
+    /// <summary>The orchestrator paused the build for the owner; the text is its question.</summary>
     Question,
     /// <summary>A message AgentHub itself typed into the worker (handoff, usage wrap-up).</summary>
     AgentHub
@@ -32,9 +32,9 @@ public sealed record OrchestratorExchange(DateTimeOffset At, ExchangeKind Kind, 
 }
 
 /// <summary>
-/// The small orchestrator box shown above the Cockpit pane an orchestration run is driving (Daniel 2026-11-05: "I should
+/// The small orchestrator box shown above the Cockpit pane an orchestration run is driving (owner feedback 2026-11-05: "I should
 /// also be able to see it in the main panel in a smaller box above the active session it is controlling"). Plain terminals
-/// never get one. It lists every message read and sent in the current worker session, oldest first (Daniel 2026-11-06:
+/// never get one. It lists every message read and sent in the current worker session, oldest first (owner feedback 2026-11-06:
 /// "show all of the messages received and sent for that session ... forget about anything from the previous handoff"),
 /// so it is clear how each message came about.
 /// </summary>

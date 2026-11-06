@@ -14,9 +14,9 @@ public enum OrchestratorEvent
     WorkerTurnEnded,
     /// <summary>The worker has sat idle since the orchestrator chose to wait.</summary>
     WorkerStillIdle,
-    /// <summary>Daniel sent a steer that should not wait for the worker's turn end (urgent, or the worker is idle).</summary>
+    /// <summary>The owner sent a steer that should not wait for the worker's turn end (urgent, or the worker is idle).</summary>
     SteerReceived,
-    /// <summary>Daniel resumed a paused build.</summary>
+    /// <summary>The owner resumed a paused build.</summary>
     Resumed,
     /// <summary>A run left paused or interrupted (AgentHub closed) is picked up again with a fresh worker.</summary>
     RunReopened
@@ -94,15 +94,15 @@ public static class OrchestratorMessages
 
     private static string CoreSystemPrompt(string ideaTitle, string targetDirectory) =>
         $"""
-        You are the ORCHESTRATOR of an autonomous job that AgentHub runs for Daniel. The project is "{ideaTitle}" in {targetDirectory}.
+        You are the ORCHESTRATOR of an autonomous job that AgentHub runs for its owner, the person using AgentHub. The project is "{ideaTitle}" in {targetDirectory}.
         A separate Claude Code session, the WORKER, does all the work there. You direct it; you never do the work yourself.
         The workflow section at the end says what kind of job this is and how to run it; follow it.
 
         How this conversation works:
         - Every message comes from AgentHub, the program that connects you to the worker. It has labelled sections:
           [EVENT] what happened, [STATUS] numbers about the run, [SPEC] the requirements, [HANDOFF.MD] the worker's notes file,
-          [RECENT COMMITS], [WORKER FINAL REPLY] the worker's last message, [STEER FROM DANIEL] direction from the project owner.
-        - Daniel is not in this conversation and never reads your replies. Steers are his instructions to you about the build.
+          [RECENT COMMITS], [WORKER FINAL REPLY] the worker's last message, [STEER FROM OWNER] direction from the project owner.
+        - The owner is not in this conversation and never reads your replies. Steers are their instructions to you about the build.
           Decide how and when they reach the worker: by default fold them, in your own words, into your next message to the worker
           when its current turn is over. If a steer is marked URGENT, relay it now. Never quote these labels to the worker.
         - The worker only sees "to_worker". It cannot see your reasoning, the status, or the steers unless you put them in.
@@ -116,7 +116,7 @@ public static class OrchestratorMessages
           fresh worker; you then write the new worker's first instruction. (AgentHub also forces a handoff itself when the worker's
           context window is nearly full.)
         - complete: every requirement in the spec is implemented and tested, and you have checked that yourself. AgentHub stops the build.
-        - pause_for_daniel: only when the build cannot sensibly continue without a decision only Daniel can make (spending money,
+        - pause_for_owner: only when the build cannot sensibly continue without a decision only the owner can make (spending money,
           credentials or accounts, anything irreversible outside the project folder). progress holds the question.
 
         - stage / stage_done: when the workflow has stages or phases, name the current one in "stage" every time, and set
@@ -164,7 +164,7 @@ public static class OrchestratorMessages
 
         if (input.Steers.Count > 0)
         {
-            sb.Append("[STEER FROM DANIEL]").Append(input.UrgentSteer ? " URGENT: relay now" : "").Append('\n');
+            sb.Append("[STEER FROM OWNER]").Append(input.UrgentSteer ? " URGENT: relay now" : "").Append('\n');
             for (var i = 0; i < input.Steers.Count; i++)
                 sb.Append(i + 1).Append(". (").Append(input.Steers[i].CreatedAt.ToString("HH:mm")).Append(") ").Append(input.Steers[i].Text.Trim()).Append('\n');
             sb.Append('\n');
@@ -185,9 +185,9 @@ public static class OrchestratorMessages
         OrchestratorEvent.WorkerStillIdle =>
             $"worker_still_idle: you chose to wait, and the worker has printed nothing for {input.EventDetail ?? "a while"}. Decide again.",
         OrchestratorEvent.SteerReceived => input.WorkerBusy
-            ? "steer_received: Daniel sent a steer while the worker is mid-turn. A send now is typed in and the worker reads it at its next step."
-            : "steer_received: Daniel sent a steer; the worker is idle at its prompt.",
-        OrchestratorEvent.Resumed => "resumed: Daniel resumed the build after a pause. The worker is at its prompt.",
+            ? "steer_received: the owner sent a steer while the worker is mid-turn. A send now is typed in and the worker reads it at its next step."
+            : "steer_received: the owner sent a steer; the worker is idle at its prompt.",
+        OrchestratorEvent.Resumed => "resumed: the owner resumed the build after a pause. The worker is at its prompt.",
         OrchestratorEvent.RunReopened =>
             $"run_reopened ({input.EventDetail ?? "AgentHub was restarted"}): this run is being picked up again, possibly the next day. " +
             "A fresh worker with an empty context is starting and has not been given anything yet. Carry on from where the run stood " +

@@ -356,7 +356,7 @@ public partial class IdeasWindow : Window
 
     /// <summary>
     /// Saves what is typed in the editor for the selected idea. Build Now, Start, switching ideas and every reload call this, so
-    /// a spec typed but not saved with 💾 is never lost or skipped (Daniel 2026-11-05: a paragraph typed, then Build Now built the placeholder).
+    /// a spec typed but not saved with 💾 is never lost or skipped (owner feedback 2026-11-05: a paragraph typed, then Build Now built the placeholder).
     /// </summary>
     private async Task<bool> SaveEditorAsync(bool force = false)
     {
@@ -459,7 +459,7 @@ public partial class IdeasWindow : Window
             return;
         }
 
-        // Its own orchestrator, beside the others: never suspends another idea's run (Daniel 2026-11-06).
+        // Its own orchestrator, beside the others: never suspends another idea's run (owner feedback 2026-11-06).
         if (_selectedIdea?.Id != idea.Id) IdeasList.SelectedItem = _ideas.FirstOrDefault(i => i.Id == idea.Id);
         try { await _fleet.BuildNowAsync(idea, _paneProvider); }
         catch (InvalidOperationException ex)
@@ -684,7 +684,7 @@ public partial class IdeasWindow : Window
     }
 
     /// <summary>
-    /// The monitor shows the orchestration of the idea selected on the left (Daniel 2026-11-06): its state, folder, controls,
+    /// The monitor shows the orchestration of the idea selected on the left (owner feedback 2026-11-06): its state, folder, controls,
     /// progress, conversation and log. An idea with none shows AgentHub's own notes in the log.
     /// </summary>
     private void ShowSelectedRun()
@@ -741,11 +741,11 @@ public partial class IdeasWindow : Window
         LogHeaderText.Text = engine == null ? "Activity Log (AgentHub)" : "Activity Log";
     }
 
-    /// <summary>Opens the run archive: the repository branch's INDEX.md when it exists, else the local runs folder.</summary>
+    /// <summary>Opens the runs index (INDEX.md in the runs folder) when there is one, else the runs folder.</summary>
     private void OpenRuns_Click(object sender, RoutedEventArgs e)
     {
-        var index = _fleet.Archive is { } p ? Path.Combine(p.RunsPath, "INDEX.md") : null;
-        var target = index != null && File.Exists(index) ? index : _fleet.RunsRoot;
+        var index = Path.Combine(_fleet.RunsRoot, "INDEX.md");
+        var target = File.Exists(index) ? index : _fleet.RunsRoot;
         try
         {
             Directory.CreateDirectory(_fleet.RunsRoot);

@@ -223,7 +223,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Each pane an orchestration run drives gets that run's box, and only those panes: Daniel's own terminals never show
+    /// Each pane an orchestration run drives gets that run's box, and only those panes: the owner's own terminals never show
     /// one. Engine events come from any thread.
     /// </summary>
     private void RefreshOrchestratorBoxes()
@@ -255,7 +255,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// The pane an engine's worker runs in: the one it already has, else an idle pane no other run drives, else a new one.
-    /// Never a pane with a running session of Daniel's (AGENTS.md: never replace a running session). Null when every pane
+    /// Never a pane with a running session of the owner's (AGENTS.md: never replace a running session). Null when every pane
     /// is busy. An idle engine still holding the chosen pane lets go of it.
     /// </summary>
     private TerminalPaneControl? PaneForOrchestrator(OrchestratorEngine? engine)
@@ -279,14 +279,12 @@ public partial class MainWindow : Window
     private OrchestratorFleet Orchestrators()
     {
         if (_orchestrators != null) return _orchestrators;
-        var archive = OrchestratorEngine.DefaultArchive(_runner);
-        var workflows = new WorkflowCatalogue(archive);
+        var workflows = new WorkflowCatalogue();
         _orchestrators = new OrchestratorFleet(_ideaService, steering => new OrchestratorEngine(_ideaService, _git, _runner, steering)
         {
-            Archive = archive,
             Workflows = workflows,
             RepositoryInUse = path => Dispatcher.InvokeAsync(() => EnsureRepositoryAsync(path)).Task.Unwrap()
-        }) { Workflows = workflows, Archive = archive };
+        }) { Workflows = workflows };
         _orchestrators.Changed += RefreshOrchestratorBoxes;
         return _orchestrators;
     }
