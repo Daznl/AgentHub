@@ -154,20 +154,20 @@ public sealed class SessionStore
         if (System.IO.Directory.Exists(dir)) System.IO.Directory.Delete(dir, recursive: true);
     }
 
-    /// <summary>True when the record's host process still runs (and is a session host, not a reused process id).</summary>
+    /// <summary>
+    /// True when the record's host process still runs (and is a session host, not a reused process id). The name is
+    /// checked first: it needs no process handle, whereas <see cref="Process.HasExited"/> opens one and is refused
+    /// ("Access is denied") when the id now belongs to a system or another user's process, which is then not our host.
+    /// </summary>
     public static bool IsHostAlive(SessionRecord record)
     {
         if (record.HostPid <= 0) return false;
         try
         {
             using var process = Process.GetProcessById(record.HostPid);
-            return !process.HasExited && string.Equals(process.ProcessName, HostProcessName, StringComparison.OrdinalIgnoreCase);
+            return string.Equals(process.ProcessName, HostProcessName, StringComparison.OrdinalIgnoreCase) && !process.HasExited;
         }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-        catch (InvalidOperationException)
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             return false;
         }

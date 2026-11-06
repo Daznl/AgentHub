@@ -119,4 +119,12 @@ public sealed class SessionStoreTests : IDisposable
         Assert.Matches(@"^\d{8}-\d{6}-[0-9a-f]{8}$", a);
         Assert.Equal("agenthub-session-" + a, SessionStore.PipeName(a));
     }
+
+    [Fact]
+    public void A_process_id_reused_by_a_protected_process_is_not_a_live_host()
+    {
+        // Process 4 is the System process: it exists, and opening it is refused, which used to crash startup.
+        Assert.False(SessionStore.IsHostAlive(new SessionRecord { Id = SessionStore.NewId(), HostPid = 4 }));
+        Assert.False(SessionStore.IsHostAlive(new SessionRecord { Id = SessionStore.NewId(), HostPid = Environment.ProcessId }));
+    }
 }
