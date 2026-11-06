@@ -1,5 +1,5 @@
 ---
-name: Data Processing (my copy)
+name: Data Processing Raptor
 description: Works through a data pipeline one stage at a time; a fresh worker for every stage, starting with a report on the last one.
 use-when: The idea is processing data in stages defined in a pipeline file (for example an Excel workbook).
 based-on: Data Processing
