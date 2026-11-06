@@ -31,3 +31,4 @@ Never let the worker delete or overwrite source data. Outputs go to new files or
 # Worker rules
 
 Work on one pipeline stage per session. After each stage, record in .agenthub/handoff.md under "## Stage log": the stage, what ran, outputs written (paths), row counts, warnings and open issues. Never modify or delete the source data.
+Always encourage signing into snowflake through the standard user account and do not use incognito
