@@ -14,7 +14,11 @@ public enum ExchangeKind
     /// <summary>The orchestrator paused the build for the owner; the text is its question.</summary>
     Question,
     /// <summary>A message AgentHub itself typed into the worker (handoff, usage wrap-up).</summary>
-    AgentHub
+    AgentHub,
+    /// <summary>The orchestrator's reply to the owner (pane orchestrator only: the run orchestrator never talks to the owner).</summary>
+    Reply,
+    /// <summary>A note from AgentHub to the owner (the orchestrator failed, its limit was reached).</summary>
+    Note
 }
 
 /// <summary>One message in the current worker session's conversation, as the orchestrator box lists it.</summary>
@@ -27,6 +31,8 @@ public sealed record OrchestratorExchange(DateTimeOffset At, ExchangeKind Kind, 
         ExchangeKind.Wait => "Orchestrator waits",
         ExchangeKind.Steer => "Your steer → orchestrator",
         ExchangeKind.Question => "Orchestrator asks you",
+        ExchangeKind.Reply => "Orchestrator → you",
+        ExchangeKind.Note => "AgentHub",
         _ => "AgentHub → worker",
     };
 }
@@ -41,6 +47,20 @@ public sealed record OrchestratorExchange(DateTimeOffset At, ExchangeKind Kind, 
 public sealed record OrchestratorBoxView(string Title, string State, string Progress, IReadOnlyList<OrchestratorExchange> Conversation, bool Paused)
 {
     public const string NothingYet = "Nothing yet: a new worker is briefed from the spec and the handoff notes.";
+    public const string NothingYetAttached = "Tell the orchestrator what the job is and how you want it run. Everything you type here goes to it, not the session; it answers you and instructs the session.";
+
+    /// <summary>
+    /// True for a pane orchestrator the owner attached (<see cref="PaneOrchestrator"/>): the box has a message line and a Detach
+    /// button, and no Pause or Orchestration window. False for a run orchestrator's box.
+    /// </summary>
+    public bool Attached { get; init; }
+
+    /// <summary>The box for an attached pane orchestrator.</summary>
+    public static OrchestratorBoxView ForAttached(PaneOrchestrator o)
+    {
+        var state = o.IsThinking ? "THINKING…" : o.Conversation.Count == 0 ? "LISTENING" : "ATTACHED";
+        return new OrchestratorBoxView("🧭 " + o.Title, state, OneLine(o.Note), o.Conversation, Paused: false) { Attached = true };
+    }
 
     /// <summary>The box for the engine's current state; null when nothing is being orchestrated.</summary>
     public static OrchestratorBoxView? For(OrchestratorState state, bool thinking, string? ideaTitle, int workerSession, string? progress,

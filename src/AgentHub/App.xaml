@@ -298,6 +298,16 @@
                     <Setter TargetName="Card" Property="BorderBrush" Value="#4ADE80" />
                     <Setter TargetName="Head" Property="Foreground" Value="#86EFAC" />
                 </DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="{x:Static orch:ExchangeKind.Note}">
+                    <Setter TargetName="Card" Property="BorderBrush" Value="#4ADE80" />
+                    <Setter TargetName="Head" Property="Foreground" Value="#86EFAC" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="{x:Static orch:ExchangeKind.Reply}">
+                    <Setter TargetName="Card" Property="BorderBrush" Value="#2DD4BF" />
+                    <Setter TargetName="Card" Property="Background" Value="#14262B" />
+                    <Setter TargetName="Head" Property="Foreground" Value="#5EEAD4" />
+                    <Setter TargetName="Body" Property="Foreground" Value="#E2E8F0" />
+                </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
     </Application.Resources>

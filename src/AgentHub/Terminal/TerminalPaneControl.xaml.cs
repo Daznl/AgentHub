@@ -166,12 +166,21 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     /// <summary>What the orchestrator box shows; null hides it. Only the pane an orchestration run controls gets one.</summary>
     public OrchestratorBoxView? OrchestratorView { get; private set; }
 
+    /// <summary>🧭 Orchestrate pressed in the header: the owner wants an orchestrator put on this running session.</summary>
+    public event Action<TerminalPaneControl, Button>? OrchestratorAttachRequested;
+    /// <summary>✕ Detach pressed in an attached orchestrator's box.</summary>
+    public event Action<TerminalPaneControl>? OrchestratorDetachRequested;
+    /// <summary>The owner sent a message to the attached orchestrator.</summary>
+    public event Action<TerminalPaneControl, string>? OrchestratorMessageSent;
+
     public void ShowOrchestrator(OrchestratorBoxView? view)
     {
+        var wasAttached = OrchestratorView?.Attached == true;
         OrchestratorView = view;
         if (view is null)
         {
             OrchestratorBox.Visibility = Visibility.Collapsed;
+            RefreshOrchestrateButton();
             return;
         }
         OrchestratorStateText.Text = view.State;
@@ -182,7 +191,40 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         ShowConversation(view.Conversation);
         OrchestratorPauseBtn.Content = view.Paused ? "▶ Resume" : "⏸ Pause";
         OrchestratorPauseBtn.ToolTip = view.Paused ? "Resume the orchestrator" : "Pause the orchestrator: the worker is left as it is and gets nothing new";
+        OrchestratorPauseBtn.Visibility = view.Attached ? Visibility.Collapsed : Visibility.Visible;
+        OrchestratorOpenBtn.Visibility = view.Attached ? Visibility.Collapsed : Visibility.Visible;
+        OrchestratorDetachBtn.Visibility = view.Attached ? Visibility.Visible : Visibility.Collapsed;
+        OrchestratorInputRow.Visibility = view.Attached ? Visibility.Visible : Visibility.Collapsed;
         OrchestratorBox.Visibility = Visibility.Visible;
+        RefreshOrchestrateButton();
+        // Just attached: the owner's next keystrokes are meant for the orchestrator.
+        if (view.Attached && !wasAttached) Dispatcher.BeginInvoke(() => OrchestratorInput.Focus(), System.Windows.Threading.DispatcherPriority.Input);
+    }
+
+    private bool _sessionRunning;
+
+    /// <summary>🧭 Orchestrate is offered on a running session that has no orchestrator yet.</summary>
+    private void RefreshOrchestrateButton() =>
+        OrchestrateBtn.Visibility = _sessionRunning && OrchestratorView is null ? Visibility.Visible : Visibility.Collapsed;
+
+    private void Orchestrate_Click(object sender, RoutedEventArgs e) => OrchestratorAttachRequested?.Invoke(this, OrchestrateBtn);
+    private void OrchestratorDetach_Click(object sender, RoutedEventArgs e) => OrchestratorDetachRequested?.Invoke(this);
+    private void OrchestratorSend_Click(object sender, RoutedEventArgs e) => SendOrchestratorInput();
+
+    private void OrchestratorInput_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Enter || (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Shift) != 0) return;
+        e.Handled = true;
+        SendOrchestratorInput();
+    }
+
+    private void SendOrchestratorInput()
+    {
+        var text = OrchestratorInput.Text.Trim();
+        if (text.Length == 0) return;
+        OrchestratorInput.Clear();
+        OrchestratorMessageSent?.Invoke(this, text);
+        OrchestratorInput.Focus();
     }
 
     private readonly ObservableCollection<OrchestratorExchange> _conversation = [];
@@ -196,7 +238,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             || _conversation.Count > 0 && (next.Count == 0 || !ReferenceEquals(_conversation[0], next[0])); // a new session starts at its end
         var changed = OrchestratorBoxView.Sync(_conversation, next);
 
-        OrchestratorNothingYet.Text = OrchestratorBoxView.NothingYet;
+        OrchestratorNothingYet.Text = OrchestratorView?.Attached == true ? OrchestratorBoxView.NothingYetAttached : OrchestratorBoxView.NothingYet;
         OrchestratorNothingYet.Visibility = next.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (changed && following)
             Dispatcher.BeginInvoke(scroll.ScrollToEnd, System.Windows.Threading.DispatcherPriority.Loaded);
@@ -507,6 +549,8 @@ public partial class TerminalPaneControl : UserControl, IDisposable
                 break;
         }
         ApplyHeaderMode(status == TerminalStatus.Running);
+        _sessionRunning = status == TerminalStatus.Running;
+        RefreshOrchestrateButton();
     }
 
     private void StopBtn_Click(object sender, RoutedEventArgs e) => Terminal.StopSession();

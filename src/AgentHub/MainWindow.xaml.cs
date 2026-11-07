@@ -219,7 +219,56 @@ public partial class MainWindow : Window
         pane.UpdateShellOptions(_shellOptions);
         pane.OrchestratorPauseRequested += p => { _ = ToggleOrchestratorPauseAsync(p); };
         pane.OrchestratorOpenRequested += _ => ShowIdeas();
+        pane.OrchestratorAttachRequested += (p, at) => { _ = OfferPaneOrchestratorAsync(p, at); };
+        pane.OrchestratorDetachRequested += DetachPaneOrchestrator;
+        pane.OrchestratorMessageSent += (p, text) => { if (_paneOrchestrators.TryGetValue(p, out var o)) _ = o.SendAsync(text); };
+        pane.SessionStateChanged += () => { if (!pane.IsRunning) DetachPaneOrchestrator(pane); };
         return pane;
+    }
+
+    // ---- Pane orchestrators: put on a running session with one click, taken off as freely ----
+
+    private readonly Dictionary<TerminalPaneControl, PaneOrchestrator> _paneOrchestrators = [];
+
+    /// <summary>
+    /// 🧭 Orchestrate pressed: a menu of contexts (none, or a workflow's instructions) and the orchestrator is on. The setup is
+    /// the menu pick; everything else the owner tells it by messaging it.
+    /// </summary>
+    private async Task OfferPaneOrchestratorAsync(TerminalPaneControl pane, Button at)
+    {
+        if (!pane.IsRunning || _paneOrchestrators.ContainsKey(pane) || _orchestrators?.EngineDriving(pane) != null) return;
+        var workflows = await new WorkflowCatalogue().ListAsync();
+        var menu = new ContextMenu { PlacementTarget = at, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        var plain = new MenuItem { Header = "Orchestrator with no preset context", ToolTip = "Tell it the job and how to run it by messaging it." };
+        plain.Click += (_, _) => AttachPaneOrchestrator(pane, null);
+        menu.Items.Add(plain);
+        if (workflows.Count > 0) menu.Items.Add(new Separator());
+        foreach (var w in workflows)
+        {
+            var item = new MenuItem { Header = "With context: " + w.DisplayName, ToolTip = string.IsNullOrWhiteSpace(w.Description) ? null : w.Description };
+            var picked = w;
+            item.Click += (_, _) => AttachPaneOrchestrator(pane, picked);
+            menu.Items.Add(item);
+        }
+        menu.IsOpen = true;
+    }
+
+    private void AttachPaneOrchestrator(TerminalPaneControl pane, OrchestratorWorkflow? workflow)
+    {
+        if (!pane.IsRunning || _paneOrchestrators.ContainsKey(pane)) return;
+        var orchestrator = PaneOrchestrator.ForPane(new PaneBuildWorker(pane), _runner, PaneOrchestrator.DefaultCommand, "sonnet",
+            pane.ContextFolder, $"Terminal {pane.PaneIndex}", workflow);
+        orchestrator.Changed += RefreshOrchestratorBoxes;
+        _paneOrchestrators[pane] = orchestrator;
+        RefreshOrchestratorBoxes();
+    }
+
+    private void DetachPaneOrchestrator(TerminalPaneControl pane)
+    {
+        if (!_paneOrchestrators.Remove(pane, out var orchestrator)) return;
+        orchestrator.Changed -= RefreshOrchestratorBoxes;
+        orchestrator.Dispose();
+        RefreshOrchestratorBoxes();
     }
 
     /// <summary>
@@ -236,8 +285,9 @@ public partial class MainWindow : Window
         foreach (var pane in _panes)
         {
             var o = _orchestrators?.EngineDriving(pane);
-            var next = o is null ? null : OrchestratorBoxView.For(o.State, o.IsThinking, o.CurrentIdea?.Title, o.WorkerSession, o.LatestProgress,
-                o.Conversation, o.WorktreeBranch);
+            var next = o is not null
+                ? OrchestratorBoxView.For(o.State, o.IsThinking, o.CurrentIdea?.Title, o.WorkerSession, o.LatestProgress, o.Conversation, o.WorktreeBranch)
+                : _paneOrchestrators.TryGetValue(pane, out var attached) ? OrchestratorBoxView.ForAttached(attached) : null;
             if (next != pane.OrchestratorView) pane.ShowOrchestrator(next);
         }
     }
@@ -2133,6 +2183,8 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _usageRefreshTimer.Stop();
+        foreach (var o in _paneOrchestrators.Values) o.Dispose();
+        _paneOrchestrators.Clear();
         _orchestrators?.Dispose();
         _historyArchive?.Dispose();
         try
