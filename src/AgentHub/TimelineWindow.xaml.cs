@@ -88,6 +88,23 @@ public partial class TimelineWindow : Window
             : scope.Root;
         StatusText.Text = "Reading commits and transcripts…";
 
+        // The crab opens the Timeline helper: the two reviews, and a conversation about how the timeline works
+        Helper.Actions = BuildReviewActions();
+        UpdateReviewButtons();
+        Crab.Poked += () => SetHelperOpen(!Crab.IsActive);
+        Helper.CloseRequested += () => SetHelperOpen(false);
+        Helper.ClaudeCommand = () => ReviewCommand;
+        Helper.AppState = DescribeState;
+        Helper.Examples.Clear();
+        foreach (var example in new[]
+                 {
+                     "How do I read the tree and its lanes?",
+                     "What is the difference between the two reviews?",
+                     "Why does a branch say not merged?",
+                     "Where are the review reports saved?",
+                 })
+            Helper.Examples.Add(example);
+
         Loaded += async (_, _) => await RefreshAsync(first: true);
         _timer.Tick += async (_, _) => await RefreshAsync(first: false);
         _timer.Start();
@@ -105,6 +122,97 @@ public partial class TimelineWindow : Window
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    // ---- Timeline helper (the crab): the two reviews, and questions about the timeline ----
+
+    private const double HelperWidth = 412;  // the pane and its margin
+    private double _helperGrewBy;
+    private double? _minWidthWanted;
+
+    // The side panels each add their width to the window's minimum, but never past the screen: a minimum wider than the
+    // screen forced the window wider than the monitor, with its header and crab out of reach.
+    private void WantMinWidth(double delta)
+    {
+        _minWidthWanted = (_minWidthWanted ?? MinWidth) + delta;
+        MinWidth = Math.Min(_minWidthWanted.Value, Controls.WindowPlacement.WorkArea(this).Width);
+    }
+
+    // The two review buttons at the top of the helper pane (style ReviewAction in the window's XAML). Built here, not in
+    // XAML: WPF registers no x:Name inside another control's content.
+    private Button ReviewSessionsBtn = null!, ReviewGitHubBtn = null!;
+    private TextBlock ReviewSessionsTitle = null!, ReviewGitHubTitle = null!, ReviewsNote = null!;
+
+    private StackPanel BuildReviewActions()
+    {
+        const string sessionsTip = "Ask Claude Code how you and Claude worked across the sessions: length and scope, handoffs kept, verifying rather than asking, tests before commits, prompts you keep retyping. Scored out of 10 by Claude, with rules to add to your CLAUDE.md. Uses your Claude login, no API key; only a condensed digest of the timeline is sent, and the report is saved under C:\\data\\agenthub\\timeline.";
+        const string githubTip = "Ask Claude Code about the GitHub cycle: branch names, commits straight on main, merge commits versus squashes, branches left after merging, self-merged and unreviewed pull requests. Scored out of 10 by AgentHub's own checks, findings by Claude, with rules to add to your CLAUDE.md. Only a condensed digest is sent; the report is saved under C:\\data\\agenthub\\timeline.";
+        var panel = new StackPanel();
+        panel.Children.Add(new TextBlock { Text = "Reviews", Foreground = Muted, FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) });
+        (ReviewSessionsBtn, ReviewSessionsTitle) = ReviewAction("✨ You & Claude",
+            "How the sessions went: scope, handoffs, verifying, tests before commits, prompts you keep retyping. Scored by Claude.", sessionsTip, ReviewSessions_Click);
+        (ReviewGitHubBtn, ReviewGitHubTitle) = ReviewAction("✨ GitHub cycle",
+            "Branch names, commits straight on main, merges versus squashes, branches left behind, unreviewed pull requests. Scored by AgentHub's checks.", githubTip, ReviewGitHub_Click);
+        panel.Children.Add(ReviewSessionsBtn);
+        panel.Children.Add(ReviewGitHubBtn);
+        ReviewsNote = new TextBlock { Foreground = Muted, FontSize = 11, TextWrapping = TextWrapping.Wrap };
+        panel.Children.Add(ReviewsNote);
+        return panel;
+    }
+
+    private (Button, TextBlock) ReviewAction(string title, string what, string tip, RoutedEventHandler click)
+    {
+        var name = new TextBlock { Text = title, Foreground = Frozen("#E8E2F5"), FontSize = 12, FontWeight = FontWeights.SemiBold };
+        var content = new StackPanel();
+        content.Children.Add(name);
+        content.Children.Add(new TextBlock { Text = what, Foreground = Frozen("#B6AECB"), FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 3, 0, 0) });
+        var button = new Button { Style = (Style)FindResource("ReviewAction"), Content = content, ToolTip = tip, IsEnabled = false };
+        System.Windows.Automation.AutomationProperties.SetName(button, title);
+        button.Click += click;
+        return (button, name);
+    }
+
+    /// <summary>Whether the crab wanders and does tricks; the main window passes its settings.</summary>
+    public bool CrabAnimated { set => Crab.SetAnimated(value); }
+
+    // The window widens by the pane so the tree keeps its size, and narrows again on close; a maximised window stays as it is.
+    // The crab glows and stays home while the pane is open, as a pressed button would.
+    private void SetHelperOpen(bool open)
+    {
+        Crab.IsActive = open;
+        if ((Helper.Visibility == Visibility.Visible) == open) return;
+        Helper.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        if (open)
+        {
+            _helperGrewBy = Controls.WindowPlacement.Widen(this, HelperWidth);
+            WantMinWidth(HelperWidth);
+            Helper.FocusInput();
+        }
+        else
+        {
+            WantMinWidth(-HelperWidth);
+            if (WindowState == WindowState.Normal && _helperGrewBy > 0) Width = Math.Max(MinWidth, Width - _helperGrewBy);
+            _helperGrewBy = 0;
+        }
+    }
+
+    /// <summary>What the helper can see: this timeline's scope and counts, and the reviews' state. Never transcripts.</summary>
+    private string DescribeState()
+    {
+        var state = new StringBuilder();
+        state.AppendLine("Current window: 🌳 Timeline (the helper is the crab in its header; the two reviews are the buttons at the top of the helper pane, not beside Refresh)");
+        state.AppendLine($"Repository: {_scope.Name} at {_scope.Root}{(_scope.IsGit ? "" : " (not a Git repository: one folder, no tree)")}");
+        if (_model is { } model)
+        {
+            state.AppendLine($"Rows: {model.Rows.Count}; sessions: {model.SessionCount}; commits: {model.CommitCount}; branches: {model.Branches.Count}; trunk: {model.TrunkName}");
+            state.AppendLine($"Subheading: {SubheadingText.Text}");
+        }
+        foreach (var kind in new[] { ReviewKind.Interaction, ReviewKind.GitHub })
+        {
+            var slot = Slot(kind);
+            state.AppendLine($"Review {TimelineReview.Title(kind)}: {(slot.Cts is not null ? "running" : slot.Result is { } r ? $"report shown beside the tree, saved at {r.ReportPath}" : "not run in this window")}");
+        }
+        return state.ToString();
+    }
 
     /// <summary>The repository's main folder (or the plain folder); one window per root.</summary>
     public string Root => _scope.Root;
@@ -305,6 +413,7 @@ public partial class TimelineWindow : Window
     {
         public required Border Border { get; init; }
         public required DockPanel Header { get; init; }
+        public required StackPanel Lead { get; init; }
         public required StackPanel Body { get; init; }
         public required StackPanel TitleStack { get; init; }
         public required WrapPanel TitleRow { get; init; }
@@ -330,8 +439,12 @@ public partial class TimelineWindow : Window
         border.Child = stack;
 
         var header = new DockPanel { LastChildFill = true, Cursor = expandable ? Cursors.Hand : Cursors.Arrow, Background = Brushes.Transparent };
+        // Lines shown without expanding (a commit card's first commits): under the header and as wide as the card, not
+        // beside the date at the right, which squeezed them to a few letters a line in a narrow window.
+        var lead = new StackPanel { Margin = new Thickness(16, 0, 0, 0) };
         var body = new StackPanel { Margin = new Thickness(0, 8, 0, 0), Visibility = Visibility.Collapsed };
         stack.Children.Add(header);
+        stack.Children.Add(lead);
         stack.Children.Add(body);
 
         // Every card keeps the chevron's width, so titles line up whether or not the card expands.
@@ -352,7 +465,7 @@ public partial class TimelineWindow : Window
         var meta = new TextBlock { Foreground = Muted, FontSize = 11, Margin = new Thickness(0, 3, 0, 0), TextWrapping = TextWrapping.Wrap };
         titleStack.Children.Add(meta);
 
-        return new Card { Border = border, Header = header, Body = body, TitleStack = titleStack, TitleRow = titleRow, Title = title, Meta = meta, Right = right, Chevron = chevron };
+        return new Card { Border = border, Header = header, Lead = lead, Body = body, TitleStack = titleStack, TitleRow = titleRow, Title = title, Meta = meta, Right = right, Chevron = chevron };
     }
 
     // Clicking the header shows or hides the body; the body is filled once, on first expansion. Expansion survives rebuilds by key.
@@ -370,9 +483,15 @@ public partial class TimelineWindow : Window
                 fill(card.Body);
             }
         }
-        card.Header.MouseLeftButtonUp += (_, e) => { SetExpanded(card.Body.Visibility != Visibility.Visible); e.Handled = true; };
-        card.Header.MouseEnter += (_, _) => card.Border.BorderBrush = CardHover;
-        card.Header.MouseLeave += (_, _) => card.Border.BorderBrush = card.Border.Tag as Brush ?? CardBorder;
+        // The lead lines under the header (a commit card's first commits) click and light like the header
+        card.Lead.Background = Brushes.Transparent;
+        card.Lead.Cursor = Cursors.Hand;
+        foreach (var part in new FrameworkElement[] { card.Header, card.Lead })
+        {
+            part.MouseLeftButtonUp += (_, e) => { SetExpanded(card.Body.Visibility != Visibility.Visible); e.Handled = true; };
+            part.MouseEnter += (_, _) => card.Border.BorderBrush = CardHover;
+            part.MouseLeave += (_, _) => card.Border.BorderBrush = card.Border.Tag as Brush ?? CardBorder;
+        }
         if (_expanded.Contains(key)) SetExpanded(true);
     }
 
@@ -448,7 +567,7 @@ public partial class TimelineWindow : Window
         card.Meta.Margin = new Thickness(0, 3, 0, 6);
 
         // The first commits sit under the title, so they are read without expanding.
-        foreach (var commit in commits.Take(shown)) card.TitleStack.Children.Add(CommitLine(commit, branches.Count > 1));
+        foreach (var commit in commits.Take(shown)) card.Lead.Children.Add(CommitLine(commit, branches.Count > 1));
         if (commits.Count > shown)
         {
             card.Body.Margin = new Thickness(16, 0, 0, 0);
@@ -507,11 +626,12 @@ public partial class TimelineWindow : Window
     private static readonly Brush ScoreGood = Frozen("#86EFAC"), ScoreMid = Frozen("#FCD34D"), ScorePoor = Frozen("#FCA5A5"), Accent = Frozen("#2FD4F5");
     private static readonly Brush EvidenceBack = Frozen("#0E1622"), ReportCardBack = Frozen("#E6121A27");
 
-    /// <summary>One review's button, panel and state; there is one per <see cref="ReviewKind"/>.</summary>
+    /// <summary>One review's button (in the helper pane), panel and state; there is one per <see cref="ReviewKind"/>.</summary>
     private sealed class ReviewSlot
     {
         public required ReviewKind Kind { get; init; }
         public required Button Button { get; init; }
+        public required TextBlock Title { get; init; }
         public required string Label { get; init; }
         public required Border Panel { get; init; }
         public required StackPanel Body { get; init; }
@@ -529,12 +649,13 @@ public partial class TimelineWindow : Window
         if (_slots.Length == 0)
             _slots =
             [
-                new ReviewSlot { Kind = ReviewKind.Interaction, Button = ReviewSessionsBtn, Label = "✨ You & Claude", Panel = SessionsReportPanel, Body = SessionsReportBody, Meta = SessionsReportMeta, AddRules = SessionsAddRulesBtn },
-                new ReviewSlot { Kind = ReviewKind.GitHub, Button = ReviewGitHubBtn, Label = "✨ GitHub cycle", Panel = GitHubReportPanel, Body = GitHubReportBody, Meta = GitHubReportMeta, AddRules = GitHubAddRulesBtn },
+                new ReviewSlot { Kind = ReviewKind.Interaction, Button = ReviewSessionsBtn, Title = ReviewSessionsTitle, Label = "✨ You & Claude", Panel = SessionsReportPanel, Body = SessionsReportBody, Meta = SessionsReportMeta, AddRules = SessionsAddRulesBtn },
+                new ReviewSlot { Kind = ReviewKind.GitHub, Button = ReviewGitHubBtn, Title = ReviewGitHubTitle, Label = "✨ GitHub cycle", Panel = GitHubReportPanel, Body = GitHubReportBody, Meta = GitHubReportMeta, AddRules = GitHubAddRulesBtn },
             ];
         return _slots.First(s => s.Kind == kind);
     }
 
+    // The crab paces while a review runs, so the work shows even with the helper pane closed.
     private void UpdateReviewButtons()
     {
         var canStart = _reviewCts is null && _model is { Rows.Count: > 0 };
@@ -542,8 +663,12 @@ public partial class TimelineWindow : Window
         {
             var slot = Slot(kind);
             slot.Button.IsEnabled = canStart || slot.Cts is not null;
-            slot.Button.Content = slot.Cts is not null ? "■ Cancel" : slot.Label;
+            slot.Title.Text = slot.Cts is not null ? "■ Cancel" : slot.Label;
         }
+        Crab.IsBusy = _reviewCts is not null;
+        ReviewsNote.Text = _reviewCts is not null ? "Working… the status line at the bottom shows the stage and time. Press ■ Cancel to stop."
+            : _model is { Rows.Count: > 0 } ? "Each takes a minute or two; the crab paces while it runs. The report opens beside the tree and is saved under C:\\data\\agenthub\\timeline."
+            : "The reviews need at least one session or commit in the timeline.";
     }
 
     private async void ReviewSessions_Click(object sender, RoutedEventArgs e) => await RunReviewAsync(ReviewKind.Interaction);
@@ -564,6 +689,7 @@ public partial class TimelineWindow : Window
         _reviewCts = cts;
         UpdateReviewButtons();
         var title = TimelineReview.Title(kind);
+        Helper.Say($"Starting the **{title}** review. I'll read the timeline, build a digest and send it to Claude Code; the status line at the bottom shows how far along it is.");
         var started = DateTime.Now;
         var progress = new ReviewProgress("Starting…");
         var claudeFrom = (DateTime?)null;
@@ -595,14 +721,18 @@ public partial class TimelineWindow : Window
             ShowReport(slot, result);
             var estimate = progress.Estimate is { } est ? $" (estimated {ReviewTimings.Describe(est)})" : "";
             StatusText.Text = $"{title} review done in {(int)(DateTime.Now - started).TotalSeconds} s, {(int)result.ClaudeTime.TotalSeconds} s of it Claude Code on a {progress.DigestChars / 1024.0:0} KB digest{estimate}. Report saved to {result.ReportPath}";
+            var part = result.Report.Part;
+            Helper.Say($"The **{title}** review is done: {(part.Score is { } score ? $"{score}/10" : "not scored")}, {part.Findings.Count} finding{(part.Findings.Count == 1 ? "" : "s")}, {result.Report.Additions.Count} rule{(result.Report.Additions.Count == 1 ? "" : "s")} for your CLAUDE.md. The report is beside the tree; **Add to CLAUDE.md…** there puts the rules into the Context editor.");
         }
         catch (OperationCanceledException)
         {
             StatusText.Text = $"{title} review cancelled.";
+            Helper.Say($"Stopped the **{title}** review.");
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
         {
             StatusText.Text = $"{title} review failed.";
+            Helper.Say($"The **{title}** review failed: {ex.Message}");
             MessageBox.Show(this, ex.Message, "AgentHub - Timeline review", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
@@ -647,12 +777,39 @@ public partial class TimelineWindow : Window
         slot.AddRules.IsEnabled = report.Additions.Count > 0;
 
         slot.Panel.Visibility = Visibility.Visible;
-        ReportsColumn.Visibility = Visibility.Visible;
+        UpdateReportsColumn();
     }
 
-    // The column beside the tree only takes its width while a report is open.
-    private void UpdateReportsColumn() =>
-        ReportsColumn.Visibility = _slots.Any(s => s.Panel.Visibility == Visibility.Visible) ? Visibility.Visible : Visibility.Collapsed;
+    private const double ReportsWidth = 472;  // the reports column and its margin
+    private const double TreeMinWidth = 640;  // below this the cards wrap into unreadable slivers
+    private double _reportsGrewBy;
+
+    // The column beside the tree only takes its width while a report is open. As the helper pane does, it widens the window
+    // by its width (as far as the screen allows) so the tree keeps its size, and narrows it again when the last report closes.
+    // When the screen has no room for the tree, the helper and a report, the report takes the helper's place: the crab
+    // reopens the helper, whose conversation is kept.
+    private void UpdateReportsColumn()
+    {
+        // One report takes the whole column; two share it. A closed panel's row keeps no height.
+        for (var i = 0; i < _slots.Length && i < ReportsColumn.RowDefinitions.Count; i++)
+            ReportsColumn.RowDefinitions[i].Height = _slots[i].Panel.Visibility == Visibility.Visible ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
+        var open = _slots.Any(s => s.Panel.Visibility == Visibility.Visible);
+        if ((ReportsColumn.Visibility == Visibility.Visible) == open) return;
+        ReportsColumn.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        if (open)
+        {
+            _reportsGrewBy = Controls.WindowPlacement.Widen(this, ReportsWidth);
+            WantMinWidth(ReportsWidth);
+            var window = WindowState == WindowState.Normal ? Width : ActualWidth;
+            if (Helper.Visibility == Visibility.Visible && window - 32 - HelperWidth - ReportsWidth < TreeMinWidth) SetHelperOpen(false);
+        }
+        else
+        {
+            WantMinWidth(-ReportsWidth);
+            if (WindowState == WindowState.Normal && _reportsGrewBy > 0) Width = Math.Max(MinWidth, Width - _reportsGrewBy);
+            _reportsGrewBy = 0;
+        }
+    }
 
     private static Border ReportCard() => new()
     {

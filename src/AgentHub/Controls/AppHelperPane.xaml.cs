@@ -13,13 +13,22 @@ namespace AgentHub.Controls;
 
 /// <summary>
 /// The AgentHub helper pane, opened by the crab button in the main window's header and shown to the right of the
-/// terminals: a short conversation about how to use AgentHub. Answers come from <see cref="AppHelp"/>.
+/// terminals: a short conversation about how to use AgentHub. Answers come from <see cref="AppHelp"/>. The Timeline window
+/// shows the same pane as its Timeline helper, with <see cref="Actions"/> (the two reviews) above the conversation and
+/// its own <see cref="Title"/>, <see cref="Intro"/> and <see cref="Examples"/>.
 /// </summary>
 public partial class AppHelperPane : UserControl
 {
     private const string KeysHint = "Enter asks · Shift+Enter new line";
     private readonly ObservableCollection<HelperMessage> _log = [];
     private readonly ObservableCollection<string> _followUps = [];
+    private readonly ObservableCollection<string> _examples =
+    [
+        "How do I start Claude Code in one of my repositories?",
+        "What does the context badge on a pane mean?",
+        "How do I let an orchestration build while I'm away?",
+        "How do I add a rule to my CLAUDE.md?",
+    ];
     private readonly List<HelpTurn> _history = [];
     private CancellationTokenSource? _running;
 
@@ -28,6 +37,7 @@ public partial class AppHelperPane : UserControl
         InitializeComponent();
         Log.ItemsSource = _log;
         FollowUps.ItemsSource = _followUps;
+        ExampleChips.ItemsSource = _examples;
     }
 
     /// <summary>The Claude Code command to run (from Settings → Agents), read at each question.</summary>
@@ -39,6 +49,35 @@ public partial class AppHelperPane : UserControl
     /// <summary>Raised by the pane's ✕.</summary>
     public event Action? CloseRequested;
 
+    /// <summary>The pane's name in its header ("AgentHub helper", "Timeline helper").</summary>
+    public string Title { get => TitleText.Text; set => TitleText.Text = value; }
+
+    /// <summary>The line under the name.</summary>
+    public string Subtitle { get => SubtitleText.Text; set => SubtitleText.Text = value; }
+
+    /// <summary>The crab's first words, shown until the first question.</summary>
+    public string Intro { get => IntroText.Text; set => IntroText.Text = value; }
+
+    /// <summary>The grey text in the empty question box.</summary>
+    public string Placeholder { get => InputHint.Text; set => InputHint.Text = value; }
+
+    /// <summary>Example questions, each asked by a click; shown until the first question.</summary>
+    public IList<string> Examples => _examples;
+
+    /// <summary>
+    /// Things the crab can do for the window that owns the pane, shown above the conversation and staying while it goes
+    /// on: the Timeline's two reviews. Null for none.
+    /// </summary>
+    public object? Actions { get => ActionsHost.Content; set => ActionsHost.Content = value; }
+
+    /// <summary>A line from the crab that is not an answer (a review started, a report arrived); not part of the conversation sent to Claude.</summary>
+    public void Say(string text)
+    {
+        _log.Add(HelperMessage.Crab(text));
+        NewChatBtn.IsEnabled = true;
+        ScrollToEnd();
+    }
+
     public void FocusInput() => Dispatcher.BeginInvoke(() => Input.Focus(), DispatcherPriority.Input);
 
     private void Close_Click(object sender, RoutedEventArgs e) => CloseRequested?.Invoke();
@@ -49,7 +88,7 @@ public partial class AppHelperPane : UserControl
         _log.Clear();
         _followUps.Clear();
         _history.Clear();
-        Examples.Visibility = Visibility.Visible;
+        Welcome.Visibility = Visibility.Visible;
         NewChatBtn.IsEnabled = false;
         FocusInput();
     }
@@ -93,7 +132,7 @@ public partial class AppHelperPane : UserControl
         if (question.Length == 0 || _running is not null) return;
         if (ReferenceEquals(text, Input.Text)) Input.Text = "";
 
-        Examples.Visibility = Visibility.Collapsed;
+        Welcome.Visibility = Visibility.Collapsed;
         _followUps.Clear();
         NewChatBtn.IsEnabled = true;
         _log.Add(HelperMessage.User(question));

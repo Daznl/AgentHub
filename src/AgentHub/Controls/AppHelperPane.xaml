@@ -46,6 +46,7 @@
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
@@ -58,23 +59,29 @@
                         <Button Style="{StaticResource HeaderButton}" Click="Close_Click" Content="✕" ToolTip="Close the helper" AutomationProperties.Name="Close helper" />
                     </StackPanel>
                     <StackPanel VerticalAlignment="Center">
-                        <TextBlock Text="AgentHub helper" FontSize="13" FontWeight="SemiBold" />
-                        <TextBlock Text="Ask how to do anything in AgentHub" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,1,0,0" />
+                        <TextBlock x:Name="TitleText" Text="AgentHub helper" FontSize="13" FontWeight="SemiBold" />
+                        <TextBlock x:Name="SubtitleText" Text="Ask how to do anything in AgentHub" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,1,0,0" />
                     </StackPanel>
                 </DockPanel>
             </Border>
 
-            <ScrollViewer x:Name="Scroll" Grid.Row="1" Padding="12,12,12,4" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <!-- Things the crab can do for the owner window (the Timeline's two reviews), kept in view above the conversation; empty in the main window -->
+            <ContentPresenter x:Name="ActionsHost" Grid.Row="1" Margin="12,12,12,0" />
+
+            <ScrollViewer x:Name="Scroll" Grid.Row="2" Padding="12,12,12,4" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
                     <!-- Shown until the first question -->
-                    <StackPanel x:Name="Examples">
-                        <TextBlock Foreground="#B6C2D6" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"
+                    <StackPanel x:Name="Welcome">
+                        <TextBlock x:Name="IntroText" Foreground="#B6C2D6" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"
                                    Text="I know how every part of AgentHub works: panes, repositories, context files, history, orchestration and settings. Ask me how to do something, or what something on screen means." />
                         <TextBlock Text="For example" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6" />
-                        <Button Style="{StaticResource ExampleChip}" Click="Ask_FromChip" Content="How do I start Claude Code in one of my repositories?" />
-                        <Button Style="{StaticResource ExampleChip}" Click="Ask_FromChip" Content="What does the context badge on a pane mean?" />
-                        <Button Style="{StaticResource ExampleChip}" Click="Ask_FromChip" Content="How do I let an orchestration build while I'm away?" />
-                        <Button Style="{StaticResource ExampleChip}" Click="Ask_FromChip" Content="How do I add a rule to my CLAUDE.md?" />
+                        <ItemsControl x:Name="ExampleChips">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Style="{StaticResource ExampleChip}" Click="Ask_FromChip" Content="{Binding}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                     </StackPanel>
                     <ItemsControl x:Name="Log" ItemTemplate="{StaticResource HelperMessageTemplate}" />
                     <!-- Follow-up questions offered after the latest answer; a click asks it -->
@@ -88,7 +95,7 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <StackPanel Grid.Row="2" Margin="12,6,12,12">
+            <StackPanel Grid.Row="3" Margin="12,6,12,12">
                 <Grid>
                     <TextBox x:Name="Input" Style="{StaticResource AskBox}" MinHeight="58" MaxHeight="150"
                              PreviewKeyDown="Input_PreviewKeyDown" TextChanged="Input_TextChanged" AutomationProperties.Name="Question" />

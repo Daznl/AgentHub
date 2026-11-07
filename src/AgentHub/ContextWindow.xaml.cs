@@ -446,6 +446,7 @@ public partial class ContextWindow : Window
     private bool _helperRunning;
     private bool _reviewFromHelper;
     private double _helperGrewBy;
+    private double? _baseMinWidth;
 
     /// <summary>Whether the crab at the top right wanders and does tricks; the main window passes its settings.</summary>
     public bool CrabAnimated { set => Crab.SetAnimated(value); }
@@ -461,21 +462,16 @@ public partial class ContextWindow : Window
         HelperPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
         if (open)
         {
-            if (WindowState == WindowState.Normal)
-            {
-                var area = SystemParameters.WorkArea;
-                var width = Math.Min(Width + HelperWidth, area.Width);
-                _helperGrewBy = width - Width;
-                Width = width;
-                if (Left + Width > area.Right) Left = Math.Max(area.Left, area.Right - Width);
-            }
-            MinWidth += HelperWidth;
+            _helperGrewBy = Controls.WindowPlacement.Widen(this, HelperWidth);
+            // The minimum never passes the screen: wider forced the window past the monitor's edge
+            _baseMinWidth ??= MinWidth;
+            MinWidth = Math.Min(_baseMinWidth.Value + HelperWidth, Controls.WindowPlacement.WorkArea(this).Width);
             UpdateHelperSend();
             HelperInput.Focus();
         }
         else
         {
-            MinWidth -= HelperWidth;
+            MinWidth = _baseMinWidth ?? MinWidth;
             if (WindowState == WindowState.Normal && _helperGrewBy > 0) Width = Math.Max(MinWidth, Width - _helperGrewBy);
             _helperGrewBy = 0;
         }

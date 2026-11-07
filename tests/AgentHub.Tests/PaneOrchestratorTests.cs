@@ -34,7 +34,7 @@ public class PaneOrchestratorTests
         public void Stop() { Stops++; IsRunning = false; Exited?.Invoke(); }
         public void Context(double used, long window = 100_000)
         {
-            LatestContextReading = new ContextReading((long)(used * window), window, WindowIsAssumed: true, null, DateTimeOffset.Now, "test", null);
+            LatestContextReading = new ContextReading((long)(used * window), window, WindowIsAssumed: true, null, DateTimeOffset.Now, "test", "");
             ContextChanged?.Invoke(LatestContextReading);
         }
         public Task SubmitAsync(string prompt) { Submitted.Add(prompt); return Task.CompletedTask; }

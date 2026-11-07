@@ -52,6 +52,43 @@ public static class WindowPlacement
         }
     }
 
+    /// <summary>
+    /// The work area of the screen the window is on, in the window's logical pixels. <c>SystemParameters.WorkArea</c>
+    /// is the primary screen's, which on a second monitor let a window widen past the edge with its header out of reach.
+    /// </summary>
+    public static Rect WorkArea(Window window)
+    {
+        try
+        {
+            var hwnd = new WindowInteropHelper(window).Handle;
+            if (hwnd == IntPtr.Zero) return SystemParameters.WorkArea;
+            var screen = System.Windows.Forms.Screen.FromHandle(hwnd);
+            var dpi = VisualTreeHelper.GetDpi(window);
+            return new Rect(screen.WorkingArea.Left / dpi.DpiScaleX, screen.WorkingArea.Top / dpi.DpiScaleY,
+                screen.WorkingArea.Width / dpi.DpiScaleX, screen.WorkingArea.Height / dpi.DpiScaleY);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            return SystemParameters.WorkArea;
+        }
+    }
+
+    /// <summary>
+    /// Widens a normal window by <paramref name="by"/> for a side panel it is opening, as far as its screen allows, and
+    /// moves it left when that would hang over the right edge. Returns how much it grew, to take back when the panel
+    /// closes. A maximised window stays as it is (returns 0).
+    /// </summary>
+    public static double Widen(Window window, double by)
+    {
+        if (window.WindowState != WindowState.Normal) return 0;
+        var area = WorkArea(window);
+        var width = Math.Min(window.Width + by, area.Width);
+        var grewBy = width - window.Width;
+        window.Width = width;
+        if (window.Left + width > area.Right) window.Left = Math.Max(area.Left, area.Right - width);
+        return grewBy;
+    }
+
     /// <summary>The window rectangle shrunk to the work area and moved inside it; unchanged when it already fits.</summary>
     public static Rect Fit(Rect window, Rect work)
     {

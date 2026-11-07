@@ -1,6 +1,7 @@
 <Window x:Class="AgentHub.TimelineWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:AgentHub.Controls"
         Title="AgentHub - Timeline" Height="840" Width="1240" MinHeight="420" MinWidth="820"
         Icon="Assets/AppIcon.png" WindowStartupLocation="CenterOwner"
         Background="{StaticResource WindowBackgroundBrush}" Foreground="{StaticResource TextBrush}" FontFamily="Segoe UI">
@@ -13,6 +14,30 @@
             <Setter Property="FontSize" Value="11" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
+        <!-- One of the crab's two reviews in the helper pane: a name and what it looks at; the name reads "■ Cancel" while it runs -->
+        <Style x:Key="ReviewAction" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chip" CornerRadius="8" Background="#2A1F47" BorderBrush="#3B2A63" BorderThickness="1" Padding="12,9">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource CrabBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Chip" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid Margin="16,14,16,16">
@@ -24,16 +49,15 @@
 
         <DockPanel Grid.Row="0" Margin="0,0,0,12" LastChildFill="True">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
-                <Button x:Name="ReviewSessionsBtn" Click="ReviewSessions_Click" Content="✨ You &amp; Claude" IsEnabled="False" Background="#3B2A63" FontWeight="SemiBold"
-                        ToolTip="Ask Claude Code how you and Claude worked across the sessions: length and scope, handoffs kept, verifying rather than asking, tests before commits, prompts you keep retyping. Scored out of 10 by Claude, with rules to add to your CLAUDE.md. Uses your Claude login, no API key; only a condensed digest of the timeline is sent, and the report is saved under C:\data\agenthub\timeline."
-                        Padding="10,5" Margin="0,0,8,0" FontSize="12" />
-                <Button x:Name="ReviewGitHubBtn" Click="ReviewGitHub_Click" Content="✨ GitHub cycle" IsEnabled="False" Background="#3B2A63" FontWeight="SemiBold"
-                        ToolTip="Ask Claude Code about the GitHub cycle: branch names, commits straight on main, merge commits versus squashes, branches left after merging, self-merged and unreviewed pull requests. Scored out of 10 by AgentHub's own checks, findings by Claude, with rules to add to your CLAUDE.md. Only a condensed digest is sent; the report is saved under C:\data\agenthub\timeline."
-                        Padding="10,5" Margin="0,0,8,0" FontSize="12" />
                 <Button x:Name="RefreshBtn" Click="Refresh_Click" Content="↻ Refresh" ToolTip="Read the commits and transcripts again now (they are re-read every 20 seconds while this window is open)"
                         Padding="10,5" Margin="0,0,8,0" FontSize="12" />
                 <Button Click="Close_Click" Content="✕ Close" ToolTip="Close the timeline (Esc does too)" Padding="10,5" Margin="0" FontSize="12" />
             </StackPanel>
+            <!-- The crab, and the button that opens the Timeline helper (the two reviews, and questions about the timeline):
+                 rests beside Refresh and roams the strip towards the heading; paces while a review runs -->
+            <controls:CrabMascot x:Name="Crab" DockPanel.Dock="Right" Width="150" Height="56" VerticalAlignment="Top" Margin="12,0,12,0"
+                                 HelperName="Timeline helper"
+                                 ToolTip="Timeline helper: ask Claude Code to review how you and Claude worked, or the GitHub cycle, or ask how the timeline works" />
             <StackPanel Margin="0,0,12,0">
                 <TextBlock x:Name="HeadingText" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                 <TextBlock x:Name="SubheadingText" Margin="0,3,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
@@ -44,7 +68,16 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
+
+        <!-- The Timeline helper: the crab's two reviews, then a conversation about how the timeline works. Rightmost, so the
+             reports it produces sit between it and the tree. -->
+        <controls:AppHelperPane x:Name="Helper" Grid.Column="2" Width="400" Margin="12,0,0,0" Visibility="Collapsed"
+                                Title="Timeline helper" Subtitle="Two reviews, and how this timeline works"
+                                Placeholder="Ask about the timeline…"
+                                Intro="I can explain this timeline: the tree, the lanes, the session and commit cards, and what the two reviews above look at. Ask me how to read something, or what to do next." />
+        <!-- Its Actions (the two review buttons, style ReviewAction) are built in BuildReviewActions: WPF allows no x:Name inside another control's content -->
 
         <!-- The two review reports sit beside the tree, one above the other, not over it, so their evidence (session ids, hashes) can be matched to the cards -->
         <Grid x:Name="ReportsColumn" Grid.Column="1" Width="460" Margin="12,0,0,0" Visibility="Collapsed">

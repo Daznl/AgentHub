@@ -13,7 +13,8 @@ namespace AgentHub.Controls;
 /// focused; <see cref="Poked"/>): at the top right of the main window's header, beside the buttons, it opens the
 /// AgentHub helper; at the top right of a Context window it opens the Context helper for the file being edited. It idles and
 /// blinks, now and then scuttles, rolls, pinches, waves or dances along the free strip of header, and dozes off when
-/// AgentHub has had no input for a while. While <see cref="IsActive"/> (helper open) it glows and stays at home. Sprites are 80x80 cells in strips under <c>Assets/Crab</c>
+/// AgentHub has had no input for a while. While <see cref="IsActive"/> (helper open) it glows and stays at home; while
+/// <see cref="IsBusy"/> (a Timeline review running) it paces and pinches. Sprites are 80x80 cells in strips under <c>Assets/Crab</c>
 /// (made with PixelLab, see <c>docs/brand/crab/README.md</c>); they are drawn at a whole number of screen pixels per
 /// sprite pixel so they stay crisp at every Windows display scale. Motion is off when Windows animations are off.
 /// </summary>
@@ -82,7 +83,7 @@ public partial class CrabMascot : UserControl
         Sprite.GotKeyboardFocus += (_, _) => UpdateGlow();
         Sprite.LostKeyboardFocus += (_, _) => UpdateGlow();
         Sprite.Invoked = Press;
-        Sprite.Status = () => _active ? "Helper open" : "";
+        Sprite.Status = () => _busy ? "Working" : _active ? "Helper open" : "";
         // Size the sprite before its first render: a size set later only showed once the frame changed (the crab drew at
         // its natural 80 DIP, low and off the right edge of the Context window, for its first few seconds).
         Layout();
@@ -119,6 +120,29 @@ public partial class CrabMascot : UserControl
         _glow.Opacity = _active ? 0.95 : Sprite.IsMouseOver || Sprite.IsKeyboardFocused ? 0.6 : 0;
         Sprite.Effect = _glow.Opacity > 0 ? _glow : null;
     }
+
+    /// <summary>
+    /// Working on something the user asked for (a Timeline review, say): the crab paces the strip and pinches at each
+    /// turn until this is cleared, so the window shows the work is still going. It never dozes off while busy. Where
+    /// motion is off it sits still as always; the owner's status line says what is happening.
+    /// </summary>
+    public bool IsBusy
+    {
+        get => _busy;
+        set
+        {
+            if (_busy == value) return;
+            _busy = value;
+            if (!IsLoaded || !Moving) return;
+            if (_busy)
+            {
+                if (_mode == Mode.Asleep) WakeUp();
+                else if (_mode == Mode.Resting) _restUntil = DateTime.UtcNow;  // start the first pace on the next tick
+            }
+            else if (_mode == Mode.Resting) _nextOuting = DateTime.UtcNow + TimeSpan.FromSeconds(_random.Next(6, 14));
+        }
+    }
+    private bool _busy;
 
     /// <summary>Width at the right of this control that the crab must not walk into (the header buttons).</summary>
     public double ReservedRight
@@ -252,7 +276,8 @@ public partial class CrabMascot : UserControl
         _target = null;
         _timer.Interval = Clips["idle"].FrameTime;
         Show(Clips["idle"].Frames[0]);
-        _restUntil = DateTime.UtcNow + TimeSpan.FromMilliseconds(_random.Next(1500, 4500));
+        // Busy, it only pauses for a breath between paces
+        _restUntil = DateTime.UtcNow + TimeSpan.FromMilliseconds(_busy ? _random.Next(250, 700) : _random.Next(1500, 4500));
     }
 
     private void Step()
@@ -263,6 +288,7 @@ public partial class CrabMascot : UserControl
         {
             var now = DateTime.UtcNow;
             if (now < _restUntil) return;
+            if (_busy) { Work(); return; }
             if (now - _lastInput > SleepAfter) { Play("sleep", Mode.Acting, () => _mode = Mode.Asleep); return; }
             // While the helper is open the crab is its pressed button: it goes back home and stays there
             if (_active && Math.Abs(_x - Home) > 0.5) { Play("scuttle", Mode.Walking, loop: true, target: Home); return; }
@@ -315,6 +341,23 @@ public partial class CrabMascot : UserControl
             Play(new[] { "pinch", "wave", "dance", "roll" }[_random.Next(4)], Mode.Acting);
         }
     }
+
+    /// <summary>
+    /// Busy: pace the strip end to end, with a pinch at each turn; with no strip to pace, pinch and dance on the spot.
+    /// </summary>
+    private void Work()
+    {
+        // A walk ends in Rest(), which comes straight back here: so pace, pinch, pace, pinch...
+        _pinchNext = !_pinchNext;
+        if (_pinchNext || !HasRoom)
+        {
+            Play(HasRoom || _random.NextDouble() < 0.7 ? "pinch" : "dance", Mode.Acting);
+            return;
+        }
+        var mid = (Leftmost + Rightmost) / 2;
+        Play("scuttle", Mode.Walking, loop: true, target: _x > mid ? Leftmost : Rightmost);
+    }
+    private bool _pinchNext;
 
     private void WakeUp()
     {
