@@ -69,6 +69,15 @@ try {
   if (-not $ctx) { throw 'Context window did not open' }
   $ctxCrab = Find $ctx $A::NameProperty 'Context helper'
   function CtxHelperOpen { $x = $ctx.FindFirst($TS::Descendants, (Cond $A::NameProperty 'Close helper')); [bool]$x -and -not $x.Current.IsOffscreen }
+  function WaitFor([scriptblock]$cond, [int]$ms = 8000) { $t = [Diagnostics.Stopwatch]::StartNew(); while ($t.ElapsedMilliseconds -lt $ms) { if (& $cond) { return $true }; Start-Sleep -Milliseconds 100 }; & $cond }
+  "The one crab travels to the window being worked in"
+  Check (WaitFor { -not $ctxCrab.Current.IsOffscreen }) 'crab arrives at the context window (within 8 s)'
+  Check $crab.Current.IsOffscreen 'and the main window spot is empty'
+  $main = $win.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern); $main.SetWindowVisualState('Normal'); $win.SetFocus(); Settle
+  Check (WaitFor { -not $crab.Current.IsOffscreen }) 'focus on the main window brings it back'
+  Check $ctxCrab.Current.IsOffscreen 'context spot empty while it is away'
+  $ctx.SetFocus(); Settle
+  Check (WaitFor { -not $ctxCrab.Current.IsOffscreen }) 'back to the context window with its focus'
   Check ($ctxCrab.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button) 'the context crab is a button'
   Check (-not $ctx.FindFirst($TS::Descendants, (Cond $A::AutomationIdProperty 'CrabBtn'))) 'the old round crab button is gone from the context window'
   Check (-not (CtxHelperOpen)) 'context helper closed at start'
@@ -80,6 +89,8 @@ try {
   (Find $ctx $A::NameProperty 'Close helper').GetCurrentPattern($Invoke).Invoke(); Settle
   Check (-not (CtxHelperOpen)) 'X closes the context helper'
   Check ($ctxCrab.Current.ItemStatus -eq '') 'context crab unlit again'
+  $ctx.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close(); Settle
+  Check (WaitFor { -not $crab.Current.IsOffscreen }) 'closing the context window sends the crab home'
 } finally {
   Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
 }
