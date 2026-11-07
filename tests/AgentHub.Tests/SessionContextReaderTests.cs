@@ -37,8 +37,8 @@ public class SessionContextReaderTests : IDisposable
 
     [Fact]
     public void EncodeClaudeProjectName_MatchesClaudeCodeFolderNaming() =>
-        Assert.Equal("C--Users-daniel-wallis-barker-OneDrive---IGO-Limited-Desktop-AgentHub-main",
-            SessionContextReader.EncodeClaudeProjectName(@"C:\Users\daniel.wallis-barker\OneDrive - IGO Limited\Desktop\AgentHub-main\"));
+        Assert.Equal("C--Users-me-person-OneDrive---Company-Desktop-AgentHub-main",
+            SessionContextReader.EncodeClaudeProjectName(@"C:\Users\me.person\OneDrive - Company\Desktop\AgentHub-main\"));
 
     [Fact]
     public void Claude_FindsNewestTranscriptAndReadsLastMainThreadTurn()

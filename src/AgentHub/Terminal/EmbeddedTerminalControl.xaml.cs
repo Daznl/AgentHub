@@ -486,7 +486,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
     private bool _promptSent;
 
     /// <summary>Set just before <see cref="StartSession"/> for an orchestrator worker: that session answers Claude Code's
-    /// folder trust check with yes (Daniel chose the folder for the build). Applies to the next session only.</summary>
+    /// folder trust check with yes (the owner chose the folder for the build). Applies to the next session only.</summary>
     public bool AnswerFolderTrust { get; set; }
 
     /// <summary>Whether the program in this terminal accepts bracketed pastes (agent prompts are sent as one).</summary>
@@ -513,7 +513,9 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
                 if (offset >= 0) _postedOffset = offset;
                 if (text.Length == 0) return;
                 _paste.Observe(text);
-                if (_answerTrust && _trust.Observe(text, DateTimeOffset.Now) is { } keys) _ = AnswerTrustAsync(session, keys);
+                // Every session is watched for security checks; only a worker's folder trust check is answered by AgentHub.
+                var trustKeys = _trust.Observe(text, DateTimeOffset.Now);
+                if (_answerTrust && trustKeys is { } keys) _ = AnswerTrustAsync(session, keys);
                 _attention.OnOutput(text, DateTimeOffset.Now);
                 Post(text);
             });
@@ -563,6 +565,12 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
 
     /// <summary>How long the session has produced no output at all.</summary>
     public TimeSpan OutputSilentFor => _attention.SilentFor(DateTimeOffset.Now);
+
+    /// <summary>
+    /// A Claude Code security check (folder trust, a permission dialog) is on screen waiting for the owner. Nothing should be
+    /// typed into the session on their behalf until they have answered it: Enter there means "No, exit" or "Yes".
+    /// </summary>
+    public bool IsAtSecurityCheck => _trust.CheckOnScreen;
 
     /// <summary>Sends text input directly into the running terminal process.</summary>
     public void SendInput(string data)
@@ -706,6 +714,7 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
                             var wasWaiting = _attention.IsWaiting;
                             _attention.OnUserInput(DateTimeOffset.Now);
                             if (wasWaiting) AttentionCleared?.Invoke();
+                            _trust.UserTyped(); // the owner's own keys answer whatever check was on screen
                             _session?.Write(data);
                         }
                     }

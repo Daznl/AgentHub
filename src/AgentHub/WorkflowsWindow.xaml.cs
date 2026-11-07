@@ -6,9 +6,9 @@ using MessageBox = System.Windows.MessageBox;
 namespace AgentHub;
 
 /// <summary>
-/// The workflow catalogue: built-in templates (read-only) and Daniel's own workflows. Duplicate a template, fill in its
-/// inputs (a pipeline location, say) and instructions, save it, and pick it for an idea. Saved workflows live on the
-/// agenthub-workflows branch of the AgentHub repository, so they are still there after a pause or on another machine.
+/// The workflow catalogue: built-in templates (read-only) and the owner's own workflows. Duplicate a template, fill in its
+/// inputs (a pipeline location, say) and instructions, save it, and pick it for an idea. Saved workflows live in
+/// workflows/local of the AgentHub repository, which git ignores: they stay on this computer.
 /// </summary>
 public partial class WorkflowsWindow : Window
 {
@@ -18,7 +18,7 @@ public partial class WorkflowsWindow : Window
     private OrchestratorWorkflow? _current;
     private bool _loading;
 
-    /// <summary>The workflow Daniel chose with "Use for this idea"; null when he just closed the window.</summary>
+    /// <summary>The workflow the owner chose with "Use for this idea"; null when they just closed the window.</summary>
     public string? ChosenWorkflowId { get; private set; }
 
     public WorkflowsWindow(WorkflowCatalogue catalogue, string? selectedId, bool canUse)
@@ -59,7 +59,7 @@ public partial class WorkflowsWindow : Window
     private void Show(OrchestratorWorkflow? w)
     {
         _current = w;
-        // Templates are editable too: Save stores the edited version as Daniel's own workflow and leaves the template as it is.
+        // Templates are editable too: Save stores the edited version as the owner's own workflow and leaves the template as it is.
         var editable = w != null;
         NameBox.Text = w?.Name ?? "";
         DescriptionBox.Text = w?.Description ?? "";
@@ -144,7 +144,7 @@ public partial class WorkflowsWindow : Window
 
     private async void Save_Click(object sender, RoutedEventArgs e) => await SaveAsync();
 
-    /// <summary>The template with the editor's fields applied, as a new workflow of Daniel's (not saved yet).</summary>
+    /// <summary>The template with the editor's fields applied, as a new workflow of the owner's (not saved yet).</summary>
     private OrchestratorWorkflow EditedCopyOf(OrchestratorWorkflow template)
     {
         var copy = template.Duplicate(template.Name);
@@ -203,7 +203,7 @@ public partial class WorkflowsWindow : Window
     private async void Use_Click(object sender, RoutedEventArgs e)
     {
         if (!_canUse || _current == null) return;
-        // Edits are saved first (a changed template becomes Daniel's own workflow), so the idea points at what is on screen.
+        // Edits are saved first (a changed template becomes the owner's own workflow), so the idea points at what is on screen.
         if ((!_current.IsTemplate || TemplateEdited(_current)) && !await SaveAsync()) return;
         var chosen = _current;
         if (chosen.MissingInputs() is { Count: > 0 } missing)

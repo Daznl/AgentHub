@@ -22,7 +22,7 @@ public class TimelineBuilderTests
     private static string Full(string hash) => hash.PadRight(40, '0');
 
     private static TimelineCommit Commit(string hash, double hours, string subject = "work", params string[] parents) =>
-        new(Full(hash), parents.Select(Full).ToList(), At(hours), "Daniel", subject);
+        new(Full(hash), parents.Select(Full).ToList(), At(hours), "Ada", subject);
 
     private static TimelineBranchTip Tip(string name, string hash, bool remote = false) => new(Full(hash), name, remote);
 
@@ -759,7 +759,7 @@ public class TimelineBranchFactsTests
     private static DateTimeOffset At(double hours) => Day.AddHours(hours);
     private static string Full(string hash) => hash.PadRight(40, '0');
     private static TimelineCommit Commit(string hash, double hours, string subject = "work", params string[] parents) =>
-        new(Full(hash), parents.Select(Full).ToList(), At(hours), "Daniel", subject);
+        new(Full(hash), parents.Select(Full).ToList(), At(hours), "Ada", subject);
     private static TimelineBranchTip Tip(string name, string hash, bool remote = false) => new(Full(hash), name, remote);
 
     [Fact]

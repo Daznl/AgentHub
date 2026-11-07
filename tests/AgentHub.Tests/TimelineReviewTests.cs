@@ -28,7 +28,7 @@ public class TimelineReviewTests(ITestOutputHelper output)
     private static string Full(string hash) => hash.PadRight(40, '0');
 
     private static TimelineCommit Commit(string hash, double hours, string subject = "work", params string[] parents) =>
-        new(Full(hash), parents.Select(Full).ToList(), At(hours), "Daniel", subject);
+        new(Full(hash), parents.Select(Full).ToList(), At(hours), "Ada", subject);
 
     private static TimelineBranchTip Tip(string name, string hash, bool remote = false) => new(Full(hash), name, remote);
 
@@ -97,8 +97,8 @@ public class TimelineReviewTests(ITestOutputHelper output)
         var (model, tips, _, _) = Project();
         var prs = new List<PullRequestFact>
         {
-            new(7, "Feature x", "feat/x", "main", "daniel", "daniel", At(3), Full("m000000"), 0, false, "MERGED"),
-            new(8, "A very long title that goes on and on and on well past seventy characters in total", "Feature-Y", "feat/x", "daniel", "someone", At(5), Full("s000000"), 1, false, "MERGED"),
+            new(7, "Feature x", "feat/x", "main", "ada", "ada", At(3), Full("m000000"), 0, false, "MERGED"),
+            new(8, "A very long title that goes on and on and on well past seventy characters in total", "Feature-Y", "feat/x", "ada", "someone", At(5), Full("s000000"), 1, false, "MERGED"),
         };
         var facts = TimelineReview.Compute(Input(model, tips, prs: prs));
         var by = facts.Checks.ToDictionary(c => c.Id);
@@ -243,7 +243,7 @@ public class TimelineReviewTests(ITestOutputHelper output)
     {
         var (model, tips, feature, _) = Project();
         var transcripts = new Dictionary<string, TranscriptText>(StringComparer.OrdinalIgnoreCase) { [feature.Summary.FilePath] = new([Prompt("secret prompt", 2.1)], "last reply text") };
-        var prs = new List<PullRequestFact> { new(7, "Feature x", "feat/x", "main", "daniel", "daniel", At(3), Full("m000000"), 0, false, "MERGED") };
+        var prs = new List<PullRequestFact> { new(7, "Feature x", "feat/x", "main", "ada", "ada", At(3), Full("m000000"), 0, false, "MERGED") };
         var input = Input(model, tips, prs: prs, transcripts: transcripts);
         var facts = TimelineReview.Compute(input);
 

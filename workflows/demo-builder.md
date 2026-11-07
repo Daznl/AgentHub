@@ -17,7 +17,7 @@ Phase 1, build: as for any build. Small verified steps, tests, commits; answer t
 Phase 2, click-through (set "stage" to "click-through"): have the worker start the app and use it through its UI the way this user would: {{demo_user}}. It should use whatever UI tool it has: Claude in Chrome for web apps, or a desktop automation or computer-use tool for local apps. It goes through the main journey start to finish, as the user, typing realistic data, and reports every step: what it clicked, what it saw, what broke or confused. Screenshots or notes into .agenthub/clickthrough.md.
 
 - Every problem found goes back to phase 1 as a fix, then the click-through runs again.
-- If the worker has no way to drive the UI, pause_for_daniel and say which tool is missing.
+- If the worker has no way to drive the UI, pause_for_owner and say which tool is missing.
 - Complete only after a click-through of the whole journey with no blocking problems.
 
 # Worker rules

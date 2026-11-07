@@ -152,7 +152,7 @@ public sealed class OrchestratorWorkflow
         return sb.ToString();
     }
 
-    /// <summary>A copy to edit and save as a new workflow of Daniel's own.</summary>
+    /// <summary>A copy to edit and save as a new workflow of the owner's own.</summary>
     public OrchestratorWorkflow Duplicate(string newName) => new()
     {
         Id = "",
@@ -183,38 +183,52 @@ public sealed class OrchestratorWorkflow
 }
 
 /// <summary>
-/// The workflow catalogue: built-in templates shipped next to AgentHub.exe (read-only; copy one to change it) plus
-/// Daniel's own workflows, kept on the archive branch of the AgentHub repository (<see cref="AgentHubArchive"/>) so they
-/// are versioned and come with the repository, or in a local folder when there is no repository.
+/// The workflow catalogue: built-in templates shipped next to AgentHub.exe (read-only; copy one to change it) plus the
+/// owner's own workflows in <see cref="OwnFolder"/>. That is <c>workflows/local/</c> in the AgentHub repository, which git
+/// ignores, so a workflow written for one project (paths, pipeline notes) stays on this computer and never reaches
+/// anyone the repository is shared with (2026-11-06; until then they were committed to an archive branch).
 /// </summary>
 public sealed class WorkflowCatalogue
 {
-    private readonly AgentHubArchive? _archive;
+    /// <summary>The folder under the repository's <c>workflows/</c> that holds the owner's own (git-ignored) workflows.</summary>
+    public const string LocalSubfolder = "local";
 
     public string TemplatesFolder { get; }
-    public string LocalFolder { get; }
+    /// <summary>Where the owner's own workflows live.</summary>
+    public string OwnFolder { get; }
 
-    public WorkflowCatalogue(AgentHubArchive? archive, string? templatesFolder = null, string? localFolder = null)
+    public WorkflowCatalogue(string? templatesFolder = null, string? ownFolder = null)
     {
-        _archive = archive;
         TemplatesFolder = templatesFolder ?? Path.Combine(AppContext.BaseDirectory, "workflows");
-        LocalFolder = localFolder ?? @"C:\data\agenthub\workflows";
+        OwnFolder = ownFolder ?? DefaultOwnFolder();
     }
 
-    /// <summary>Where Daniel's own workflows live.</summary>
-    public string OwnFolder => _archive?.WorkflowsPath ?? LocalFolder;
+    /// <summary>
+    /// <c>workflows/local/</c> of the AgentHub repository this build came from (or Desktop\AgentHub); without a repository,
+    /// <c>C:\data\agenthub\workflows</c>. <c>AGENTHUB_WORKFLOWS_DIR</c> overrides it.
+    /// </summary>
+    public static string DefaultOwnFolder() =>
+        Environment.GetEnvironmentVariable("AGENTHUB_WORKFLOWS_DIR") is { Length: > 0 } custom ? custom
+        : FindAgentHubRepository() is { } repo ? Path.Combine(repo, "workflows", LocalSubfolder)
+        : @"C:\data\agenthub\workflows";
 
-    public async Task<List<OrchestratorWorkflow>> ListAsync()
+    private static string? FindAgentHubRepository()
     {
-        if (_archive != null)
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
-            try { await _archive.EnsureAsync(); }
-            catch { /* fall back to whatever is on disk */ }
+            if (File.Exists(Path.Combine(dir.FullName, "AgentHub.sln")) && Directory.Exists(Path.Combine(dir.FullName, ".git")))
+                return dir.FullName;
         }
+        var desktop = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Desktop", "AgentHub");
+        return Directory.Exists(Path.Combine(desktop, ".git")) ? desktop : null;
+    }
+
+    public Task<List<OrchestratorWorkflow>> ListAsync()
+    {
         var list = new List<OrchestratorWorkflow>();
         list.AddRange(Read(TemplatesFolder, template: true));
         list.AddRange(Read(OwnFolder, template: false));
-        return list.OrderBy(w => w.IsTemplate ? 0 : 1).ThenBy(w => w.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        return Task.FromResult(list.OrderBy(w => w.IsTemplate ? 0 : 1).ThenBy(w => w.Name, StringComparer.OrdinalIgnoreCase).ToList());
     }
 
     public async Task<OrchestratorWorkflow> GetAsync(string? id)
@@ -239,7 +253,7 @@ public sealed class WorkflowCatalogue
         }
     }
 
-    /// <summary>Saves one of Daniel's workflows (never a template); a new one gets an id from its name. Returns a line for the UI.</summary>
+    /// <summary>Saves one of the owner's workflows (never a template); a new one gets an id from its name. Returns a line for the UI.</summary>
     public async Task<string> SaveAsync(OrchestratorWorkflow workflow)
     {
         if (workflow.IsTemplate) throw new InvalidOperationException("Templates are read-only; duplicate it to make your own.");
@@ -253,19 +267,19 @@ public sealed class WorkflowCatalogue
             workflow.Id = id;
         }
 
-        var text = workflow.Serialize();
-        if (_archive != null) return await _archive.SaveWorkflowAsync(workflow.Id + ".md", text, $"Workflow saved: {workflow.Name}");
-        Directory.CreateDirectory(LocalFolder);
-        await File.WriteAllTextAsync(Path.Combine(LocalFolder, workflow.Id + ".md"), text);
-        return $"Saved to {LocalFolder} (no AgentHub repository found, so not versioned).";
+        Directory.CreateDirectory(OwnFolder);
+        var path = Path.Combine(OwnFolder, workflow.Id + ".md");
+        var temp = path + ".tmp";
+        await File.WriteAllTextAsync(temp, workflow.Serialize());
+        await Hosting.SharedFile.ReplaceAsync(temp, path);
+        return $"Saved to {path} (stays on this computer: never committed).";
     }
 
-    public async Task<string> DeleteAsync(OrchestratorWorkflow workflow)
+    public Task<string> DeleteAsync(OrchestratorWorkflow workflow)
     {
         if (workflow.IsTemplate) throw new InvalidOperationException("Templates cannot be deleted.");
-        if (_archive != null) return await _archive.DeleteWorkflowAsync(workflow.Id + ".md", $"Workflow deleted: {workflow.Name}");
-        var path = Path.Combine(LocalFolder, workflow.Id + ".md");
+        var path = Path.Combine(OwnFolder, workflow.Id + ".md");
         if (File.Exists(path)) File.Delete(path);
-        return "Deleted.";
+        return Task.FromResult("Deleted.");
     }
 }

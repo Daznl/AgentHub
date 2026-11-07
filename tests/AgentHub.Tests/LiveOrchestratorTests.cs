@@ -88,8 +88,8 @@ internal sealed class PrintModeWorker(string model) : IBuildWorker
 public class LiveOrchestratorTests(ITestOutputHelper output)
 {
     /// <summary>
-    /// The whole loop for real: Sonnet orchestrates a Sonnet worker building a tiny Node CLI, Daniel's steer arrives mid-run,
-    /// and the finished run is published to a scratch repository's archive branch. Spends Claude usage, so opt-in.
+    /// The whole loop for real: Sonnet orchestrates a Sonnet worker building a tiny Node CLI, the owner's steer arrives mid-run,
+    /// and the finished run is listed in the runs index. Spends Claude usage, so opt-in.
     /// Leaves its folder under C:\data\agenthub\orch-live for reading the REVIEW.md.
     /// </summary>
     [LiveFact("claude", optIn: "AGENTHUB_LIVE_ORCHESTRATOR")]
@@ -99,10 +99,6 @@ public class LiveOrchestratorTests(ITestOutputHelper output)
         Directory.CreateDirectory(root);
         var runner = new ProcessRunner();
 
-        var archiveRepo = Path.Combine(root, "archive repo");
-        Directory.CreateDirectory(archiveRepo);
-        await runner.RunAsync("git", ["init", "-q", "-b", "main"], archiveRepo);
-        await runner.RunAsync("git", ["commit", "-q", "--allow-empty", "-m", "init"], archiveRepo);
 
         var ideas = new IdeaService(Path.Combine(root, "ideas.json"));
         var idea = new ProjectIdea
@@ -120,7 +116,6 @@ public class LiveOrchestratorTests(ITestOutputHelper output)
         var engine = new OrchestratorEngine(ideas, new GitService(runner), runner, new SteeringService(Path.Combine(root, "steering.json")))
         {
             RunsRoot = Path.Combine(root, "runs"),
-            Archive = new AgentHubArchive(runner, archiveRepo, Path.Combine(root, "archive worktree")),
             UsageReader = () => Task.FromResult<UsageSnapshot?>(null),
             TurnSettle = TimeSpan.FromSeconds(1),
             WorkerStartupDelay = TimeSpan.Zero,
@@ -136,7 +131,7 @@ public class LiveOrchestratorTests(ITestOutputHelper output)
             for (var i = 0; i < 600 && worker.Received.Count == 0; i++) await Task.Delay(500);
             Assert.NotEmpty(worker.Received);
 
-            // Daniel's steer while the worker is on its first turn.
+            // The owner's steer while the worker is on its first turn.
             await engine.SteerAsync(idea, "Also add a --shout flag that prints the greeting in upper case.", urgent: false);
 
             var deadline = DateTime.Now.AddMinutes(25);
@@ -164,14 +159,14 @@ public class LiveOrchestratorTests(ITestOutputHelper output)
             Assert.Equal("completed", record.Outcome);
             Assert.Equal(1, record.Steers);
             Assert.True(File.Exists(Path.Combine(Path.GetDirectoryName(review)!, "orchestrator.jsonl")), "orchestrator transcript copied");
-            Assert.DoesNotContain(worker.Received, m => m.Contains("[STEER FROM DANIEL]"));
+            Assert.DoesNotContain(worker.Received, m => m.Contains("[STEER FROM OWNER]"));
 
             var run = await runner.RunAsync("node", ["hello.js", "--name", "Ada", "--shout"], idea.TargetDirectory);
             output.WriteLine("hello.js --shout: " + run.StdOut.Trim());
             Assert.Contains("HELLO, ADA!", run.StdOut);
 
-            var files = await runner.RunAsync("git", ["ls-tree", "-r", "--name-only", AgentHubArchive.Branch], archiveRepo);
-            Assert.Contains($"runs/{record.RunId}/REVIEW.md", files.StdOut);
+            var index = await File.ReadAllTextAsync(Path.Combine(root, "runs", "INDEX.md"));
+            Assert.Contains($"{record.RunId}/REVIEW.md", index);
         }
     }
 }

@@ -1,3 +1,4 @@
+using AgentHub.Hosting;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -25,6 +26,10 @@ public sealed class RunRecord
     public string IdeaTitle { get; set; } = "";
     public string Spec { get; set; } = "";
     public string TargetDirectory { get; set; } = "";
+    /// <summary>The git worktree the worker used when another run had the repository folder; null when it used the folder itself.</summary>
+    public string? WorkingDirectory { get; set; }
+    /// <summary>The worktree's branch, to merge when the run is done.</summary>
+    public string? Branch { get; set; }
     public string WorkerCommand { get; set; } = "";
     public string OrchestratorModel { get; set; } = "";
     public string Workflow { get; set; } = "Builder";
@@ -141,7 +146,7 @@ public sealed class RunRecorder
         try
         {
             if (e.Flag) Record.Flags++;
-            await File.AppendAllTextAsync(EventsPath, JsonSerializer.Serialize(e, JsonLine) + "\n");
+            await SharedFile.AppendAsync(EventsPath, JsonSerializer.Serialize(e, JsonLine) + "\n");
             await WriteRecordAsync();
         }
         finally { _lock.Release(); }
@@ -151,20 +156,39 @@ public sealed class RunRecorder
     {
         var temp = RecordPath + ".tmp";
         await File.WriteAllTextAsync(temp, JsonSerializer.Serialize(Record, Json));
-        File.Move(temp, RecordPath, overwrite: true);
+        await SharedFile.ReplaceAsync(temp, RecordPath);
     }
 
     public static List<RunEvent> ReadEvents(string eventsPath)
     {
         var list = new List<RunEvent>();
         if (!File.Exists(eventsPath)) return list;
-        foreach (var line in File.ReadLines(eventsPath))
+        foreach (var line in SharedFile.ReadLinesShared(eventsPath))
         {
             if (string.IsNullOrWhiteSpace(line)) continue;
             try { if (JsonSerializer.Deserialize<RunEvent>(line, Json) is { } e) list.Add(e); }
             catch (JsonException) { }
         }
         return list;
+    }
+
+    /// <summary>
+    /// Rewrites INDEX.md (every run, newest first) in the runs folder and returns its path. Runs stay on this computer:
+    /// they hold the worker's reports and the owner's steers, so they never go into a repository (2026-11-06, before
+    /// AgentHub was shared with coworkers).
+    /// </summary>
+    public static async Task<string> WriteIndexAsync(string runsRoot)
+    {
+        Directory.CreateDirectory(runsRoot);
+        var records = Directory.EnumerateDirectories(runsRoot)
+            .Select(d => ReadRecord(Path.Combine(d, "run.json")))
+            .OfType<RunRecord>()
+            .ToList();
+        var index = Path.Combine(runsRoot, "INDEX.md");
+        var temp = index + ".tmp";
+        await File.WriteAllTextAsync(temp, RunReview.RenderIndex(records));
+        await SharedFile.ReplaceAsync(temp, index);
+        return index;
     }
 
     public static RunRecord? ReadRecord(string recordPath)
@@ -184,14 +208,17 @@ public sealed class RunRecorder
             Record.EndedAt ??= DateTimeOffset.Now;
             var open = Record.WorkerSessions.LastOrDefault();
             if (open is { EndedAt: null }) { open.EndedAt = Record.EndedAt; open.EndReason ??= outcome; }
-            await File.AppendAllTextAsync(EventsPath,
+            await SharedFile.AppendAsync(EventsPath,
                 JsonSerializer.Serialize(new RunEvent { At = Record.EndedAt.Value, Kind = "end", Action = outcome, Detail = detail }, JsonLine) + "\n");
             await WriteRecordAsync();
 
             var transcript = FindTranscript(Record.OrchestratorSessionId, claudeProjectsRoot);
             if (transcript is not null) File.Copy(transcript, Path.Combine(Folder, "orchestrator.jsonl"), overwrite: true);
 
-            await File.WriteAllTextAsync(Path.Combine(Folder, "REVIEW.md"), RunReview.Render(Record, ReadEvents(EventsPath)));
+            // Whole or not at all: a reader (the runs index, a test, an editor) may open it the moment it appears.
+            var review = Path.Combine(Folder, "REVIEW.md");
+            await File.WriteAllTextAsync(review + ".tmp", RunReview.Render(Record, ReadEvents(EventsPath)));
+            await SharedFile.ReplaceAsync(review + ".tmp", review);
         }
         finally { _lock.Release(); }
     }
@@ -224,7 +251,8 @@ public static class RunReview
         Row(sb, "Orchestrator", $"{r.OrchestratorModel} · {r.OrchestratorCalls} decisions · session `{r.OrchestratorSessionId}`" + (r.Reopened > 0 ? $" · picked up again {r.Reopened}×" : ""));
         if (r.StagesDone.Count > 0 || r.CurrentStage != null)
             Row(sb, "Stages", (r.StagesDone.Count > 0 ? "done: " + string.Join(", ", r.StagesDone) : "none done") + (r.CurrentStage is { } cs && !r.StagesDone.Contains(cs) ? $" · current: {cs}" : ""));
-        Row(sb, "Worker", $"`{r.WorkerCommand}` in `{r.TargetDirectory}` · {r.WorkerSessions.Count} session(s) · {r.MessagesToWorker} messages sent");
+        Row(sb, "Worker", $"`{r.WorkerCommand}` in `{r.WorkingDirectory ?? r.TargetDirectory}` · {r.WorkerSessions.Count} session(s) · {r.MessagesToWorker} messages sent");
+        if (r.WorkingDirectory != null) Row(sb, "Worktree", $"branch `{r.Branch}` of `{r.TargetDirectory}`: merge it when the run is done");
         Row(sb, "Steers / handoffs / flags", $"{r.Steers} / {r.Handoffs} / {r.Flags}");
         if (!string.IsNullOrEmpty(r.AgentHubBuild)) Row(sb, "AgentHub build", r.AgentHubBuild);
         if (!string.IsNullOrEmpty(r.LastProgress)) Row(sb, "Last progress", r.LastProgress);
@@ -264,7 +292,7 @@ public static class RunReview
                 if (e.WorkerReply is not null) sb.Append("**Worker reported:**\n\n").Append(Quote(OrchestratorMessages.Cut(e.WorkerReply, 1500, keepTail: true))).Append("\n\n");
                 if (e.Steers is { Count: > 0 })
                 {
-                    sb.Append("**Steer from Daniel:**\n\n");
+                    sb.Append("**Steer from the owner:**\n\n");
                     foreach (var s in e.Steers) sb.Append("> ").Append(OneLine(s)).Append('\n');
                     sb.Append("\n_Handling: ").Append(e.SteerHandling).Append("_\n\n");
                 }

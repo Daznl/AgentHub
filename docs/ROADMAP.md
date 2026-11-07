@@ -73,11 +73,14 @@
   - Context window handoff loop: monitors transcript token consumption via `ContextWindowTracker`, prompts clean handoff documentation to `.agenthub/handoff.md` when reaching threshold (e.g. 75%), terminates bloated session cleanly, and launches a fresh session continuing from handoff notes
   - GitHub synchronization: 1-click fetch/pull/compile for AgentHub directly from GitHub
 - [x] **Claude orchestrator** (`ClaudeOrchestratorBrain`, `OrchestratorMessages`, `OrchestratorDecision`): a headless Sonnet Claude Code session directs the worker turn by turn with JSON decisions; steers go to it, not the worker; hard limits (usage cap, context handoff, decision cap) stay in code
-- [x] **Run archive** (`RunRecorder`, `RunReview`, `AgentHubArchive`): every run recorded live, REVIEW.md + INDEX.md, committed under `runs/` on the `agenthub-workflows` branch through a dedicated worktree
+- [x] **Run archive** (`RunRecorder`, `RunReview`): every run recorded live, REVIEW.md + INDEX.md beside it; kept on this computer, never committed
 - [x] **Workflow catalogue** (`OrchestratorWorkflow`, `WorkflowCatalogue`, 📚 `WorkflowsWindow`):
-  - Builder, Data Processing and Demo Builder templates; duplicate, fill in inputs and save your own (kept on the archive branch); one workflow per idea
+  - Builder, Data Processing and Demo Builder templates; duplicate, fill in inputs and save your own (in git-ignored `workflows/local/`); one workflow per idea
   - stages with a fresh worker after each one
   - runs suspended on close and reopened on the next build
+- [x] **Parallel orchestrations** (`OrchestratorFleet`): one engine per Build Now plus the Auto-Builder lane, side by side; shared usage reading and steering; a second run on a busy repository gets its own git worktree and branch; the Orchestration window monitors the selected idea's run
+- [ ] Merge helper for a finished run's worktree branch (now merged by hand)
+- [~] **Pane orchestrator** (`PaneOrchestrator`, `ClaudeJsonSession`; branch `experiment/pane-orchestrator`): 🧭 Orchestrate on any running pane puts an orchestrator between the owner and that session with no run, idea or spec; it answers the owner and instructs the session; ✕ Detach takes it off. Context handoff restarts the session in the same pane (tested live, 3 panes in parallel); security checks stay the owner's (WAITING FOR YOU, messages held). Experimental: no usage wait or archive yet; not kept across an AgentHub restart
 - [ ] Tell the orchestrator about other ideas' workflows ("use when") so it can suggest one for a new idea
 - [ ] "Review this run" button: hand a REVIEW.md to Claude and ask what the orchestrator prompt should do differently
 - [ ] Orchestrator model and decision cap as settings (now `sonnet` / 400 in code)

@@ -78,7 +78,7 @@ public class WorkflowCatalogueTests : IDisposable
     {
         var w = new OrchestratorWorkflow { Name = "Data Processing", Handoff = WorkflowHandoff.AfterEachStage, Instructions = "Pipeline at {{loc}}.", Inputs = [new("loc", @"D:\p")] };
         var prompt = OrchestratorMessages.SystemPrompt("Sales", @"C:\x", w);
-        Assert.Contains("Daniel is not in this conversation", prompt);
+        Assert.Contains("The owner is not in this conversation", prompt);
         Assert.True(prompt.IndexOf("stage_done", StringComparison.Ordinal) < prompt.IndexOf("===== WORKFLOW: Data Processing", StringComparison.Ordinal));
         Assert.Contains(@"Pipeline at D:\p.", prompt);
         Assert.Contains("hands off after every stage", prompt);
@@ -91,7 +91,7 @@ public class WorkflowCatalogueTests : IDisposable
     [Fact]
     public async Task Catalogue_lists_templates_first_and_saves_own_workflows_with_ids_from_their_names()
     {
-        var catalogue = new WorkflowCatalogue(null, TemplatesFolder, Path.Combine(_dir, "own"));
+        var catalogue = new WorkflowCatalogue(TemplatesFolder, Path.Combine(_dir, "own"));
         var template = (await catalogue.ListAsync()).First(w => w.Id == "template:data-processing");
         await Assert.ThrowsAsync<InvalidOperationException>(() => catalogue.SaveAsync(template));
 
@@ -111,33 +111,22 @@ public class WorkflowCatalogueTests : IDisposable
         Assert.DoesNotContain(await catalogue.ListAsync(), w => w.Id == "sales-pipeline-2");
     }
 
+    /// <summary>
+    /// 2026-11-06, before AgentHub was shared with coworkers: the owner's own workflows (project paths, pipeline notes) live
+    /// in the repository's workflows/local, which git ignores, so they can never be committed or shared.
+    /// </summary>
     [Fact]
-    public async Task Own_workflows_are_committed_to_the_archive_branch_beside_the_runs()
+    public async Task Own_workflows_live_in_the_repositorys_git_ignored_local_folder()
     {
-        var repo = Path.Combine(_dir, "Agent Hub repo");
-        Directory.CreateDirectory(repo);
-        var runner = new ProcessRunner();
-        await runner.RunAsync("git", ["init", "-q", "-b", "main"], repo);
-        await runner.RunAsync("git", ["config", "user.email", "t@example.com"], repo);
-        await runner.RunAsync("git", ["config", "user.name", "Test"], repo);
-        await runner.RunAsync("git", ["commit", "-q", "--allow-empty", "-m", "init"], repo);
+        var own = WorkflowCatalogue.DefaultOwnFolder();
+        var repo = Path.GetDirectoryName(Path.GetDirectoryName(own))!;
+        Assert.Equal(Path.Combine(repo, "workflows", WorkflowCatalogue.LocalSubfolder), own);
+        Assert.True(File.Exists(Path.Combine(repo, "AgentHub.sln")), $"{own} should be in the AgentHub repository");
 
-        var archive = new AgentHubArchive(runner, repo, Path.Combine(_dir, "archive worktree"));
-        var catalogue = new WorkflowCatalogue(archive, TemplatesFolder);
-        var mine = (await catalogue.GetAsync("template:data-processing")).Duplicate("Sales pipeline");
-        mine.InputsText = @"pipeline_location: C:\Work\pipeline.xlsx";
-        Assert.Contains("committed", await catalogue.SaveAsync(mine));
-
-        var files = (await runner.RunAsync("git", ["ls-tree", "-r", "--name-only", AgentHubArchive.Branch], repo)).StdOut;
-        Assert.Contains("workflows/sales-pipeline.md", files);
-        Assert.Contains("README.md", files);
-        var log = (await runner.RunAsync("git", ["log", "--format=%s", AgentHubArchive.Branch], repo)).StdOut;
-        Assert.Contains("Workflow saved: Sales pipeline", log);
-        Assert.Equal("main", (await runner.RunAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], repo)).StdOut.Trim());
-
-        // A second catalogue on the same archive (AgentHub restarted) sees it.
-        var reopened = new WorkflowCatalogue(new AgentHubArchive(runner, repo, Path.Combine(_dir, "archive worktree")), TemplatesFolder);
-        Assert.Contains(await reopened.ListAsync(), w => w.Id == "sales-pipeline" && w.MissingInputs().Count == 0);
+        var ignored = await new ProcessRunner().RunAsync("git", ["check-ignore", "-q", "workflows/local/sales-pipeline.md"], repo);
+        Assert.Equal(0, ignored.ExitCode);
+        var template = await new ProcessRunner().RunAsync("git", ["check-ignore", "-q", "workflows/builder.md"], repo);
+        Assert.NotEqual(0, template.ExitCode); // the templates are shared
     }
 }
 
@@ -163,7 +152,7 @@ public class WorkflowLoopTests : IDisposable
     private async Task<(OrchestratorEngine, IdeaService, ProjectIdea, WorkflowCatalogue)> SetupAsync(ScriptedBrain brain)
     {
         var runner = new ProcessRunner();
-        var catalogue = new WorkflowCatalogue(null, Path.Combine(AppContext.BaseDirectory, "workflows"), Path.Combine(_dir, "own"));
+        var catalogue = new WorkflowCatalogue(Path.Combine(AppContext.BaseDirectory, "workflows"), Path.Combine(_dir, "own"));
         var pipeline = (await catalogue.GetAsync("template:data-processing")).Duplicate("Test pipeline");
         pipeline.InputsText = @"pipeline_location: C:\Work Files\pipeline.xlsx";
         await catalogue.SaveAsync(pipeline);

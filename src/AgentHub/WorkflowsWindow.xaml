@@ -82,7 +82,7 @@
                         <Button x:Name="DuplicateBtn" Content="⧉ Duplicate" Click="Duplicate_Click" Padding="10,4" Margin="0,0,6,0" ToolTip="Copy this workflow to make one of your own (for a template: the way to change it)" />
                         <Button x:Name="NewBtn" Content="➕ New" Click="New_Click" Padding="10,4" Margin="0,0,6,0" ToolTip="A blank workflow" />
                         <Button x:Name="DeleteBtn" Content="🗑 Delete" Click="Delete_Click" Padding="10,4" Margin="0,0,6,0" />
-                        <Button x:Name="SaveBtn" Content="💾 Save" Click="Save_Click" Background="#2563EB" FontWeight="SemiBold" Padding="12,4" ToolTip="Saved on the agenthub-workflows branch of the AgentHub repository" />
+                        <Button x:Name="SaveBtn" Content="💾 Save" Click="Save_Click" Background="#2563EB" FontWeight="SemiBold" Padding="12,4" ToolTip="Saved in workflows/local of the AgentHub folder: stays on this computer, never committed" />
                     </StackPanel>
                     <TextBlock x:Name="ModeText" VerticalAlignment="Center" FontSize="12" Foreground="#FBBF24" TextWrapping="Wrap" />
                 </DockPanel>

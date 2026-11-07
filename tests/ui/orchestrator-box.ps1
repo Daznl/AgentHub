@@ -1,5 +1,5 @@
 ﻿# UI test: the orchestrator box shows above the pane an orchestration run drives, and only there. A scripted orchestrator (AGENTHUB_ORCHESTRATOR_COMMAND) and a cmd.exe worker: no Claude usage.
-# ideas, archive repo and projects folder. UI Automation patterns only: no mouse, no keyboard, no focus stealing.
+# ideas, workflows folder and projects folder. UI Automation patterns only: no mouse, no keyboard, no focus stealing.
 param([string]$Exe = 'C:\data\agenthub\build-repo\AgentHub.exe')
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
@@ -63,8 +63,7 @@ function Rect($el) { $el.Current.BoundingRectangle }
 
 # ---- fresh test state: one idea whose worker is plain cmd.exe, and a scripted orchestrator (no Claude usage) ----
 Remove-Item $T -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force "$T\projects", "$T\archive-repo" | Out-Null
-git -C "$T\archive-repo" init -q; git -C "$T\archive-repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+New-Item -ItemType Directory -Force "$T\projects" | Out-Null
 $settings = Get-Content "$env:APPDATA\AgentHub\settings.json" -Raw | ConvertFrom-Json
 $settings.PaneLayout = @(); $settings.SessionsDirectory = "$T\sessions"; $settings.HistoryArchiveEnabled = $false; $settings.SessionsOutliveAgentHub = $false; $settings.AnimatedBackground = $false
 [IO.File]::WriteAllText("$T\settings.json", ($settings | ConvertTo-Json -Depth 20))
@@ -74,8 +73,8 @@ $ideas = @(@{ Id = 'boxone'; Title = 'Box Test'; Description = 'A UI test of the
 $fake = Join-Path $T 'fake-orchestrator.cmd'
 [IO.File]::WriteAllText($fake, "@echo off`r`nmore > nul`r`necho {""type"":""result"",""is_error"":false,""result"":""ok"",""session_id"":""00000000-0000-0000-0000-000000000001"",""structured_output"":{""action"":""wait"",""to_worker"":null,""steer_handling"":""none"",""reason"":""UI test"",""progress"":""Scripted orchestrator for the box test"",""stage"":null,""stage_done"":false}}`r`n")
 
-$env:AGENTHUB_SETTINGS_DIR = $T; $env:AGENTHUB_RUNS_DIR = "$T\runs"; $env:AGENTHUB_RUNS_REPO = "$T\archive-repo"
-$env:AGENTHUB_RUNS_WORKTREE = "$T\archive"; $env:AGENTHUB_PROJECTS_DIR = "$T\projects"; $env:AGENTHUB_ORCHESTRATOR_COMMAND = $fake
+$env:AGENTHUB_SETTINGS_DIR = $T; $env:AGENTHUB_RUNS_DIR = "$T\runs"
+$env:AGENTHUB_WORKFLOWS_DIR = "$T\workflows"; $env:AGENTHUB_PROJECTS_DIR = "$T\projects"; $env:AGENTHUB_ORCHESTRATOR_COMMAND = $fake
 $p = Start-Process $Exe -PassThru; $script:procId = $p.Id
 try {
   $main = $null

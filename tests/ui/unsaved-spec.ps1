@@ -1,5 +1,5 @@
 ﻿# UI test: a spec typed but not saved is kept (reload, switching ideas, Build Now), on a TEST AgentHub with its own settings,
-# ideas, archive repo and projects folder. UI Automation patterns only: no mouse, no keyboard, no focus stealing.
+# ideas, workflows folder and projects folder. UI Automation patterns only: no mouse, no keyboard, no focus stealing.
 param([string]$Exe = 'C:\data\agenthub\build-repo\AgentHub.exe')
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
@@ -60,18 +60,17 @@ function IdeaById($id) { (Ideas) | Where-Object { $_.Id -eq $id } | Select-Objec
 
 # ---- fresh test state: one idea with the placeholder spec ----
 Remove-Item $T -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force "$T\projects", "$T\archive-repo" | Out-Null
-git -C "$T\archive-repo" init -q; git -C "$T\archive-repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+New-Item -ItemType Directory -Force "$T\projects" | Out-Null
 $settings = Get-Content "$env:APPDATA\AgentHub\settings.json" -Raw | ConvertFrom-Json
 $settings.PaneLayout = @(); $settings.SessionsDirectory = "$T\sessions"; $settings.HistoryArchiveEnabled = $false; $settings.SessionsOutliveAgentHub = $false; $settings.AnimatedBackground = $false
 [IO.File]::WriteAllText("$T\settings.json", ($settings | ConvertTo-Json -Depth 20))
-[IO.File]::WriteAllText("$T\ideas.json", '[{"Id":"ideaone","Title":"New App #1","Description":"Describe the goal, architecture, features, and requirements for this application.","TargetDirectory":"C:\\Users\\danie\\Desktop\\ClaudeCProjects\\Pie","AgentCommand":"claude","ContextHandoffThreshold":0.75,"Status":0,"WorkflowId":"template:builder"}]')
+[IO.File]::WriteAllText("$T\ideas.json", '[{"Id":"ideaone","Title":"New App #1","Description":"Describe the goal, architecture, features, and requirements for this application.","TargetDirectory":"C:\\Users\\me\\Desktop\\ClaudeCProjects\\Pie","AgentCommand":"claude","ContextHandoffThreshold":0.75,"Status":0,"WorkflowId":"template:builder"}]')
 $para1 = 'A habit tracker for my phone: log habits daily, streaks, a weekly chart, works offline.'
 $para2 = 'A second idea typed and never saved: a recipe scaler.'
 $para3 = 'Edited again, then Build Now pressed without Save.'
 
-$env:AGENTHUB_SETTINGS_DIR = $T; $env:AGENTHUB_RUNS_DIR = "$T\runs"; $env:AGENTHUB_RUNS_REPO = "$T\archive-repo"
-$env:AGENTHUB_RUNS_WORKTREE = "$T\archive"; $env:AGENTHUB_PROJECTS_DIR = "$T\projects"
+$env:AGENTHUB_SETTINGS_DIR = $T; $env:AGENTHUB_RUNS_DIR = "$T\runs"
+$env:AGENTHUB_WORKFLOWS_DIR = "$T\workflows"; $env:AGENTHUB_PROJECTS_DIR = "$T\projects"
 $p = Start-Process $Exe -PassThru; $script:procId = $p.Id
 try {
   $main = $null

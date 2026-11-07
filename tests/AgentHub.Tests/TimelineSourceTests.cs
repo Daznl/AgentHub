@@ -34,9 +34,9 @@ public class TimelineSourceTests : IDisposable
     public void ParseLog_ReadsEveryField()
     {
         var log = string.Join("\n",
-            $"a1b2c3d4e5f60718293a4b5c6d7e8f9012345678{Sep}0000000000000000000000000000000000000001{Sep}2026-11-03T16:31:29+08:00{Sep}Daznl{Sep}Timeline phase 1",
-            $"0000000000000000000000000000000000000001{Sep}0000000000000000000000000000000000000002 0000000000000000000000000000000000000003{Sep}2026-11-03T08:00:00Z{Sep}Daniel{Sep}Merge pull request #6",
-            $"0000000000000000000000000000000000000002{Sep}{Sep}2026-10-01T00:00:00Z{Sep}Daniel{Sep}Initial commit\r",
+            $"a1b2c3d4e5f60718293a4b5c6d7e8f9012345678{Sep}0000000000000000000000000000000000000001{Sep}2026-11-03T16:31:29+08:00{Sep}ada-dev{Sep}Timeline phase 1",
+            $"0000000000000000000000000000000000000001{Sep}0000000000000000000000000000000000000002 0000000000000000000000000000000000000003{Sep}2026-11-03T08:00:00Z{Sep}Ada{Sep}Merge pull request #6",
+            $"0000000000000000000000000000000000000002{Sep}{Sep}2026-10-01T00:00:00Z{Sep}Ada{Sep}Initial commit\r",
             "garbage line",
             "");
 
@@ -48,7 +48,7 @@ public class TimelineSourceTests : IDisposable
                 Assert.Equal("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", c.Hash);
                 Assert.Equal("a1b2c3d", c.Short);
                 Assert.Equal(new DateTimeOffset(2026, 11, 3, 16, 31, 29, TimeSpan.FromHours(8)), c.Time);
-                Assert.Equal("Daznl", c.Author);
+                Assert.Equal("ada-dev", c.Author);
                 Assert.Equal("Timeline phase 1", c.Subject);
                 Assert.Null(c.Branch); // the graph fills this in
                 Assert.False(c.IsMerge);

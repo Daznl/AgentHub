@@ -45,7 +45,7 @@ public partial class MainWindow : Window
     private readonly List<ShellOption> _shellOptions = new();
     private readonly List<TerminalPaneControl> _panes = new();
     private readonly IdeaService _ideaService = new();
-    private OrchestratorEngine? _orchestrator;
+    private OrchestratorFleet? _orchestrators;
     private IdeasWindow? _ideasWindow;
     private static readonly SolidColorBrush[] PaneAccentBrushes =
     [
@@ -250,14 +250,64 @@ public partial class MainWindow : Window
         pane.RepoContextRequested += p => ShowContext(p.ContextFolder, p.ContextCli);
         pane.TimelineRequested += p => ShowTimeline(p.HistoryFolder);
         pane.UpdateShellOptions(_shellOptions);
-        pane.OrchestratorPauseRequested += p => { _ = ToggleOrchestratorPauseAsync(); };
+        pane.OrchestratorPauseRequested += p => { _ = ToggleOrchestratorPauseAsync(p); };
         pane.OrchestratorOpenRequested += _ => ShowIdeas();
+        pane.OrchestratorAttachRequested += (p, at) => { _ = OfferPaneOrchestratorAsync(p, at); };
+        pane.OrchestratorDetachRequested += DetachPaneOrchestrator;
+        pane.OrchestratorMessageSent += (p, text) => { if (_paneOrchestrators.TryGetValue(p, out var o)) _ = o.SendAsync(text); };
+        // The session ended: the orchestrator goes with it, unless it ended the session itself for a handoff and is starting the next.
+        pane.SessionStateChanged += () => { if (!pane.IsRunning && _paneOrchestrators.TryGetValue(pane, out var o) && !o.IsRestarting) DetachPaneOrchestrator(pane); };
         return pane;
     }
 
+    // ---- Pane orchestrators: put on a running session with one click, taken off as freely ----
+
+    private readonly Dictionary<TerminalPaneControl, PaneOrchestrator> _paneOrchestrators = [];
+
     /// <summary>
-    /// The orchestrator box goes above the one pane an orchestration run drives, and only there: Daniel's own terminals
-    /// never show it. Engine events come from any thread.
+    /// 🧭 Orchestrate pressed: a menu of contexts (none, or a workflow's instructions) and the orchestrator is on. The setup is
+    /// the menu pick; everything else the owner tells it by messaging it.
+    /// </summary>
+    private async Task OfferPaneOrchestratorAsync(TerminalPaneControl pane, Button at)
+    {
+        if (!pane.IsRunning || _paneOrchestrators.ContainsKey(pane) || _orchestrators?.EngineDriving(pane) != null) return;
+        var workflows = await new WorkflowCatalogue().ListAsync();
+        var menu = new ContextMenu { PlacementTarget = at, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        var plain = new MenuItem { Header = "Orchestrator with no preset context", ToolTip = "Tell it the job and how to run it by messaging it." };
+        plain.Click += (_, _) => AttachPaneOrchestrator(pane, null);
+        menu.Items.Add(plain);
+        if (workflows.Count > 0) menu.Items.Add(new Separator());
+        foreach (var w in workflows)
+        {
+            var item = new MenuItem { Header = "With context: " + w.DisplayName, ToolTip = string.IsNullOrWhiteSpace(w.Description) ? null : w.Description };
+            var picked = w;
+            item.Click += (_, _) => AttachPaneOrchestrator(pane, picked);
+            menu.Items.Add(item);
+        }
+        menu.IsOpen = true;
+    }
+
+    private void AttachPaneOrchestrator(TerminalPaneControl pane, OrchestratorWorkflow? workflow)
+    {
+        if (!pane.IsRunning || _paneOrchestrators.ContainsKey(pane)) return;
+        var orchestrator = PaneOrchestrator.ForPane(new PaneBuildWorker(pane), _runner, PaneOrchestrator.DefaultCommand, "sonnet",
+            pane.ContextFolder, $"Terminal {pane.PaneIndex}", workflow);
+        orchestrator.Changed += RefreshOrchestratorBoxes;
+        _paneOrchestrators[pane] = orchestrator;
+        RefreshOrchestratorBoxes();
+    }
+
+    private void DetachPaneOrchestrator(TerminalPaneControl pane)
+    {
+        if (!_paneOrchestrators.Remove(pane, out var orchestrator)) return;
+        orchestrator.Changed -= RefreshOrchestratorBoxes;
+        orchestrator.Dispose();
+        RefreshOrchestratorBoxes();
+    }
+
+    /// <summary>
+    /// Each pane an orchestration run drives gets that run's box, and only those panes: the owner's own terminals never show
+    /// one. Engine events come from any thread.
     /// </summary>
     private void RefreshOrchestratorBoxes()
     {
@@ -266,20 +316,20 @@ public partial class MainWindow : Window
             _ = Dispatcher.InvokeAsync(RefreshOrchestratorBoxes);
             return;
         }
-        var o = _orchestrator;
-        var view = o is null ? null : OrchestratorBoxView.For(o.State, o.IsThinking, o.CurrentIdea?.Title, o.WorkerSession, o.LatestProgress,
-            o.LastReadFromWorker, o.LastSentToWorker, o.LastSentAnswersRead);
-        var driven = view is null ? null : o!.ActivePane;
         foreach (var pane in _panes)
         {
-            var next = pane == driven ? view : null;
+            var o = _orchestrators?.EngineDriving(pane);
+            var next = o is not null
+                ? OrchestratorBoxView.For(o.State, o.IsThinking, o.CurrentIdea?.Title, o.WorkerSession, o.LatestProgress, o.Conversation, o.WorktreeBranch)
+                : _paneOrchestrators.TryGetValue(pane, out var attached) ? OrchestratorBoxView.ForAttached(attached) : null;
             if (next != pane.OrchestratorView) pane.ShowOrchestrator(next);
         }
     }
 
-    private async Task ToggleOrchestratorPauseAsync()
+    /// <summary>Pause / Resume in a pane's box acts on the run driving that pane, not on the others.</summary>
+    private async Task ToggleOrchestratorPauseAsync(TerminalPaneControl pane)
     {
-        if (_orchestrator is not { } o) return;
+        if (_orchestrators?.EngineDriving(pane) is not { } o) return;
         if (o.State == OrchestratorState.Paused) await o.ResumeAsync();
         else o.Pause();
         RefreshOrchestratorBoxes();
@@ -288,18 +338,39 @@ public partial class MainWindow : Window
     private void OpenIdeas_Click(object sender, RoutedEventArgs e) => ShowIdeas();
 
     /// <summary>
-    /// The pane the build worker runs in: the one it already has, else an idle pane, else a new one. Never a pane with a
-    /// running session of Daniel's (AGENTS.md: never replace a running session). Null when every pane is busy.
+    /// The pane an engine's worker runs in: the one it already has, else an idle pane no other run drives, else a new one.
+    /// Never a pane with a running session of the owner's (AGENTS.md: never replace a running session). Null when every pane
+    /// is busy. An idle engine still holding the chosen pane lets go of it.
     /// </summary>
-    private TerminalPaneControl? PaneForOrchestrator()
+    private TerminalPaneControl? PaneForOrchestrator(OrchestratorEngine? engine)
     {
-        if (_orchestrator?.ActivePane is { } current && _panes.Contains(current)) return current;
-        if (_panes.FirstOrDefault(p => !p.IsRunning) is { } idle) return idle;
-        if (_panes.Count >= MaxPanes) return null;
-        var pane = CreateTerminalPane();
-        _panes.Add(pane);
-        RebuildTerminalLayout();
+        if (engine?.ActivePane is { } current && _panes.Contains(current)
+            && _orchestrators?.EngineDriving(current) is var driver && (driver == engine || driver == null && !current.IsRunning))
+            return current;
+        var pane = _panes.FirstOrDefault(p => !p.IsRunning && _orchestrators?.IsPaneTaken(p) != true);
+        if (pane == null)
+        {
+            if (_panes.Count >= MaxPanes) return null;
+            pane = CreateTerminalPane();
+            _panes.Add(pane);
+            RebuildTerminalLayout();
+        }
+        foreach (var idle in _orchestrators?.Engines ?? [])
+            if (idle != engine && idle.ActivePane == pane) idle.ReleaseWorker();
         return pane;
+    }
+
+    private OrchestratorFleet Orchestrators()
+    {
+        if (_orchestrators != null) return _orchestrators;
+        var workflows = new WorkflowCatalogue();
+        _orchestrators = new OrchestratorFleet(_ideaService, steering => new OrchestratorEngine(_ideaService, _git, _runner, steering)
+        {
+            Workflows = workflows,
+            RepositoryInUse = path => Dispatcher.InvokeAsync(() => EnsureRepositoryAsync(path)).Task.Unwrap()
+        }) { Workflows = workflows };
+        _orchestrators.Changed += RefreshOrchestratorBoxes;
+        return _orchestrators;
     }
 
     private void ShowIdeas()
@@ -311,24 +382,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_orchestrator == null)
-        {
-            var archive = OrchestratorEngine.DefaultArchive(_runner);
-            _orchestrator = new OrchestratorEngine(_ideaService, _git, _runner)
-            {
-                Archive = archive,
-                Workflows = new WorkflowCatalogue(archive),
-                RepositoryInUse = path => Dispatcher.InvokeAsync(() => EnsureRepositoryAsync(path)).Task.Unwrap()
-            };
-            _orchestrator.StateChanged += _ => RefreshOrchestratorBoxes();
-            _orchestrator.ThinkingChanged += _ => RefreshOrchestratorBoxes();
-            _orchestrator.ProgressChanged += _ => RefreshOrchestratorBoxes();
-            _orchestrator.CurrentIdeaChanged += _ => RefreshOrchestratorBoxes();
-            _orchestrator.LogAdded += _ => RefreshOrchestratorBoxes();
-        }
         var window = new IdeasWindow(
             _ideaService,
-            _orchestrator,
+            Orchestrators(),
             _usageService,
             paneProvider: PaneForOrchestrator,
             openContextAction: folder => ShowContext(folder, null),
@@ -2165,7 +2221,9 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _usageRefreshTimer.Stop();
-        _orchestrator?.Dispose();
+        foreach (var o in _paneOrchestrators.Values) o.Dispose();
+        _paneOrchestrators.Clear();
+        _orchestrators?.Dispose();
         _historyArchive?.Dispose();
         try
         {

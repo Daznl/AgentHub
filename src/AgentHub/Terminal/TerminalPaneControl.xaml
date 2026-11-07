@@ -87,14 +87,23 @@
     </Grid.RowDefinitions>
 
     <!-- The orchestrator driving this pane's session, in a small box above it. Only on the pane an orchestration run
-         controls; every other pane (Daniel's own terminals) never shows it. -->
+         controls; every other pane (the owner's own terminals) never shows it. -->
     <Border x:Name="OrchestratorBox" Grid.Row="0" Visibility="Collapsed" Background="#151129" BorderBrush="#4C3A8C" BorderThickness="1"
             CornerRadius="8" Padding="10,6" Margin="0,0,0,6">
-        <DockPanel LastChildFill="True">
+        <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <DockPanel Grid.Row="0" LastChildFill="True">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
                 <Button x:Name="OrchestratorPauseBtn" Click="OrchestratorPause_Click" Content="⏸ Pause" ToolTip="Pause the orchestrator: the worker is left as it is and gets nothing new"
                         Background="#221A3D" Foreground="#C4B5FD" Padding="8,2" Margin="0,0,4,0" FontSize="11" FontWeight="SemiBold" />
                 <Button x:Name="OrchestratorOpenBtn" Click="OrchestratorOpen_Click" Content="Orchestration…" ToolTip="Open the Orchestration window"
+                        Background="#221A3D" Foreground="#C4B5FD" Padding="8,2" FontSize="11" FontWeight="SemiBold" />
+                <Button x:Name="OrchestratorDetachBtn" Click="OrchestratorDetach_Click" Content="✕ Detach" Visibility="Collapsed"
+                        ToolTip="Take the orchestrator off this session: the session carries on as your own, and your typing goes straight to it again"
                         Background="#221A3D" Foreground="#C4B5FD" Padding="8,2" FontSize="11" FontWeight="SemiBold" />
             </StackPanel>
             <StackPanel>
@@ -106,10 +115,25 @@
                     <TextBlock x:Name="OrchestratorTitle" Foreground="{StaticResource TextBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                 </DockPanel>
                 <TextBlock x:Name="OrchestratorProgress" Foreground="#B6C2D6" FontSize="11" Margin="0,3,0,0" TextTrimming="CharacterEllipsis" />
-                <TextBlock x:Name="OrchestratorLastRead" Foreground="#9AA8BE" FontSize="10" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
-                <TextBlock x:Name="OrchestratorLastSent" Foreground="#7E8CA6" FontSize="10" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
             </StackPanel>
         </DockPanel>
+        <!-- Every message of the current worker session, oldest first; follows the newest unless scrolled up. -->
+        <ScrollViewer x:Name="OrchestratorConversationScroll" Grid.Row="1" MaxHeight="220" Margin="0,6,0,0"
+                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+                <TextBlock x:Name="OrchestratorNothingYet" Foreground="#7E8CA6" FontSize="10" TextWrapping="Wrap" />
+                <ItemsControl x:Name="OrchestratorConversation" ItemTemplate="{StaticResource OrchestratorExchangeTemplate}" />
+            </StackPanel>
+        </ScrollViewer>
+        <!-- Attached orchestrator only: what the owner types here goes to the orchestrator, never straight to the session. -->
+        <DockPanel x:Name="OrchestratorInputRow" Grid.Row="2" Visibility="Collapsed" LastChildFill="True" Margin="0,6,0,0">
+            <Button x:Name="OrchestratorSendBtn" DockPanel.Dock="Right" Click="OrchestratorSend_Click" Content="Send" ToolTip="Send to the orchestrator (Enter; Shift+Enter for a new line)"
+                    Background="#4C3A8C" Foreground="#EDE9FE" Padding="10,2" Margin="6,0,0,0" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Bottom" />
+            <TextBox x:Name="OrchestratorInput" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="90" VerticalScrollBarVisibility="Auto" FontSize="12" Padding="8,4"
+                     Background="#0F0C1F" Foreground="#E2E8F0" BorderBrush="#4C3A8C" CaretBrush="#C4B5FD" PreviewKeyDown="OrchestratorInput_PreviewKeyDown"
+                     AutomationProperties.Name="Message the orchestrator" ToolTip="Message the orchestrator: the job, how to run it, questions. Enter sends." />
+        </DockPanel>
+        </Grid>
     </Border>
 
     <Border x:Name="PaneBorder" Grid.Row="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" ClipToBounds="True">
@@ -143,6 +167,9 @@
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                         <Button x:Name="BrowseBtn" Click="BrowseFolder_Click" Content="📂" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="LaunchBtn" Click="Launch_Click" Content="Relaunch" Margin="0,0,4,0" Padding="8,3" FontWeight="SemiBold" Background="#0E7490" FontSize="11" />
+                        <Button x:Name="OrchestrateBtn" Click="Orchestrate_Click" Content="🧭 Orchestrate" Visibility="Collapsed"
+                                ToolTip="Put an orchestrator on this session: your messages go to it, it answers you and instructs the session. Take it off any time."
+                                Background="#221A3D" Foreground="#C4B5FD" Padding="8,3" Margin="0,0,4,0" FontSize="11" FontWeight="SemiBold" />
                         <Button x:Name="RepoContextBtn" Click="RepoContext_Click" Content="📁 Repo context" Background="#16202F" Foreground="#B6C2D6" Padding="8,3" Margin="0,0,4,0" FontSize="11" FontWeight="SemiBold" />
                         <Button x:Name="TimelineBtn" Click="Timeline_Click" Content="🌳" ToolTip="Timeline of this repository: every session and commit from the start, parallel sessions side by side" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
                         <Button x:Name="HistoryBtn" Click="History_Click" Content="🕘" ToolTip="Open the full history of this pane's session, or of the selected folder's sessions" Background="#16202F" Foreground="#7E8CA6" Padding="7,3" Margin="0,0,4,0" FontSize="11" FontWeight="Bold" />
