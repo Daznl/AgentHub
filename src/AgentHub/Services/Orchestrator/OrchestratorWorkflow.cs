@@ -216,11 +216,12 @@ public sealed class WorkflowCatalogue
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "AgentHub.sln")) && Directory.Exists(Path.Combine(dir.FullName, ".git")))
+            // ".git" is a folder in a clone and a file in a git worktree
+            if (File.Exists(Path.Combine(dir.FullName, "AgentHub.sln")) && Path.Exists(Path.Combine(dir.FullName, ".git")))
                 return dir.FullName;
         }
         var desktop = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Desktop", "AgentHub");
-        return Directory.Exists(Path.Combine(desktop, ".git")) ? desktop : null;
+        return Path.Exists(Path.Combine(desktop, ".git")) ? desktop : null;
     }
 
     public Task<List<OrchestratorWorkflow>> ListAsync()

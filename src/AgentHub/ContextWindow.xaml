@@ -1,6 +1,7 @@
 <Window x:Class="AgentHub.ContextWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:AgentHub.Controls"
         Title="AgentHub - Context" Height="680" Width="820" MinHeight="380" MinWidth="560"
         Icon="Assets/AppIcon.png" WindowStartupLocation="CenterOwner"
         Background="{StaticResource WindowBackgroundBrush}" Foreground="{StaticResource TextBrush}" FontFamily="Segoe UI">
@@ -124,9 +125,10 @@
         </Grid.RowDefinitions>
 
         <DockPanel Grid.Row="0" Margin="0,0,0,10" LastChildFill="True">
-            <ToggleButton x:Name="CrabBtn" DockPanel.Dock="Right" Style="{StaticResource CrabToggle}" VerticalAlignment="Top" Margin="12,0,0,0"
-                          Checked="Crab_Toggled" Unchecked="Crab_Toggled" AutomationProperties.Name="Context helper"
-                          ToolTip="Context helper: say what to add or change in this file. Claude Code suggests the edits and you choose which go in." />
+            <!-- The crab, and the button that opens the Context helper: rests at the top right and roams the strip beside the heading -->
+            <controls:CrabMascot x:Name="Crab" DockPanel.Dock="Right" Width="150" Height="56" VerticalAlignment="Top" Margin="12,0,0,0"
+                                 HelperName="Context helper"
+                                 ToolTip="Context helper: say what to add or change in this file. Claude Code suggests the edits and you choose which go in." />
             <StackPanel>
                 <TextBlock x:Name="HeadingText" FontSize="18" FontWeight="SemiBold" />
                 <TextBlock x:Name="SubheadingText" Margin="0,3,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />

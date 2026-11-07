@@ -24,8 +24,10 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <Image Grid.Column="0" Source="Assets/HeaderLogo.png" Width="72" Height="72" HorizontalAlignment="Left" VerticalAlignment="Top" RenderOptions.BitmapScalingMode="HighQuality" />
-                <!-- The crab mascot: rests at the top right beside the buttons and roams the free header strip towards the logo -->
-                <controls:CrabMascot x:Name="Mascot" Grid.Column="1" Height="72" VerticalAlignment="Top" />
+                <!-- The crab mascot, and the button that opens the AgentHub helper pane to the right of the terminals:
+                     rests at the top right beside the buttons and roams the free header strip towards the logo -->
+                <controls:CrabMascot x:Name="Mascot" Grid.Column="1" Height="72" VerticalAlignment="Top"
+                                     ToolTip="AgentHub helper: ask how to do anything in AgentHub" />
 
                 <!-- One row of buttons: view actions, then navigation at the far right. Filled right to left so that when the
                      window is too narrow, navigation keeps the top-right spot and the view actions drop to a right-aligned second line. -->
@@ -40,10 +42,6 @@
                         <Button Click="OpenHistory_Click" Content="🕘 History" FontWeight="SemiBold" ToolTip="Every Claude Code and Codex session per repository: each prompt, reply, thinking step, tool call and result" />
                         <Button Click="OpenContext_Click" Content="📄 Context" FontWeight="SemiBold" ToolTip="View and edit the user-wide instruction file of each CLI: Claude Code CLAUDE.md, Codex AGENTS.md, Gemini / Antigravity GEMINI.md" />
                         <Button Click="OpenSettings_Click" Content="⚙ Settings" Margin="0,0,0,8" />
-                        <!-- The AgentHub helper: opens a pane to the right of the terminals -->
-                        <ToggleButton x:Name="AppHelperBtn" Style="{StaticResource CrabToggle}" Width="34" Height="34" Margin="10,0,0,8" VerticalAlignment="Top"
-                                      Checked="AppHelperBtn_Toggled" Unchecked="AppHelperBtn_Toggled" AutomationProperties.Name="AgentHub helper"
-                                      ToolTip="AgentHub helper: ask how to do anything in AgentHub" />
                     </StackPanel>
                     <!-- Manage GitHub Repos view: repository management actions -->
                     <StackPanel x:Name="ManageBar" Visibility="Collapsed" Orientation="Horizontal" FlowDirection="LeftToRight">

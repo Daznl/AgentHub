@@ -319,7 +319,8 @@
             </Setter>
         </Style>
 
-        <!-- The helpers' orange crab (Context window and main window), drawn as vectors: WPF renders emoji in one flat colour only -->
+        <!-- The helpers' orange crab icon for panel headers and replies (Context window and main window), drawn as vectors:
+             WPF renders emoji in one flat colour only. The buttons that open the helpers are the pixel-art CrabMascot. -->
         <SolidColorBrush x:Key="CrabBrush" Color="#FF7A45" />
         <DrawingImage x:Key="CrabIcon">
             <DrawingImage.Drawing>
@@ -360,34 +361,6 @@
                 </DrawingGroup>
             </DrawingImage.Drawing>
         </DrawingImage>
-
-        <!-- Round crab button that opens and closes the helper; lit while the helper is open -->
-        <Style x:Key="CrabToggle" TargetType="ToggleButton">
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Width" Value="38" />
-            <Setter Property="Height" Value="38" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ToggleButton">
-                        <Border x:Name="Disc" CornerRadius="19" Background="#24160F" BorderBrush="#5A3320" BorderThickness="1">
-                            <Image Source="{StaticResource CrabIcon}" Width="26" Height="26" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Disc" Property="Background" Value="#3D2214" />
-                                <Setter TargetName="Disc" Property="BorderBrush" Value="{StaticResource CrabBrush}" />
-                            </Trigger>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Disc" Property="BorderBrush" Value="{StaticResource CrabBrush}" />
-                            </Trigger>
-                            <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="Disc" Property="BorderBrush" Value="{StaticResource CrabBrush}" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
 
         <!-- Example requests shown in an empty helper, and follow-up suggestions; a click uses the text -->
         <Style x:Key="ExampleChip" TargetType="Button">

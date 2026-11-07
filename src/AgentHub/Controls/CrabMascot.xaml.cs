@@ -9,9 +9,11 @@ using UserControl = System.Windows.Controls.UserControl;
 namespace AgentHub.Controls;
 
 /// <summary>
-/// The AgentHub crab: a pixel-art mascot that lives at the top right of the header, beside the buttons. It idles and blinks, now and then
-/// scuttles, rolls, pinches, waves or dances along the free strip of header, reacts when clicked and dozes off when
-/// AgentHub has had no input for a while. Sprites are 80x80 cells in strips under <c>Assets/Crab</c>
+/// The AgentHub crab: a pixel-art mascot that is the button for every helper in AgentHub (click, or Enter / Space when
+/// focused; <see cref="Poked"/>): at the top right of the main window's header, beside the buttons, it opens the
+/// AgentHub helper; at the top right of a Context window it opens the Context helper for the file being edited. It idles and
+/// blinks, now and then scuttles, rolls, pinches, waves or dances along the free strip of header, and dozes off when
+/// AgentHub has had no input for a while. While <see cref="IsActive"/> (helper open) it glows and stays at home. Sprites are 80x80 cells in strips under <c>Assets/Crab</c>
 /// (made with PixelLab, see <c>docs/brand/crab/README.md</c>); they are drawn at a whole number of screen pixels per
 /// sprite pixel so they stay crisp at every Windows display scale. Motion is off when Windows animations are off.
 /// </summary>
@@ -61,6 +63,11 @@ public partial class CrabMascot : UserControl
     private DateTime _restUntil;
     private DateTime _nextOuting;
     private DateTime _lastInput = DateTime.UtcNow;
+    private bool _active;
+
+    // An orange halo, like the glow of the logo artwork: soft on hover or keyboard focus, full while active.
+    private readonly System.Windows.Media.Effects.DropShadowEffect _glow =
+        new() { Color = System.Windows.Media.Color.FromRgb(0xFF, 0x7A, 0x45), ShadowDepth = 0, BlurRadius = 16, Opacity = 0 };
 
     public CrabMascot()
     {
@@ -70,11 +77,48 @@ public partial class CrabMascot : UserControl
         Unloaded += OnUnloaded;
         SizeChanged += (_, _) => Layout();
         Sprite.DpiChanged += (_, _) => Layout();  // moved to a screen with another display scale
+        Sprite.MouseEnter += (_, _) => UpdateGlow();
+        Sprite.MouseLeave += (_, _) => UpdateGlow();
+        Sprite.GotKeyboardFocus += (_, _) => UpdateGlow();
+        Sprite.LostKeyboardFocus += (_, _) => UpdateGlow();
+        Sprite.Invoked = Press;
+        Sprite.Status = () => _active ? "Helper open" : "";
+        // Size the sprite before its first render: a size set later only showed once the frame changed (the crab drew at
+        // its natural 80 DIP, low and off the right edge of the Context window, for its first few seconds).
+        Layout();
         Show(Clips["idle"].Frames[0]);
     }
 
-    /// <summary>Raised when the crab is clicked.</summary>
+    /// <summary>Raised when the crab is clicked, or Enter or Space is pressed while it has keyboard focus.</summary>
     public event Action? Poked;
+
+    /// <summary>
+    /// What this crab opens, as screen readers and UI Automation announce it ("AgentHub helper", "Context helper"). The same
+    /// crab lives in more than one window, each one the helper for that place.
+    /// </summary>
+    public string HelperName
+    {
+        get => System.Windows.Automation.AutomationProperties.GetName(Sprite);
+        set => System.Windows.Automation.AutomationProperties.SetName(Sprite, value);
+    }
+
+    /// <summary>Lit and staying at home, as a pressed toggle button would; the owner sets it while the helper is open.</summary>
+    public bool IsActive
+    {
+        get => _active;
+        set
+        {
+            if (_active == value) return;
+            _active = value;
+            UpdateGlow();
+        }
+    }
+
+    private void UpdateGlow()
+    {
+        _glow.Opacity = _active ? 0.95 : Sprite.IsMouseOver || Sprite.IsKeyboardFocused ? 0.6 : 0;
+        Sprite.Effect = _glow.Opacity > 0 ? _glow : null;
+    }
 
     /// <summary>Width at the right of this control that the crab must not walk into (the header buttons).</summary>
     public double ReservedRight
@@ -128,6 +172,9 @@ public partial class CrabMascot : UserControl
         InputManager.Current.PostProcessInput += OnAnyInput;
         Layout();
         Restart();
+        // The first arrange of the sprite can be from before this control had its size (seen in the Context window: the
+        // crab drew low and off the right edge until its first frame change); arrange it again once the window is up.
+        Dispatcher.BeginInvoke(Layout, DispatcherPriority.Loaded);
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -217,6 +264,8 @@ public partial class CrabMascot : UserControl
             var now = DateTime.UtcNow;
             if (now < _restUntil) return;
             if (now - _lastInput > SleepAfter) { Play("sleep", Mode.Acting, () => _mode = Mode.Asleep); return; }
+            // While the helper is open the crab is its pressed button: it goes back home and stays there
+            if (_active && Math.Abs(_x - Home) > 0.5) { Play("scuttle", Mode.Walking, loop: true, target: Home); return; }
             if (now >= _nextOuting) { _nextOuting = now + TimeSpan.FromSeconds(_random.Next(12, 32)); GoOut(); return; }
             Play("idle", Mode.Acting, Rest);  // breathe and blink between outings
             return;
@@ -243,7 +292,7 @@ public partial class CrabMascot : UserControl
     /// <summary>Something to do between rests: a walk, a roll along the header, or a little show on the spot.</summary>
     private void GoOut()
     {
-        var pick = _random.NextDouble();
+        var pick = _active ? 1 : _random.NextDouble();  // active: only tricks on the spot
         if (HasRoom && pick < 0.45)
         {
             // Wander somewhere new, or head home when far from it
@@ -276,10 +325,48 @@ public partial class CrabMascot : UserControl
     private void Sprite_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         e.Handled = true;
+        Press();
+    }
+
+    private void Sprite_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key is not (Key.Enter or Key.Space)) return;
+        e.Handled = true;
+        Press();
+    }
+
+    // The owner flips IsActive from Poked; then a hop, and a wave hello when that opened the helper.
+    private void Press()
+    {
         Poked?.Invoke();
         if (!Moving) return;
-        // A poke: a startled hop, then one of its tricks on the spot
-        var trick = new[] { "pinch", "wave", "dance", "roll" }[_random.Next(4)];
-        Play("hop", Mode.Acting, () => Play(trick, Mode.Acting));
+        Play("hop", Mode.Acting, _active ? () => Play("wave", Mode.Acting) : null);
+    }
+}
+
+/// <summary>The crab's picture, announced to screen readers and UI Automation as a button that can be invoked.</summary>
+public sealed class CrabSprite : System.Windows.Controls.Image
+{
+    internal Action? Invoked { get; set; }
+
+    /// <summary>Read out after the name, e.g. "Helper open".</summary>
+    internal Func<string>? Status { get; set; }
+
+    protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer() => new Peer(this);
+
+    private sealed class Peer(CrabSprite owner)
+        : System.Windows.Automation.Peers.FrameworkElementAutomationPeer(owner), System.Windows.Automation.Provider.IInvokeProvider
+    {
+        protected override System.Windows.Automation.Peers.AutomationControlType GetAutomationControlTypeCore() =>
+            System.Windows.Automation.Peers.AutomationControlType.Button;
+
+        protected override string GetClassNameCore() => nameof(CrabSprite);
+
+        protected override string GetItemStatusCore() => owner.Status?.Invoke() ?? "";
+
+        public override object GetPattern(System.Windows.Automation.Peers.PatternInterface patternInterface) =>
+            patternInterface == System.Windows.Automation.Peers.PatternInterface.Invoke ? this : base.GetPattern(patternInterface);
+
+        public void Invoke() => owner.Invoked?.Invoke();
     }
 }
