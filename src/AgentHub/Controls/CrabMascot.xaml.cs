@@ -9,8 +9,9 @@ using UserControl = System.Windows.Controls.UserControl;
 namespace AgentHub.Controls;
 
 /// <summary>
-/// The AgentHub crab: a pixel-art mascot that lives at the top right of the header, beside the buttons, and is the
-/// button that opens the AgentHub helper (click, or Enter / Space when focused; <see cref="Poked"/>). It idles and
+/// The AgentHub crab: a pixel-art mascot that is the button for every helper in AgentHub (click, or Enter / Space when
+/// focused; <see cref="Poked"/>): at the top right of the main window's header, beside the buttons, it opens the
+/// AgentHub helper; at the top right of a Context window it opens the Context helper for the file being edited. It idles and
 /// blinks, now and then scuttles, rolls, pinches, waves or dances along the free strip of header, and dozes off when
 /// AgentHub has had no input for a while. While <see cref="IsActive"/> (helper open) it glows and stays at home. Sprites are 80x80 cells in strips under <c>Assets/Crab</c>
 /// (made with PixelLab, see <c>docs/brand/crab/README.md</c>); they are drawn at a whole number of screen pixels per
@@ -82,11 +83,24 @@ public partial class CrabMascot : UserControl
         Sprite.LostKeyboardFocus += (_, _) => UpdateGlow();
         Sprite.Invoked = Press;
         Sprite.Status = () => _active ? "Helper open" : "";
+        // Size the sprite before its first render: a size set later only showed once the frame changed (the crab drew at
+        // its natural 80 DIP, low and off the right edge of the Context window, for its first few seconds).
+        Layout();
         Show(Clips["idle"].Frames[0]);
     }
 
     /// <summary>Raised when the crab is clicked, or Enter or Space is pressed while it has keyboard focus.</summary>
     public event Action? Poked;
+
+    /// <summary>
+    /// What this crab opens, as screen readers and UI Automation announce it ("AgentHub helper", "Context helper"). The same
+    /// crab lives in more than one window, each one the helper for that place.
+    /// </summary>
+    public string HelperName
+    {
+        get => System.Windows.Automation.AutomationProperties.GetName(Sprite);
+        set => System.Windows.Automation.AutomationProperties.SetName(Sprite, value);
+    }
 
     /// <summary>Lit and staying at home, as a pressed toggle button would; the owner sets it while the helper is open.</summary>
     public bool IsActive
@@ -158,6 +172,9 @@ public partial class CrabMascot : UserControl
         InputManager.Current.PostProcessInput += OnAnyInput;
         Layout();
         Restart();
+        // The first arrange of the sprite can be from before this control had its size (seen in the Context window: the
+        // crab drew low and off the right edge until its first frame change); arrange it again once the window is up.
+        Dispatcher.BeginInvoke(Layout, DispatcherPriority.Loaded);
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)

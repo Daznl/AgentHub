@@ -12,7 +12,7 @@ public sealed record HelpTurn(bool FromUser, string Text);
 public sealed record HelpAnswer(string Answer, IReadOnlyList<string> Suggestions);
 
 /// <summary>
-/// The AgentHub helper (🦀 in the main window): answers questions about using AgentHub, and only that. It knows the app
+/// The AgentHub helper (the crab at the top right of the main window): answers questions about using AgentHub, and only that. It knows the app
 /// from the README and docs packed into this build (so it always matches the installed version) and a short summary of
 /// the app's current state. Runs through <see cref="ClaudePrint"/>: print mode on the user's own Claude login, all tools
 /// off, no settings or CLAUDE.md of the user's own, so it can only read what it is sent and reply.
@@ -26,7 +26,9 @@ public static class AppHelp
     private const string DocsPrefix = "AgentHub.Docs.";
 
     public const string SystemPrompt = """
-        You are the AgentHub helper: the crab button in AgentHub's main window. AgentHub is a Windows desktop app that
+        You are the AgentHub helper: the pixel-art crab at the top right of AgentHub's main window, which opened this
+        pane when clicked. The same crab sits in the Context window, where it is the Context helper that edits
+        instruction files; here you help with the app as a whole. AgentHub is a Windows desktop app that
         runs coding agent CLIs (Claude Code, Codex, Gemini / Antigravity) in terminal panes, manages GitHub repositories,
         edits the CLIs' instruction files, shows session history and runs orchestrations. Your only job is to help the
         user understand and use AgentHub.

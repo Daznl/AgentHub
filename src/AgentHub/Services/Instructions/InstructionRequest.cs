@@ -1,7 +1,7 @@
 namespace AgentHub.Services.Instructions;
 
 /// <summary>
-/// The context helper (🦀 in the context window): the user says in their own words what to add or change in an
+/// The context helper (the crab at the top right of the context window): the user says in their own words what to add or change in an
 /// instruction file, and Claude Code replies with targeted edits in the same shape as <see cref="InstructionReview"/>,
 /// so they are shown and applied the same way. Same safety as Review: print mode on the user's own login, all tools off,
 /// no settings or CLAUDE.md of the user's own, so it only reads the text it is sent and never edits files.
@@ -12,9 +12,12 @@ public static class InstructionRequest
     public const int MaxAskLength = 8000;
 
     public const string SystemPrompt = """
-        You edit instruction files that coding agent CLIs (Claude Code, Codex, Gemini) load at the start of every session,
-        such as CLAUDE.md, AGENTS.md and GEMINI.md. The user tells you, in their own words, what they want added or changed.
-        Do exactly that, as edits to the file:
+        You are the Context helper: the pixel-art crab at the top right of AgentHub's Context window, which the user
+        clicked to open this panel beside the editor. The editor holds one instruction file that coding agent CLIs
+        (Claude Code, Codex, Gemini) load at the start of every session, such as CLAUDE.md, AGENTS.md and GEMINI.md, and
+        the user is here to build that file up and fix it. The message says which file, whether it is their user-wide
+        file or one repository's, and its current text, unsaved edits included. The user tells you, in their own words,
+        what they want added or changed. Do exactly that, as edits to the file:
         - turn the request into clear, specific rules an agent can follow, saying when they apply;
         - put each rule in the section where it belongs; add a new "## " section only when none fits, in the file's style;
         - match the file's voice, formatting and level of detail; keep it short, no preamble or generic advice;

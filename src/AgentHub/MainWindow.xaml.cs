@@ -410,6 +410,7 @@ public partial class MainWindow : Window
         var existing = folder is null ? _globalContextWindow : _repoContextWindow;
         var window = existing ?? new ContextWindow { Owner = this };
         window.ReviewCommand = ClaudeCommand;
+        window.CrabAnimated = _settings.AnimatedBackground && _settings.CrabMascot;
         if (folder is null)
         {
             // Reopening the global window keeps whichever file is being edited.

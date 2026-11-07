@@ -40,6 +40,7 @@ public partial class ContextWindow : Window
         Controls.WindowPlacement.KeepOnScreen(this);
         Activated += (_, _) => CheckDisk();
         HelperLog.ItemsSource = _helperLog;
+        Crab.Poked += () => SetHelperOpen(!Crab.IsActive);
     }
 
     /// <summary>The folder shown by a repo context window; null for the global one.</summary>
@@ -446,14 +447,16 @@ public partial class ContextWindow : Window
     private bool _reviewFromHelper;
     private double _helperGrewBy;
 
-    private void Crab_Toggled(object sender, RoutedEventArgs e) => SetHelperOpen(CrabBtn.IsChecked == true);
+    /// <summary>Whether the crab at the top right wanders and does tricks; the main window passes its settings.</summary>
+    public bool CrabAnimated { set => Crab.SetAnimated(value); }
 
     private void CloseHelper_Click(object sender, RoutedEventArgs e) => SetHelperOpen(false);
 
     // The window widens by the panel so the editor keeps its size, and narrows again on close; a maximised window stays as it is.
+    // The crab glows and stays home while the panel is open, as a pressed button would.
     private void SetHelperOpen(bool open)
     {
-        CrabBtn.IsChecked = open;
+        Crab.IsActive = open;
         if ((HelperPanel.Visibility == Visibility.Visible) == open) return;
         HelperPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
         if (open)
