@@ -261,6 +261,64 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <!-- Pop-up menus (the 🧭 Orchestrate context menu) in the app's own dark palette; WPF's default is a flat white box -->
+        <Style TargetType="ContextMenu">
+            <Style.Resources>
+                <!-- Scoped to menus so the separators and items elsewhere keep their own look -->
+                <Style TargetType="MenuItem">
+                    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                    <Setter Property="Padding" Value="10,6" />
+                    <Setter Property="Cursor" Value="Hand" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="MenuItem">
+                                <Border x:Name="Row" Background="Transparent" CornerRadius="6" Padding="{TemplateBinding Padding}" Margin="0,1" SnapsToDevicePixels="True">
+                                    <ContentPresenter ContentSource="Header" VerticalAlignment="Center" RecognizesAccessKey="True" TextElement.Foreground="{TemplateBinding Foreground}" />
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsHighlighted" Value="True">
+                                        <Setter TargetName="Row" Property="Background" Value="#1C2A42" />
+                                        <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+                                    </Trigger>
+                                    <Trigger Property="IsEnabled" Value="False">
+                                        <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+                <Style TargetType="Separator">
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="Separator">
+                                <Border Height="1" Background="{StaticResource BorderBrush}" Margin="6,4" SnapsToDevicePixels="True" />
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </Style.Resources>
+            <Setter Property="Background" Value="#F0101826" />
+            <Setter Property="BorderBrush" Value="#2A3B55" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="HasDropShadow" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContextMenu">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8" Padding="4" Margin="0,2,8,8" SnapsToDevicePixels="True">
+                            <Border.Effect>
+                                <DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.55" Color="#000814" />
+                            </Border.Effect>
+                            <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- The helpers' orange crab (Context window and main window), drawn as vectors: WPF renders emoji in one flat colour only -->
         <SolidColorBrush x:Key="CrabBrush" Color="#FF7A45" />
         <DrawingImage x:Key="CrabIcon">

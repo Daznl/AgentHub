@@ -72,7 +72,14 @@ try {
 
   "3. Orchestrate: pick a context from the menu, the box appears with its message line"
   Click $btn
-  Click (MenuItem 'Orchestrator with no preset context'); Start-Sleep 2
+  $item = MenuItem 'Orchestrator with no preset context'
+  Start-Sleep -Milliseconds 600
+  # The open menu is a pop-up window of its own, so PrintWindow of the main window misses it: copy the screen around the button
+  # for the design check (it must follow the app's dark palette).
+  $r = $btn.Current.BoundingRectangle
+  $bmp = New-Object System.Drawing.Bitmap 520, 260; $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.CopyFromScreen([int]($r.Left - 320), [int]($r.Top - 10), 0, 0, $bmp.Size); $bmp.Save((Join-Path $Shots 'p-menu.png')); $g.Dispose(); $bmp.Dispose()
+  Click $item; Start-Sleep 2
   Check (@(Texts $main '*ORCHESTRATOR' | Where-Object { $_.Current.Name -ceq '🧠 ORCHESTRATOR' }).Count -eq 1) 'exactly one orchestrator box'
   Check ((Texts $main '🧭 Orchestrator').Count -eq 1) 'titled 🧭 Orchestrator'
   Check ((Texts $main 'LISTENING').Count -eq 1) 'listening, nothing asked yet'
