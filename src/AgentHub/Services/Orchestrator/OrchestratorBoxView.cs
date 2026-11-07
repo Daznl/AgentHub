@@ -58,8 +58,9 @@ public sealed record OrchestratorBoxView(string Title, string State, string Prog
     /// <summary>The box for an attached pane orchestrator.</summary>
     public static OrchestratorBoxView ForAttached(PaneOrchestrator o)
     {
-        var state = o.IsThinking ? "THINKING…" : o.Conversation.Count == 0 ? "LISTENING" : "ATTACHED";
-        return new OrchestratorBoxView("🧭 " + o.Title, state, OneLine(o.Note), o.Conversation, Paused: false) { Attached = true };
+        var state = o.IsWaitingForOwner ? "WAITING FOR YOU" : o.IsHandingOff ? "HANDING OFF" : o.IsThinking ? "THINKING…" : o.Conversation.Count == 0 ? "LISTENING" : "ATTACHED";
+        var title = "🧭 " + o.Title + (o.Session > 1 ? $" · session #{o.Session}" : "");
+        return new OrchestratorBoxView(title, state, OneLine(o.Note), o.Conversation, Paused: false) { Attached = true };
     }
 
     /// <summary>The box for the engine's current state; null when nothing is being orchestrated.</summary>

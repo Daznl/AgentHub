@@ -44,7 +44,16 @@ public interface IBuildWorker
 
     /// <summary>When the transcript says the latest turn ended (nothing sent since); null while a turn runs or when unknown.</summary>
     DateTimeOffset? ReadTurnEndedAt() => null;
+
+    /// <summary>How the running session was started, so a fresh one can be started the same way after a handoff; null when unknown.</summary>
+    SessionLaunch? SessionLaunch => null;
+
+    /// <summary>A security check (folder trust, permission dialog) is on screen for the owner to answer: type nothing into the session.</summary>
+    bool IsAtSecurityCheck => false;
 }
+
+/// <summary>What it takes to start a session like the running one again.</summary>
+public readonly record struct SessionLaunch(string CommandLine, string WorkingDirectory, string Title, string SessionName);
 
 /// <summary>
 /// Claude Code ends every turn in its transcript with a <c>{"type":"system","subtype":"turn_duration"}</c> line. A second
@@ -108,6 +117,7 @@ public sealed class PaneBuildWorker : IBuildWorker, IDisposable
     public string Label => $"Terminal {Pane.PaneIndex}";
     public bool IsRunning => Pane.IsRunning;
     public bool IsAwaitingInput => Pane.TerminalControl.IsAwaitingInput;
+    public bool IsAtSecurityCheck => Pane.TerminalControl.IsAtSecurityCheck;
     public TimeSpan OutputSilentFor => Pane.TerminalControl.OutputSilentFor;
     public string? TranscriptPath => Pane.TranscriptPath;
     public ContextReading? LatestContextReading => Pane.LatestContextReading;
@@ -147,6 +157,17 @@ public sealed class PaneBuildWorker : IBuildWorker, IDisposable
         var path = TranscriptPath;
         if (string.IsNullOrEmpty(path) || path.Contains(".codex", StringComparison.OrdinalIgnoreCase)) return null;
         return TranscriptTurns.LastTurnEnd(path);
+    }
+
+    public SessionLaunch? SessionLaunch
+    {
+        get
+        {
+            var t = Pane.TerminalControl;
+            if (string.IsNullOrWhiteSpace(t.CommandLine) || string.IsNullOrWhiteSpace(t.WorkingDirectory)) return null;
+            var name = string.IsNullOrWhiteSpace(t.SessionName) ? Path.GetFileName(t.WorkingDirectory.TrimEnd('\\', '/')) : t.SessionName;
+            return new SessionLaunch(t.CommandLine, t.WorkingDirectory, name, name);
+        }
     }
 
     private void RaiseTurnEnded() => TurnEnded?.Invoke();

@@ -90,7 +90,8 @@ try {
   Check ((Texts $main 'List the folder, then wait for me.').Count -eq 1) 'the message is listed as yours'
   Check ($reply.Count -eq 1) "the orchestrator's reply is shown"
   Check ((Texts $main '*Orchestrator → you').Count -eq 1) 'labelled Orchestrator → you'
-  Check ((Texts $main '*Orchestrator → worker').Count -eq 1) 'and its instruction to the session is listed'
+  $sent = @(); for ($i = 0; $i -lt 40 -and $sent.Count -eq 0; $i++) { Start-Sleep -Milliseconds 250; $sent = Texts $main '*Orchestrator → worker' }   # typed in after the reply is shown
+  Check ($sent.Count -eq 1) 'and its instruction to the session is listed'
   Check ((Texts $main 'Scripted pane orchestrator').Count -eq 1) 'with its note under the title'
   Check ((Texts $main 'ATTACHED').Count -eq 1) 'state ATTACHED once it has spoken'
   Check ($input.GetCurrentPattern($Val).Current.Value -eq '') 'the message line is cleared'

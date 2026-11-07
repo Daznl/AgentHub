@@ -80,7 +80,7 @@
   - runs suspended on close and reopened on the next build
 - [x] **Parallel orchestrations** (`OrchestratorFleet`): one engine per Build Now plus the Auto-Builder lane, side by side; shared usage reading and steering; a second run on a busy repository gets its own git worktree and branch; the Orchestration window monitors the selected idea's run
 - [ ] Merge helper for a finished run's worktree branch (now merged by hand)
-- [~] **Pane orchestrator** (`PaneOrchestrator`, `ClaudeJsonSession`; branch `experiment/pane-orchestrator`): 🧭 Orchestrate on any running pane puts an orchestrator between the owner and that session with no run, idea or spec; it answers the owner and instructs the session; ✕ Detach takes it off. Experimental: no handoff, usage wait or archive yet
+- [~] **Pane orchestrator** (`PaneOrchestrator`, `ClaudeJsonSession`; branch `experiment/pane-orchestrator`): 🧭 Orchestrate on any running pane puts an orchestrator between the owner and that session with no run, idea or spec; it answers the owner and instructs the session; ✕ Detach takes it off. Context handoff restarts the session in the same pane (tested live, 3 panes in parallel); security checks stay the owner's (WAITING FOR YOU, messages held). Experimental: no usage wait or archive yet; not kept across an AgentHub restart
 - [ ] Tell the orchestrator about other ideas' workflows ("use when") so it can suggest one for a new idea
 - [ ] "Review this run" button: hand a REVIEW.md to Claude and ask what the orchestrator prompt should do differently
 - [ ] Orchestrator model and decision cap as settings (now `sonnet` / 400 in code)

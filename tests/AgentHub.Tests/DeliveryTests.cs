@@ -162,5 +162,31 @@ public class FolderTrustPromptTests
         var t = new FolderTrustPrompt();
         Assert.Null(t.Observe("Claude Code v2.1.318 ❯ Try \"create a util logging.py that...\" Yes, I trust my tests", DateTimeOffset.Now));
         Assert.Null(t.AnsweredAt);
+        Assert.False(t.CheckOnScreen);
+    }
+
+    /// <summary>2026-11-07: the owner answers security checks; while one is on screen nothing is typed into the session.</summary>
+    [Fact]
+    public void A_trust_check_the_owner_answers_counts_as_on_screen_until_they_type()
+    {
+        var t = new FolderTrustPrompt();
+        Assert.Equal("\x1b[B", t.Observe(Screen, DateTimeOffset.Now)); // the keys are only used for a worker; the owner's pane ignores them
+        Assert.True(t.CheckOnScreen);
+        t.UserTyped();
+        Assert.False(t.CheckOnScreen);
+        Assert.False(t.Pending);
+    }
+
+    [Fact]
+    public void A_permission_dialog_is_a_check_on_screen_until_the_owner_types()
+    {
+        var t = new FolderTrustPrompt();
+        Assert.Null(t.Observe("\x1b[1mBash command\x1b[0m\r\n  git commit -m \"x\"\r\n\r\n Do you want to proceed?\r\n\x1b[36m❯\x1b[39m 1. Yes\r\n  2. No, and tell Claude what to do differently (esc)", DateTimeOffset.Now));
+        Assert.True(t.CheckOnScreen);
+        t.UserTyped();
+        Assert.False(t.CheckOnScreen);
+        // Redrawn after a key that did not answer it: on screen again.
+        t.Observe(" Do you want to proceed?\r\n  1. Yes\r\n\x1b[36m❯\x1b[39m 2. No, and tell Claude what to do differently (esc)", DateTimeOffset.Now);
+        Assert.True(t.CheckOnScreen);
     }
 }

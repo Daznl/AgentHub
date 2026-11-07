@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Json;
 using AgentHub.Services.Context;
 using AgentHub.Services.Orchestrator;
@@ -18,15 +19,24 @@ public class PaneOrchestratorTests
         public bool IsAwaitingInput { get; set; } = true;
         public TimeSpan OutputSilentFor { get; set; } = TimeSpan.FromMinutes(1);
         public string? TranscriptPath => null;
-        public ContextReading? LatestContextReading => null;
         public string? LastReply { get; set; }
         public string? LastPrompt { get; set; }
         public List<string> Submitted { get; } = [];
+        public List<string> Started { get; } = [];
+        public int Stops { get; private set; }
+        public ContextReading? LatestContextReading { get; private set; }
+        public SessionLaunch? SessionLaunch { get; set; }
+        public bool IsAtSecurityCheck { get; set; }
         public event Action? TurnEnded;
         public event Action? Exited;
         public event Action<ContextReading?>? ContextChanged;
-        public void Start(string commandLine, string workingDirectory, string title, string sessionName) { }
-        public void Stop() { IsRunning = false; Exited?.Invoke(); ContextChanged?.Invoke(null); }
+        public void Start(string commandLine, string workingDirectory, string title, string sessionName) { Started.Add($"{commandLine} in {workingDirectory} as {sessionName}"); IsRunning = true; }
+        public void Stop() { Stops++; IsRunning = false; Exited?.Invoke(); }
+        public void Context(double used, long window = 100_000)
+        {
+            LatestContextReading = new ContextReading((long)(used * window), window, WindowIsAssumed: true, null, DateTimeOffset.Now, "test", null);
+            ContextChanged?.Invoke(LatestContextReading);
+        }
         public Task SubmitAsync(string prompt) { Submitted.Add(prompt); return Task.CompletedTask; }
         public string? ReadLastReply() => LastReply;
         public string? ReadLastPrompt() => LastPrompt;
@@ -91,6 +101,17 @@ public class PaneOrchestratorTests
         worker.EndTurn("All 12 tests pass."); // the same turn signalled twice is not asked about twice
         await Task.Delay(150);
         Assert.Equal(2, brain.Messages.Count);
+
+        // After the orchestrator's next message the terminal goes quiet mid-turn (a long tool run): the old reply is still the
+        // transcript's last one, so it is not a turn end either (live run 2026-11-07: a duplicate report reached the orchestrator).
+        brain.Answer = _ => new PaneDecision(null, "now step 2", "");
+        await o.SendAsync("carry on");
+        Assert.Equal(3, brain.Messages.Count);
+        worker.EndTurn("All 12 tests pass.");
+        await Task.Delay(150);
+        Assert.Equal(3, brain.Messages.Count);
+        worker.EndTurn("Step 2 done.");
+        await Until(() => brain.Messages.Count == 4);
     }
 
     [Fact]
@@ -132,6 +153,87 @@ public class PaneOrchestratorTests
         worker.EndTurn("done");
         await Task.Delay(100);
         Assert.Empty(brain.Messages);
+    }
+
+    [Fact]
+    public async Task Full_context_window_hands_off_and_a_fresh_session_is_briefed_from_the_handoff()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "agenthub-pane-handoff-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, ".agenthub"));
+        await File.WriteAllTextAsync(Path.Combine(dir, ".agenthub", "handoff.md"), "# Notes\nParser done; tests next.");
+        try
+        {
+            var worker = new ScriptedWorker { SessionLaunch = new SessionLaunch("claude --x", dir, "Pane Test", "Pane Test") };
+            var brain = new ScriptedBrain { Answer = m => m.Contains("new_worker_session") ? new PaneDecision("Fresh session briefed.", "Read .agenthub/handoff.md, then write the tests.", "session 2") : new PaneDecision(null, "go", "") };
+            using var o = new PaneOrchestrator(worker, brain, "Orchestrator") { TurnSettle = TimeSpan.Zero, StopDelay = TimeSpan.Zero, StartupDelay = TimeSpan.Zero };
+            await o.SendAsync("build it");
+
+            worker.Context(0.30); // the session's starting size
+            Assert.False(o.IsHandingOff);
+            worker.Context(0.80); // over the 75% limit
+            await Until(() => o.IsHandingOff);
+            Assert.Equal(OrchestratorMessages.HandoffPrompt, worker.Submitted.Last());
+            Assert.Equal("HANDING OFF", OrchestratorBoxView.ForAttached(o).State);
+
+            // The owner can still talk to it, but nothing is typed into a session that is writing its notes.
+            brain.Answer = m => m.Contains("new_worker_session") ? new PaneDecision("Fresh session briefed.", "Read .agenthub/handoff.md, then write the tests.", "session 2") : new PaneDecision("Handing off now.", "also do X", "");
+            await o.SendAsync("status?");
+            Assert.Equal(OrchestratorMessages.HandoffPrompt, worker.Submitted.Last());
+            Assert.Contains(o.Conversation, x => x.Kind == ExchangeKind.Note && x.Text.StartsWith("Held:"));
+
+            worker.EndTurn("Handoff written and committed.");
+            await Until(() => o.Session == 2 && worker.Submitted.Last().StartsWith("Read .agenthub/handoff.md"));
+            Assert.Equal(1, worker.Stops);
+            Assert.Equal([$"claude --x in {dir} as Pane Test"], worker.Started);
+            var briefing = brain.Messages.Last();
+            Assert.Contains("new_worker_session", briefing);
+            Assert.Contains("[HANDOFF.MD]\n# Notes\nParser done; tests next.", briefing);
+            Assert.DoesNotContain("[WORKER FINAL REPLY]", briefing);
+            Assert.False(o.IsHandingOff);
+            Assert.Contains("session #2", OrchestratorBoxView.ForAttached(o).Title);
+
+            // The new session's own first reading is its baseline, not a reason to hand off again.
+            worker.Context(0.80);
+            await Task.Delay(100);
+            Assert.False(o.IsHandingOff);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task Nothing_is_typed_into_a_security_check_the_message_waits_for_the_owner()
+    {
+        var worker = new ScriptedWorker { IsAtSecurityCheck = true };
+        var brain = new ScriptedBrain { Answer = _ => new PaneDecision("Sent step 1.", "Create todo.py.", "step 1") };
+        using var o = new PaneOrchestrator(worker, brain, "Orchestrator") { LoopInterval = TimeSpan.FromMilliseconds(30), TurnSettle = TimeSpan.Zero };
+
+        await o.SendAsync("build it");
+        Assert.Empty(worker.Submitted);
+        Assert.Equal("Create todo.py.", o.HeldForWorker);
+        Assert.Equal("WAITING FOR YOU", OrchestratorBoxView.ForAttached(o).State);
+        Assert.Contains(o.Conversation, x => x.Kind == ExchangeKind.Note && x.Text.StartsWith("Held: the session is showing a security check"));
+
+        worker.EndTurn("ignored: a dialog is not a turn end");
+        await Task.Delay(100);
+        Assert.Single(brain.Messages);
+
+        worker.IsAtSecurityCheck = false; // the owner answered it
+        await Until(() => worker.Submitted.Count == 1);
+        Assert.Equal("Create todo.py.", worker.Submitted[0]);
+        Assert.Null(o.HeldForWorker);
+        Assert.Equal("ATTACHED", OrchestratorBoxView.ForAttached(o).State);
+    }
+
+    [Fact]
+    public async Task A_session_without_a_known_launch_never_hands_off()
+    {
+        var worker = new ScriptedWorker();
+        using var o = new PaneOrchestrator(worker, new ScriptedBrain(), "Orchestrator");
+        worker.Context(0.30);
+        worker.Context(0.90);
+        await Task.Delay(100);
+        Assert.False(o.IsHandingOff);
+        Assert.Empty(worker.Submitted);
     }
 
     [Fact]
