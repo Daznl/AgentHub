@@ -217,7 +217,6 @@
             <DockPanel Grid.Row="0" Margin="0,0,0,10" LastChildFill="True">
                 <Button DockPanel.Dock="Right" Click="CloseHelper_Click" Content="✕" Margin="0" Padding="8,3" FontSize="11" VerticalAlignment="Top"
                         Background="Transparent" BorderBrush="Transparent" ToolTip="Close the helper" AutomationProperties.Name="Close helper" />
-                <Image DockPanel.Dock="Left" Source="{StaticResource CrabIcon}" Width="28" Height="28" Margin="0,0,10,0" VerticalAlignment="Top" />
                 <StackPanel>
                     <TextBlock Text="Context helper" FontSize="15" FontWeight="SemiBold" />
                     <TextBlock x:Name="HelperTarget" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap" />
