@@ -41,10 +41,6 @@ public partial class ContextWindow : Window
         Activated += (_, _) => CheckDisk();
         HelperLog.ItemsSource = _helperLog;
         Crab.Poked += () => SetHelperOpen(!Crab.IsActive);
-        // The crab comes over from the main window while this one is being worked in, and goes back when it closes
-        Controls.CrabCourier.Register(Crab);
-        Activated += (_, _) => Controls.CrabCourier.MoveTo(Crab);
-        Closed += (_, _) => Controls.CrabCourier.Evict(Crab);
     }
 
     /// <summary>The folder shown by a repo context window; null for the global one.</summary>

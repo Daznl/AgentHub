@@ -9,10 +9,9 @@ using UserControl = System.Windows.Controls.UserControl;
 namespace AgentHub.Controls;
 
 /// <summary>
-/// A spot for the AgentHub crab, the pixel-art mascot that is the button for every helper in AgentHub (click, or Enter /
-/// Space when focused; <see cref="Poked"/>): at the top right of the main window's header, beside the buttons, it opens the
-/// AgentHub helper; at the top right of a Context window it opens the Context helper for the file being edited. There is
-/// one crab: it shows at the spot of the window being worked in and travels between spots (<see cref="CrabCourier"/>). It idles and
+/// The AgentHub crab: a pixel-art mascot that is the button for every helper in AgentHub (click, or Enter / Space when
+/// focused; <see cref="Poked"/>): at the top right of the main window's header, beside the buttons, it opens the
+/// AgentHub helper; at the top right of a Context window it opens the Context helper for the file being edited. It idles and
 /// blinks, now and then scuttles, rolls, pinches, waves or dances along the free strip of header, and dozes off when
 /// AgentHub has had no input for a while. While <see cref="IsActive"/> (helper open) it glows and stays at home. Sprites are 80x80 cells in strips under <c>Assets/Crab</c>
 /// (made with PixelLab, see <c>docs/brand/crab/README.md</c>); they are drawn at a whole number of screen pixels per
@@ -103,56 +102,6 @@ public partial class CrabMascot : UserControl
         set => System.Windows.Automation.AutomationProperties.SetName(Sprite, value);
     }
 
-    /// <summary>Whether the crab is here. False while it is away at another window's spot (see <see cref="CrabCourier"/>).</summary>
-    public bool IsPresent { get; private set; } = true;
-
-    /// <summary>The sprite cell, in sprite pixels.</summary>
-    internal static int CellSize => Cell;
-
-    internal static BitmapSource[] Frames(string clip) => Clips[clip].Frames;
-    internal static TimeSpan FrameTime(string clip) => Clips[clip].FrameTime;
-
-    /// <summary>DIP per sprite pixel at this spot.</summary>
-    internal double SpriteScale => _scale;
-
-    /// <summary>Screen pixels per DIP at this spot.</summary>
-    internal double Dpi => VisualTreeHelper.GetDpi(this).DpiScaleX;
-
-    internal bool IsMoving => Moving;
-
-    /// <summary>
-    /// The crab's sprite cell on screen, in physical pixels: its home, or where it is right now. Null before this spot is
-    /// laid out or while its window is not on screen.
-    /// </summary>
-    internal Rect? CellOnScreen(bool home)
-    {
-        if (!IsLoaded || ActualWidth <= 0 || !IsVisible || PresentationSource.FromVisual(this) is null) return null;
-        var dpi = Dpi;
-        var origin = Stage.PointToScreen(new System.Windows.Point(home ? Home : _x, ActualHeight - Feet * _scale));
-        return new Rect(origin, new System.Windows.Size(Cell * _scale * dpi, Cell * _scale * dpi));
-    }
-
-    /// <summary>The crab leaves this spot: nothing shows here until it comes back.</summary>
-    internal void Depart()
-    {
-        IsPresent = false;
-        _timer.Stop();
-        Sprite.Visibility = Visibility.Hidden;
-        Sprite.Effect = null;
-    }
-
-    /// <summary>The crab arrives at this spot and settles at home, with a hop and a wave hello when it can move.</summary>
-    internal void Arrive()
-    {
-        IsPresent = true;
-        Sprite.Visibility = Visibility.Visible;
-        UpdateGlow();
-        if (!IsLoaded) return;
-        Layout();
-        Restart();
-        if (Moving) Play("hop", Mode.Acting, () => Play("wave", Mode.Acting));
-    }
-
     /// <summary>Lit and staying at home, as a pressed toggle button would; the owner sets it while the helper is open.</summary>
     public bool IsActive
     {
@@ -183,7 +132,7 @@ public partial class CrabMascot : UserControl
     public void SetAnimated(bool animated)
     {
         _animated = animated;
-        if (IsLoaded && IsPresent) Restart();
+        if (IsLoaded) Restart();
     }
 
     private bool Moving => _animated && SystemParameters.ClientAreaAnimation;
@@ -222,7 +171,7 @@ public partial class CrabMascot : UserControl
         if (_window is not null) _window.StateChanged += OnWindowStateChanged;
         InputManager.Current.PostProcessInput += OnAnyInput;
         Layout();
-        if (IsPresent) Restart();
+        Restart();
         // The first arrange of the sprite can be from before this control had its size (seen in the Context window: the
         // crab drew low and off the right edge until its first frame change); arrange it again once the window is up.
         Dispatcher.BeginInvoke(Layout, DispatcherPriority.Loaded);
@@ -239,7 +188,7 @@ public partial class CrabMascot : UserControl
     private void OnWindowStateChanged(object? sender, EventArgs e)
     {
         if (_window?.WindowState == WindowState.Minimized) _timer.Stop();
-        else if (Moving && IsPresent) _timer.Start();
+        else if (Moving) _timer.Start();
     }
 
     private void OnAnyInput(object sender, ProcessInputEventArgs e)

@@ -91,9 +91,6 @@ public partial class MainWindow : Window
         AppHelper.AppState = DescribeAppState;
         AppHelper.CloseRequested += () => SetHelperOpen(false);
         Mascot.Poked += () => SetHelperOpen(!Mascot.IsActive);
-        // The one crab starts here and comes back whenever this window is the one being worked in
-        Controls.CrabCourier.Register(Mascot);
-        Activated += (_, _) => Controls.CrabCourier.MoveTo(Mascot);
     }
 
     /// <summary>The crab in the header opens and closes the helper pane, and glows while it is open.</summary>
