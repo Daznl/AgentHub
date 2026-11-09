@@ -12,8 +12,9 @@ namespace AgentHub.Controls;
 /// The AgentHub crab: a pixel-art mascot that is the button for every helper in AgentHub (click, or Enter / Space when
 /// focused; <see cref="Poked"/>): at the top right of the main window's header, beside the buttons, it opens the
 /// AgentHub helper; at the top right of a Context window it opens the Context helper for the file being edited. It idles and
-/// blinks, now and then scuttles, rolls, pinches, waves or dances along the free strip of header, and dozes off when
-/// AgentHub has had no input for a while. While <see cref="IsActive"/> (helper open) it glows and stays at home; while
+/// blinks, now and then scuttles, rolls, pinches, waves or dances along the free strip of header, pulls a face (a wink, a
+/// laugh, sunglasses, a pirate hat…), and dozes off when AgentHub has had no input for a while. A roll leaves it dizzy for a
+/// moment; finished work earns a party hat. While <see cref="IsActive"/> (helper open) it glows and stays at home; while
 /// <see cref="IsBusy"/> (a Timeline review running) it paces and pinches. Sprites are 80x80 cells in strips under <c>Assets/Crab</c>
 /// (made with PixelLab, see <c>docs/brand/crab/README.md</c>); they are drawn at a whole number of screen pixels per
 /// sprite pixel so they stay crisp at every Windows display scale. Motion is off when Windows animations are off.
@@ -40,7 +41,14 @@ public partial class CrabMascot : UserControl
         ["hop"] = Load("hop", 70),
         ["dance"] = Load("dance", 110),
         ["sleep"] = Load("sleep", 170),
+        ["faces"] = Load("faces", 1300),   // one still per cell, held for a moment (see Face)
     };
+
+    /// <summary>The cells of <c>faces.png</c>: the mascot's spare expressions from the PixelLab candidates sheet, in sheet order.</summary>
+    private enum Face { Smile, Wink, Laugh, Hearts, Shocked, Angry, Sad, Sleepy, Tongue, Dizzy, Pirate, Party, Sunglasses, Shy, Salute, Crown }
+
+    /// <summary>Faces pulled at random between outings: the cheerful ones. Shocked, angry, sad and sleepy wait for a reason.</summary>
+    private static readonly Face[] IdleFaces = [Face.Wink, Face.Laugh, Face.Hearts, Face.Tongue, Face.Pirate, Face.Sunglasses, Face.Shy, Face.Salute, Face.Crown];
 
     private enum Mode { Resting, Acting, Walking, Asleep }
 
@@ -83,7 +91,7 @@ public partial class CrabMascot : UserControl
         Sprite.GotKeyboardFocus += (_, _) => UpdateGlow();
         Sprite.LostKeyboardFocus += (_, _) => UpdateGlow();
         Sprite.Invoked = Press;
-        Sprite.Status = () => _busy ? "Working" : _active ? "Helper open" : "";
+        Sprite.Status = () => _busy ? "Working" : _active ? "Helper open" : _face is { } face ? "Face: " + face : "";
         // Size the sprite before its first render: a size set later only showed once the frame changed (the crab drew at
         // its natural 80 DIP, low and off the right edge of the Context window, for its first few seconds).
         Layout();
@@ -139,10 +147,17 @@ public partial class CrabMascot : UserControl
                 if (_mode == Mode.Asleep) WakeUp();
                 else if (_mode == Mode.Resting) _restUntil = DateTime.UtcNow;  // start the first pace on the next tick
             }
-            else if (_mode == Mode.Resting) _nextOuting = DateTime.UtcNow + TimeSpan.FromSeconds(_random.Next(6, 14));
+            else
+            {
+                // Work done: a party hat and a dance at the next rest, then outings as usual
+                _celebrate = true;
+                _nextOuting = DateTime.UtcNow + TimeSpan.FromSeconds(_random.Next(6, 14));
+                if (_mode == Mode.Resting) _restUntil = DateTime.UtcNow;
+            }
         }
     }
     private bool _busy;
+    private bool _celebrate;
 
     /// <summary>Width at the right of this control that the crab must not walk into (the header buttons).</summary>
     public double ReservedRight
@@ -259,6 +274,7 @@ public partial class CrabMascot : UserControl
         double? target = null, Func<int, bool>? movesOn = null)
     {
         _clip = Clips[clip];
+        _face = null;
         _mode = mode;
         _then = then;
         _loop = loop;
@@ -270,8 +286,28 @@ public partial class CrabMascot : UserControl
         Show(_clip.Frames[_frame]);
     }
 
+    /// <summary>Holds one expression for <paramref name="ms"/>, standing still, then <paramref name="then"/> (or a rest).</summary>
+    private void Hold(Face face, int ms, Action? then = null)
+    {
+        _clip = new Sheet([Clips["faces"].Frames[(int)face]], TimeSpan.FromMilliseconds(ms));
+        _face = face.ToString().ToLowerInvariant();
+        _mode = Mode.Acting;
+        _then = then;
+        _loop = false;
+        _reverse = false;
+        _target = null;
+        _movesOn = _ => false;
+        _frame = 0;
+        _timer.Interval = _clip.FrameTime;
+        Show(_clip.Frames[0]);
+    }
+
+    /// <summary>The face being held, in lower case ("wink"), for the sprite's UI Automation status; null otherwise.</summary>
+    private string? _face;
+
     private void Rest()
     {
+        _face = null;
         _mode = Mode.Resting;
         _target = null;
         _timer.Interval = Clips["idle"].FrameTime;
@@ -289,6 +325,7 @@ public partial class CrabMascot : UserControl
             var now = DateTime.UtcNow;
             if (now < _restUntil) return;
             if (_busy) { Work(); return; }
+            if (_celebrate) { _celebrate = false; Hold(Face.Party, 1600, () => Play("dance", Mode.Acting)); return; }
             if (now - _lastInput > SleepAfter) { Play("sleep", Mode.Acting, () => _mode = Mode.Asleep); return; }
             // While the helper is open the crab is its pressed button: it goes back home and stays there
             if (_active && Math.Abs(_x - Home) > 0.5) { Play("scuttle", Mode.Walking, loop: true, target: Home); return; }
@@ -315,10 +352,10 @@ public partial class CrabMascot : UserControl
         Show(_clip.Frames[_frame]);
     }
 
-    /// <summary>Something to do between rests: a walk, a roll along the header, or a little show on the spot.</summary>
+    /// <summary>Something to do between rests: a walk, a roll along the header, a little show on the spot, or a face.</summary>
     private void GoOut()
     {
-        var pick = _active ? 1 : _random.NextDouble();  // active: only tricks on the spot
+        var pick = _active ? 0.6 + 0.4 * _random.NextDouble() : _random.NextDouble();  // active: only tricks and faces on the spot
         if (HasRoom && pick < 0.45)
         {
             // Wander somewhere new, or head home when far from it
@@ -334,13 +371,21 @@ public partial class CrabMascot : UserControl
             // Frames 4 to 10 of the roll are the crab curled up mid-tumble: travel only then
             var reach = 7 * RollStride * _scale;
             var target = _x - reach >= Leftmost && (_x + reach > Rightmost || _random.NextDouble() < 0.5) ? _x - reach : _x + reach;
-            Play("roll", Mode.Acting, target: Math.Clamp(target, Leftmost, Rightmost), movesOn: f => f is >= 4 and < 11);
+            Play("roll", Mode.Acting, Dizzy, target: Math.Clamp(target, Leftmost, Rightmost), movesOn: f => f is >= 4 and < 11);
+        }
+        else if (pick < 0.82)
+        {
+            var trick = new[] { "pinch", "wave", "dance", "roll" }[_random.Next(4)];
+            Play(trick, Mode.Acting, trick == "roll" ? Dizzy : null);
         }
         else
         {
-            Play(new[] { "pinch", "wave", "dance", "roll" }[_random.Next(4)], Mode.Acting);
+            Hold(IdleFaces[_random.Next(IdleFaces.Length)], _random.Next(1100, 1700));
         }
     }
+
+    /// <summary>A roll leaves the crab seeing stars for a moment.</summary>
+    private void Dizzy() => Hold(Face.Dizzy, 900);
 
     /// <summary>
     /// Busy: pace the strip end to end, with a pinch at each turn; with no strip to pace, pinch and dance on the spot.
