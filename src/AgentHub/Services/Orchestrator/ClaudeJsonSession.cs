@@ -70,7 +70,13 @@ public sealed class ClaudeJsonSession
         _started = alreadyStarted;
     }
 
-    public static IReadOnlyList<string> Arguments(string model, string sessionId, bool resume, string projectDirectory, string systemPrompt, string schema) =>
+    /// <summary>
+    /// Where the system prompt is written for the CLI, next to its transcript. A file, not an argument: with the owner's
+    /// instruction files in it the prompt can outgrow Windows' 32,767-character command line.
+    /// </summary>
+    public string SystemPromptPath => Path.Combine(_workingDirectory, "system-prompt.md");
+
+    public static IReadOnlyList<string> Arguments(string model, string sessionId, bool resume, string projectDirectory, string systemPromptFile, string schema) =>
     [
         "-p", "--model", model,
         resume ? "--resume" : "--session-id", sessionId,
@@ -79,7 +85,7 @@ public sealed class ClaudeJsonSession
         "--permission-mode", "dontAsk",
         "--setting-sources", "", "--strict-mcp-config",
         "--add-dir", projectDirectory,
-        "--append-system-prompt", systemPrompt
+        "--append-system-prompt-file", systemPromptFile
     ];
 
     /// <summary>
@@ -91,11 +97,12 @@ public sealed class ClaudeJsonSession
     {
         var started = DateTimeOffset.Now;
         Directory.CreateDirectory(_workingDirectory);
+        await File.WriteAllTextAsync(SystemPromptPath, _systemPrompt, cancellationToken);
         var request = message;
 
         for (var attempt = 1; attempt <= 2; attempt++)
         {
-            var args = Arguments(_model, SessionId, _started, _projectDirectory, _systemPrompt, _schema);
+            var args = Arguments(_model, SessionId, _started, _projectDirectory, SystemPromptPath, _schema);
             (int ExitCode, string StdOut, string StdErr) run;
             try
             {
