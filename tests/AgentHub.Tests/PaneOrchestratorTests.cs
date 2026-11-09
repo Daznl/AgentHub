@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using AgentHub.Services.Context;
+using AgentHub.Services.History;
 using AgentHub.Services.Orchestrator;
 using Xunit;
 
@@ -20,7 +21,7 @@ public class PaneOrchestratorTests
         public TimeSpan OutputSilentFor { get; set; } = TimeSpan.FromMinutes(1);
         public string? TranscriptPath => null;
         public string? LastReply { get; set; }
-        public string? LastPrompt { get; set; }
+        public List<HistoryEntry> History { get; set; } = [];
         public List<string> Submitted { get; } = [];
         public List<string> Started { get; } = [];
         public int Stops { get; private set; }
@@ -39,7 +40,7 @@ public class PaneOrchestratorTests
         }
         public Task SubmitAsync(string prompt) { Submitted.Add(prompt); return Task.CompletedTask; }
         public string? ReadLastReply() => LastReply;
-        public string? ReadLastPrompt() => LastPrompt;
+        public IReadOnlyList<HistoryEntry> ReadHistory() => History;
         public void EndTurn(string reply) { LastReply = reply; TurnEnded?.Invoke(); }
     }
 
@@ -67,7 +68,17 @@ public class PaneOrchestratorTests
     [Fact]
     public async Task Owner_message_goes_to_the_orchestrator_which_answers_and_instructs_the_worker()
     {
-        var worker = new ScriptedWorker { LastPrompt = "fix the parser", LastReply = "Parser fixed, 12 tests pass." };
+        var worker = new ScriptedWorker
+        {
+            History =
+            [
+                new(HistoryKind.Prompt, "build a CSV importer", null),
+                new(HistoryKind.Reply, "Importer built.", null),
+                new(HistoryKind.Prompt, "fix the parser", null),
+                new(HistoryKind.Reply, "Parser fixed, 12 tests pass.", null),
+            ],
+            LastReply = "Parser fixed, 12 tests pass.",
+        };
         var brain = new ScriptedBrain { Answer = _ => new PaneDecision("On it: asked for tests on the edge cases.", "Add tests for empty and malformed input.", "testing the parser") };
         using var o = new PaneOrchestrator(worker, brain, "Orchestrator") { TurnSettle = TimeSpan.Zero };
 
@@ -75,9 +86,12 @@ public class PaneOrchestratorTests
 
         var message = Assert.Single(brain.Messages);
         Assert.Contains("[FROM OWNER]\nMake sure the parser", message);
-        Assert.Contains("[WORKER SO FAR]", message); // the first message says where the session stood
-        Assert.Contains("fix the parser", message);
+        Assert.Contains("[CONVERSATION HISTORY]", message); // the first message carries the session from its start
+        Assert.Contains("--- Message 1 to the worker ---\nbuild a CSV importer", message);
+        Assert.Contains("Importer built.", message);
+        Assert.Contains("--- Message 2 to the worker ---\nfix the parser", message);
         Assert.Contains("Parser fixed", message);
+        Assert.True(message.IndexOf("[CONVERSATION HISTORY]") < message.IndexOf("[FROM OWNER]")); // background first, then the new request
         Assert.Contains("worker idle", message);
         Assert.Equal(["Add tests for empty and malformed input."], worker.Submitted);
         Assert.Equal("testing the parser", o.Note);
@@ -98,7 +112,7 @@ public class PaneOrchestratorTests
         await Until(() => brain.Messages.Count == 2);
         Assert.Contains("worker_turn_ended", brain.Messages[1]);
         Assert.Contains("All 12 tests pass.", brain.Messages[1]);
-        Assert.DoesNotContain("[WORKER SO FAR]", brain.Messages[1]); // only the first message introduces the session
+        Assert.DoesNotContain("[CONVERSATION HISTORY]", brain.Messages[1]); // only the first message introduces the session
         Assert.Contains(o.Conversation, x => x.Kind == ExchangeKind.Reply && x.Text == "Done: the tests pass.");
 
         worker.EndTurn("All 12 tests pass."); // the same turn signalled twice is not asked about twice

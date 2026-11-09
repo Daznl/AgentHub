@@ -199,8 +199,10 @@ public sealed class PaneOrchestrator : IDisposable
 
             How this works:
             - Every message comes from AgentHub, labelled: [EVENT] what happened, [FROM OWNER] what the owner wrote, [WORKER FINAL REPLY]
-              the worker's last message, [WORKER SO FAR] where the session stood when you were attached, [HANDOFF.MD] the worker's notes
-              file after a handoff, [STATUS] numbers.
+              the worker's last message, [CONVERSATION HISTORY] (your first message only) everything the session was sent before you
+              were attached with the end of each reply, [HANDOFF.MD] the worker's notes file after a handoff, [STATUS] numbers.
+            - [CONVERSATION HISTORY] is background, not a request: read it for the job, the owner's standing instructions and what is
+              already done, then act on the [EVENT] of the message it came with. Do not redo or re-send work it shows finished.
             - The owner's messages are both the job and your standing instructions. When they tell you what the work is, how to behave,
               what to watch for or what to pass on, keep to it for the rest of the session. There may be no written spec: their messages are the spec.
             - to_owner: your reply to the owner. Short and direct, no padding; answer what they asked, report what they should know.
@@ -231,11 +233,12 @@ public sealed class PaneOrchestrator : IDisposable
     }
 
     /// <summary>One message for the orchestrator.</summary>
-    public static string Compose(string eventText, string? fromOwner, string? workerReply, string? soFar, string? status, string? handoff = null)
+    /// <param name="history">The session before the orchestrator was attached (<see cref="ConversationHistory.Format"/>); first message only.</param>
+    public static string Compose(string eventText, string? fromOwner, string? workerReply, string? history, string? status, string? handoff = null)
     {
         var sb = new StringBuilder();
         sb.Append("[EVENT] ").Append(eventText).Append("\n\n");
-        if (!string.IsNullOrWhiteSpace(soFar)) sb.Append("[WORKER SO FAR]\n").Append(soFar.Trim()).Append("\n\n");
+        if (!string.IsNullOrWhiteSpace(history)) sb.Append("[CONVERSATION HISTORY]\n").Append(history.Trim()).Append("\n\n");
         if (!string.IsNullOrWhiteSpace(status)) sb.Append("[STATUS] ").Append(status.Trim()).Append("\n\n");
         if (!string.IsNullOrWhiteSpace(handoff)) sb.Append("[HANDOFF.MD]\n").Append(OrchestratorMessages.Cut(handoff.Trim(), OrchestratorMessages.MaxHandoffChars, keepTail: false)).Append("\n\n");
         if (workerReply is not null)
@@ -480,16 +483,15 @@ public sealed class PaneOrchestrator : IDisposable
                 return;
             }
 
-            string? soFar = null;
+            // The first message carries the whole session so far, so the orchestrator knows the job (a transcript can be tens of MB: read off this thread).
+            string? history = null;
             if (!_introduced)
             {
-                var prompt = _worker.ReadLastPrompt();
-                var last = workerReply is null ? _worker.ReadLastReply() : null;
-                if (prompt != null || last != null)
-                    soFar = (prompt is { Length: > 0 } ? "Last prompt the worker got:\n" + OrchestratorMessages.Cut(prompt, 2000, keepTail: false) + "\n\n" : "")
-                          + (last is { Length: > 0 } ? "Its last reply:\n" + OrchestratorMessages.Cut(last, OrchestratorMessages.MaxWorkerReplyChars, keepTail: true) : "");
+                var entries = await Task.Run(_worker.ReadHistory);
+                history = ConversationHistory.Format(entries, lastReplyFollows: workerReply is not null,
+                    lastTurnRunning: _worker.IsRunning && !_worker.IsAwaitingInput);
             }
-            var message = Compose(eventText, fromOwner, workerReply, soFar, Status(), handoff);
+            var message = Compose(eventText, fromOwner, workerReply, history, Status(), handoff);
             if (workerReply is not null) AddExchange(ExchangeKind.Read, workerReply.Length == 0 ? "(no text reply)" : workerReply);
 
             SetThinking(true);
