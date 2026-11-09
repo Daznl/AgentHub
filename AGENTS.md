@@ -28,3 +28,11 @@ AgentHub is a Windows-first personal control centre for GitHub repositories and 
 - Build the solution.
 - Exercise affected Git command paths with spaces in repository paths.
 - Keep README/roadmap updated when behavior changes.
+
+## Updating the app the user runs
+
+The pinned taskbar icon launches a separate install folder. `git pull`, `dotnet publish` and launching the publish output do not change it, so none of them count as updating the app.
+
+- Update it only with `scripts\Deploy-Taskbar.ps1`. If AgentHub is running, confirm with the user that it may close, then pass `-CloseRunning`.
+- Never tell the user they have the latest AgentHub until `scripts\Deploy-Taskbar.ps1 -Check` prints `UP TO DATE`, and say which commit is installed.
+- When "latest" looks wrong, compare the commit stamped in the installed `AgentHub.dll` with `origin/main` before searching branches.

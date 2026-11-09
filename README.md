@@ -184,6 +184,15 @@ src\AgentHub\bin\Release\net8.0-windows\win-x64\publish\AgentHub.exe
 
 Right-click it and choose **Pin to taskbar**, or **Send to → Desktop** to create a shortcut.
 
+### Updating a pinned install
+
+If your pinned icon points at a separate install folder, pulling and publishing do not update it. `scripts\Deploy-Taskbar.ps1` finds that folder from the shortcut, builds the current commit, backs up the old version to `C:\data\agenthub`, swaps it in, relaunches and confirms the installed commit. It needs a clean tree containing `origin/main`.
+
+```powershell
+.\scripts\Deploy-Taskbar.ps1 -Check          # is the taskbar app on the latest code?
+.\scripts\Deploy-Taskbar.ps1 -CloseRunning   # update it, closing the running app
+```
+
 ### First launch
 
 1. Open **Manage GitHub Repos → GitHub Repos** and click **Sign in**, or skip this and add local repos by path.
