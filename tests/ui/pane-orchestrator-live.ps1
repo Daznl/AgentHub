@@ -68,7 +68,7 @@ $jobs = @{
   'Live Gamma' = 'The job: build a small Python Markdown-to-HTML converter in this folder (md2html.py handling headings, paragraphs, lists, bold and italics) with pytest tests. Commit after each step. One step at a time; report to me in one line after each turn.'
 }
 
-$env:AGENTHUB_SETTINGS_DIR = $S; $env:AGENTHUB_RUNS_DIR = "$T\runs"; $env:AGENTHUB_PANE_ORCHESTRATORS_DIR = "$T\pane-orchestrators"
+$env:AGENTHUB_SETTINGS_DIR = $S; $env:AGENTHUB_PANE_ORCHESTRATORS_DIR = "$T\pane-orchestrators"
 $env:AGENTHUB_WORKFLOWS_DIR = "$T\workflows"; $env:AGENTHUB_PROJECTS_DIR = "$T\projects"
 foreach ($v in 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'AGENTHUB_ORCHESTRATOR_COMMAND') { Remove-Item "env:$v" -ErrorAction SilentlyContinue }
 $p = Start-Process $Exe -PassThru; $script:procId = $p.Id

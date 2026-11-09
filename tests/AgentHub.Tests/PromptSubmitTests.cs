@@ -17,23 +17,6 @@ public class PromptSubmitTests
     }
 
     [Theory]
-    [InlineData("[COMPLETED]\n# AI Stock Bot\n", true)]
-    [InlineData("# [COMPLETED] AI Stock Bot\n", true)]
-    [InlineData("\n\n**[completed]** all done\n", true)]
-    [InlineData("# AI Stock Bot\n\nNotes: put [COMPLETED] at the top when finished.\n", false)]
-    [InlineData("# AI Stock Bot\n- [ ] Implement core functionality\n", false)]
-    [InlineData("", false)]
-    public void Only_a_completed_marker_at_the_top_finishes_an_idea(string handoff, bool expected) =>
-        Assert.Equal(expected, AgentHub.Services.Orchestrator.OrchestratorEngine.IsMarkedCompleted(handoff));
-
-    [Fact]
-    public void Worker_rules_tell_the_agent_how_to_finish_and_what_the_orchestrator_sees()
-    {
-        Assert.Contains("[COMPLETED]", AgentHub.Services.Orchestrator.OrchestratorMessages.AutonomyRules);
-        Assert.Contains("summary", AgentHub.Services.Orchestrator.OrchestratorMessages.AutonomyRules);
-    }
-
-    [Theory]
     [InlineData("")]
     [InlineData("  \r\n\t ")]
     public void Blank_prompt_flattens_to_empty(string prompt) =>

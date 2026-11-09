@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using AgentHub.Services.Orchestrator;
 using Xunit;
 
@@ -12,42 +13,32 @@ public class OrchestratorBoxViewTests
     ];
 
     [Fact]
-    public void Nothing_is_shown_when_no_build_is_being_orchestrated()
+    public void A_shown_list_follows_the_conversation_and_starts_over_when_it_does_not_continue()
     {
-        Assert.Null(OrchestratorBoxView.For(OrchestratorState.Idle, false, "Tally", 1, "x", Talk));
-        Assert.Null(OrchestratorBoxView.For(OrchestratorState.Building, false, null, 1, "x", Talk));
-    }
+        var shown = new ObservableCollection<OrchestratorExchange>();
+        Assert.True(OrchestratorBoxView.Sync(shown, Talk));
+        Assert.Equal(2, shown.Count);
+        Assert.False(OrchestratorBoxView.Sync(shown, Talk)); // nothing new
 
-    [Theory]
-    [InlineData(OrchestratorState.Building, false, "DRIVING", false)]
-    [InlineData(OrchestratorState.Building, true, "THINKING…", false)]
-    [InlineData(OrchestratorState.HandoffPending, false, "HANDING OFF", false)]
-    [InlineData(OrchestratorState.WaitingForReset, false, "WAITING FOR USAGE RESET", false)]
-    [InlineData(OrchestratorState.Paused, true, "PAUSED", true)]
-    public void The_state_label_follows_the_engine(OrchestratorState state, bool thinking, string label, bool paused)
-    {
-        var v = OrchestratorBoxView.For(state, thinking, "Tally", 2, "Slice 3 of 4.\n Tests pass.", Talk)!;
-        Assert.Equal(label, v.State);
-        Assert.Equal(paused, v.Paused);
-        Assert.Equal("Tally · worker #2", v.Title);
-        Assert.Equal("Slice 3 of 4. Tests pass.", v.Progress);
-    }
+        var longer = Talk.Append(new OrchestratorExchange(DateTimeOffset.Now, ExchangeKind.Reply, "Done.")).ToList();
+        Assert.True(OrchestratorBoxView.Sync(shown, longer));
+        Assert.Equal(3, shown.Count);
+        Assert.Same(Talk[0], shown[0]);
 
-    [Fact]
-    public void The_whole_conversation_is_shown_with_each_message_in_full()
-    {
-        var v = OrchestratorBoxView.For(OrchestratorState.Building, false, "Tally", 1, "", Talk)!;
-        Assert.Same(Talk, v.Conversation);
-        Assert.Equal("Slice 1 done:\n 14 tests pass.", v.Conversation[1].Text);
-        Assert.Empty(OrchestratorBoxView.For(OrchestratorState.Building, false, "Tally", 1, "", null)!.Conversation);
+        var fresh = new List<OrchestratorExchange> { new(DateTimeOffset.Now, ExchangeKind.Note, "Session #2") }; // a new session: a different list
+        Assert.True(OrchestratorBoxView.Sync(shown, fresh));
+        Assert.Single(shown);
+        Assert.Equal("Session #2", shown[0].Text);
     }
 
     [Theory]
     [InlineData(ExchangeKind.Read, "Worker → orchestrator")]
     [InlineData(ExchangeKind.Sent, "Orchestrator → worker")]
     [InlineData(ExchangeKind.Wait, "Orchestrator waits")]
-    [InlineData(ExchangeKind.Steer, "Your steer → orchestrator")]
+    [InlineData(ExchangeKind.Steer, "You → orchestrator")]
     [InlineData(ExchangeKind.Question, "Orchestrator asks you")]
+    [InlineData(ExchangeKind.Reply, "Orchestrator → you")]
+    [InlineData(ExchangeKind.Note, "AgentHub")]
     [InlineData(ExchangeKind.AgentHub, "AgentHub → worker")]
     public void Each_message_says_who_it_went_between(ExchangeKind kind, string label) =>
         Assert.Equal(label, new OrchestratorExchange(DateTimeOffset.Now, kind, "x").Label);

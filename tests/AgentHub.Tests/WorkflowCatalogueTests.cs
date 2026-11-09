@@ -1,7 +1,5 @@
 using System.IO;
-using AgentHub.Models;
 using AgentHub.Services;
-using AgentHub.Services.Ideas;
 using AgentHub.Services.Orchestrator;
 using Xunit;
 
@@ -36,15 +34,14 @@ public class WorkflowCatalogueTests : IDisposable
         Assert.Contains(OrchestratorWorkflow.DefaultId, all.Keys);
         var builder = all["template:builder"];
         Assert.Equal("Builder", builder.Name);
-        Assert.Equal(WorkflowHandoff.OnContext, builder.Handoff);
+        Assert.Equal(0.75, builder.ContextThreshold);
         Assert.Empty(builder.MissingInputs());
-        Assert.Contains("Complete only when", builder.Instructions);
+        Assert.Contains("Tell the owner it is done only when", builder.Instructions);
 
         var data = all["template:data-processing"];
-        Assert.Equal(WorkflowHandoff.AfterEachStage, data.Handoff);
         Assert.Equal(["pipeline_location"], data.MissingInputs());
         Assert.Contains("{{pipeline_location}}", data.Instructions);
-        Assert.Contains("one pipeline stage per session", data.WorkerRules);
+        Assert.Contains("one pipeline stage at a time", data.Instructions);
 
         Assert.Equal(["demo_user"], all["template:demo-builder"].MissingInputs());
         Assert.Contains("Claude in Chrome", all["template:demo-builder"].Instructions);
@@ -65,27 +62,32 @@ public class WorkflowCatalogueTests : IDisposable
 
         var again = OrchestratorWorkflow.Parse(mine.Serialize(), "sales-pipeline");
         Assert.Equal(mine.Name, again.Name);
-        Assert.Equal(mine.Handoff, again.Handoff);
         Assert.Equal(mine.ContextThreshold, again.ContextThreshold);
         Assert.Equal(mine.InputsText, again.InputsText);
         Assert.Equal(mine.Instructions.Trim(), again.Instructions);
-        Assert.Equal(mine.WorkerRules.Trim(), again.WorkerRules);
-        Assert.Equal(mine.Version(), again.Version());
+        Assert.Equal(mine.Serialize(), again.Serialize());
     }
 
     [Fact]
-    public void System_prompt_is_the_fixed_core_followed_by_the_workflow()
+    public void Keys_and_sections_from_older_files_are_ignored()
     {
-        var w = new OrchestratorWorkflow { Name = "Data Processing", Handoff = WorkflowHandoff.AfterEachStage, Instructions = "Pipeline at {{loc}}.", Inputs = [new("loc", @"D:\p")] };
-        var prompt = OrchestratorMessages.SystemPrompt("Sales", @"C:\x", w);
-        Assert.Contains("The owner is not in this conversation", prompt);
-        Assert.True(prompt.IndexOf("stage_done", StringComparison.Ordinal) < prompt.IndexOf("===== WORKFLOW: Data Processing", StringComparison.Ordinal));
-        Assert.Contains(@"Pipeline at D:\p.", prompt);
-        Assert.Contains("hands off after every stage", prompt);
+        var old = "---\nname: Old\nmodel: sonnet\nhandoff: after-each-stage\nworker-command: codex\ncontext-threshold: 60\n---\n\n# Orchestrator instructions\n\nDo the thing.\n\n# Worker rules\n\nNever delete data.\n";
+        var w = OrchestratorWorkflow.Parse(old, "old");
+        Assert.Equal("Do the thing.", w.Instructions);
+        Assert.Equal(0.60, w.ContextThreshold);
+        Assert.DoesNotContain("handoff:", w.Serialize());
+        Assert.DoesNotContain("Worker rules", w.Serialize());
+    }
 
-        var rules = OrchestratorMessages.WorkerRules(new OrchestratorWorkflow { WorkerRules = "Log row counts.\nNever delete data." });
-        Assert.EndsWith("Also: Log row counts. Never delete data.)", rules);
-        Assert.Equal(OrchestratorMessages.AutonomyRules, OrchestratorMessages.WorkerRules(null));
+    [Fact]
+    public void System_prompt_is_the_fixed_core_followed_by_the_template()
+    {
+        var w = new OrchestratorWorkflow { Name = "Data Processing", Description = "Stages.", Instructions = "Pipeline at {{loc}}.", Inputs = [new("loc", @"D:\p")] };
+        var prompt = PaneOrchestrator.SystemPrompt(@"C:\x", "Terminal 1", w);
+        Assert.Contains("Your only output is the JSON", prompt);
+        Assert.True(prompt.IndexOf("to_worker", StringComparison.Ordinal) < prompt.IndexOf("===== CONTEXT: Data Processing", StringComparison.Ordinal));
+        Assert.Contains(@"Pipeline at D:\p.", prompt);
+        Assert.DoesNotContain("=====", PaneOrchestrator.SystemPrompt(@"C:\x", "Terminal 1", null));
     }
 
     [Fact]
@@ -127,183 +129,5 @@ public class WorkflowCatalogueTests : IDisposable
         Assert.Equal(0, ignored.ExitCode);
         var template = await new ProcessRunner().RunAsync("git", ["check-ignore", "-q", "workflows/builder.md"], repo);
         Assert.NotEqual(0, template.ExitCode); // the templates are shared
-    }
-}
-
-public class WorkflowLoopTests : IDisposable
-{
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), "AgentHub Stages " + Guid.NewGuid().ToString("n")[..8]);
-
-    public WorkflowLoopTests() => Directory.CreateDirectory(_dir);
-
-    public void Dispose()
-    {
-        try
-        {
-            foreach (var f in Directory.EnumerateFiles(_dir, "*", SearchOption.AllDirectories)) File.SetAttributes(f, FileAttributes.Normal);
-            Directory.Delete(_dir, recursive: true);
-        }
-        catch { }
-    }
-
-    private static OrchestratorDecision Send(string text, string? stage = null, bool done = false) =>
-        new(OrchestratorAction.Send, text, "none", "next", "working", stage, done);
-
-    private async Task<(OrchestratorEngine, IdeaService, ProjectIdea, WorkflowCatalogue)> SetupAsync(ScriptedBrain brain)
-    {
-        var runner = new ProcessRunner();
-        var catalogue = new WorkflowCatalogue(Path.Combine(AppContext.BaseDirectory, "workflows"), Path.Combine(_dir, "own"));
-        var pipeline = (await catalogue.GetAsync("template:data-processing")).Duplicate("Test pipeline");
-        pipeline.InputsText = @"pipeline_location: C:\Work Files\pipeline.xlsx";
-        await catalogue.SaveAsync(pipeline);
-
-        var ideas = new IdeaService(Path.Combine(_dir, "ideas.json"));
-        var idea = new ProjectIdea { Title = "Sales data", Description = "Process the sales data", TargetDirectory = Path.Combine(_dir, "Sales data"), WorkflowId = pipeline.Id };
-        await ideas.AddIdeaAsync(idea);
-        await OrchestratorLoopTests.OnlyThisIdea(ideas, idea);
-        return (MakeEngine(ideas, brain, catalogue), ideas, idea, catalogue);
-    }
-
-    private OrchestratorEngine MakeEngine(IdeaService ideas, ScriptedBrain brain, WorkflowCatalogue catalogue)
-    {
-        var runner = new ProcessRunner();
-        return new OrchestratorEngine(ideas, new GitService(runner), runner, new SteeringService(Path.Combine(_dir, "steering.json")))
-        {
-            RunsRoot = Path.Combine(_dir, "runs"),
-            Workflows = catalogue,
-            BrainFactory = (_, _) => brain,
-            UsageReader = () => Task.FromResult<UsageSnapshot?>(null),
-            TurnSettle = TimeSpan.Zero,
-            WorkerStartupDelay = TimeSpan.Zero,
-            LoopInterval = TimeSpan.FromMilliseconds(50),
-            IdleRecheck = TimeSpan.FromHours(1)
-        };
-    }
-
-    private static async Task Until(Func<bool> condition, string what)
-    {
-        for (var i = 0; i < 300 && !condition(); i++) await Task.Delay(25);
-        Assert.True(condition(), "Timed out waiting for: " + what);
-    }
-
-    private RunRecord Record() => RunRecorder.ReadRecord(Path.Combine(Directory.GetDirectories(Path.Combine(_dir, "runs")).Single(), "run.json"))!;
-
-    [Fact]
-    public async Task A_finished_stage_starts_a_fresh_worker_and_the_run_remembers_the_stages()
-    {
-        var brain = new ScriptedBrain(
-            Send("Read the pipeline and list the stages, then run stage 1 only.", stage: "1 clean"),
-            Send("(ignored: stage done means a fresh worker)", stage: "1 clean", done: true),
-            Send("Report on stage 1 first.", stage: "2 join"));
-        var (engine, _, idea, _) = await SetupAsync(brain);
-        var worker = new ScriptedWorker();
-        using (engine)
-        {
-            await engine.BuildIdeaImmediatelyAsync(idea, worker);
-            await Until(() => worker.Received.Count == 1, "first instruction");
-            Assert.Contains(@"C:\Work Files\pipeline.xlsx", OrchestratorMessages.SystemPrompt(idea.Title, idea.TargetDirectory, engine.CurrentWorkflow));
-            Assert.Contains("one pipeline stage per session", worker.Received[0]);
-            Assert.Contains("[WORKFLOW] Test pipeline (fresh worker after each stage)", brain.Messages[0]);
-
-            worker.FinishTurn("Stage 1 done: 10,000 rows cleaned, output in out/1.");
-            await Until(() => worker.Received.Count == 2, "handoff prompt");
-            Assert.Equal(OrchestratorMessages.HandoffPrompt, worker.Received[1]);
-
-            worker.FinishTurn("Handoff written.");
-            await Until(() => worker.Received.Count == 3, "the fresh worker's first instruction");
-            Assert.Equal(2, worker.Starts);
-            Assert.StartsWith("[EVENT] new_worker_session", brain.Messages[2]);
-            Assert.Contains("stages done: 1 clean", brain.Messages[2]);
-            Assert.StartsWith("Report on stage 1 first.", worker.Received[2]);
-
-            var r = engine.CurrentRun!;
-            Assert.Equal(["1 clean"], r.StagesDone);
-            Assert.Equal("2 join", r.CurrentStage);
-            Assert.Equal("Test pipeline", r.Workflow);
-        }
-        Assert.True(File.Exists(Path.Combine(Directory.GetDirectories(Path.Combine(_dir, "runs")).Single(), "workflow.md")));
-    }
-
-    [Fact]
-    public async Task Closing_AgentHub_leaves_the_run_open_and_building_again_picks_it_up_with_the_same_orchestrator()
-    {
-        var day1 = new ScriptedBrain(Send("Run stage 1 only.", stage: "1 clean"));
-        var (engine, ideas, idea, catalogue) = await SetupAsync(day1);
-        var worker = new ScriptedWorker();
-        await engine.BuildIdeaImmediatelyAsync(idea, worker);
-        await Until(() => worker.Received.Count == 1, "day 1 instruction");
-        engine.Dispose(); // AgentHub closed for the night
-
-        var suspended = Record();
-        Assert.Equal("suspended", suspended.Outcome);
-        Assert.Equal("1 clean", suspended.CurrentStage);
-
-        var day2 = new ScriptedBrain(Send("Report on stage 1, then carry on.", stage: "1 clean"));
-        var sessions = new List<string>();
-        using var engine2 = MakeEngine(ideas, day2, catalogue);
-        engine2.BrainFactory = (record, _) => { sessions.Add(record.OrchestratorSessionId); return day2; };
-        var worker2 = new ScriptedWorker();
-        await engine2.BuildIdeaImmediatelyAsync(idea, worker2);
-        await Until(() => worker2.Received.Count == 1, "day 2 instruction");
-
-        Assert.StartsWith("[EVENT] run_reopened", day2.Messages[0]);
-        Assert.Contains("current stage: 1 clean", day2.Messages[0]);
-        Assert.Equal(["scripted"], sessions); // the orchestrator session id of day 1, handed back
-        var reopened = engine2.CurrentRun!;
-        Assert.Equal(suspended.RunId, reopened.RunId);
-        Assert.Equal(1, reopened.Reopened);
-        Assert.Equal(2, reopened.WorkerSessions.Count);
-        Assert.Single(Directory.GetDirectories(Path.Combine(_dir, "runs")));
-    }
-
-    [Fact]
-    public async Task An_idea_never_shows_Building_when_nothing_is_building_it()
-    {
-        // Left over from before a restart (the 2026-11-04 runs left two ideas like this).
-        var (engine, ideas, idea, catalogue) = await SetupAsync(new ScriptedBrain(Send("Run stage 1 only.", stage: "1 clean")));
-        idea.Status = IdeaStatus.Building;
-        idea.StatusNote = "Building (Session #1)";
-        await ideas.UpdateIdeaAsync(idea);
-        await engine.RecoverAfterRestartAsync();
-        var saved = (await ideas.LoadAsync()).Single();
-        Assert.Equal(IdeaStatus.Queued, saved.Status);
-        Assert.Contains("Interrupted", saved.StatusNote);
-
-        // Closing AgentHub mid-run: back in the queue.
-        var worker = new ScriptedWorker();
-        await engine.BuildIdeaImmediatelyAsync(saved, worker);
-        await Until(() => worker.Received.Count == 1, "first instruction");
-        Assert.Equal(IdeaStatus.Building, (await ideas.LoadAsync()).Single().Status);
-        engine.Dispose();
-        saved = (await ideas.LoadAsync()).Single();
-        Assert.Equal(IdeaStatus.Queued, saved.Status);
-        Assert.Contains("picks up where it left off", saved.StatusNote);
-
-        // Stop: paused, not building.
-        using var engine2 = MakeEngine(ideas, new ScriptedBrain(Send("Carry on.", stage: "1 clean")), catalogue);
-        var worker2 = new ScriptedWorker();
-        await engine2.BuildIdeaImmediatelyAsync(saved, worker2);
-        await Until(() => worker2.Received.Count == 1, "instruction after reopening");
-        engine2.Stop();
-        await Until(() => ideas.LoadAsync().Result.Single().Status == IdeaStatus.Paused, "paused after Stop");
-    }
-
-    [Fact]
-    public async Task Work_mode_skips_an_idea_whose_workflow_inputs_are_not_filled_in()
-    {
-        var brain = new ScriptedBrain();
-        var (engine, ideas, idea, _) = await SetupAsync(brain);
-        idea.WorkflowId = "template:data-processing"; // the template, still "<paste …>"
-        await ideas.UpdateIdeaAsync(idea);
-        using (engine)
-        {
-            await engine.StartAsync(); // no pane yet: nothing to do
-            await engine.BuildIdeaImmediatelyAsync(idea, new ScriptedWorker());
-            await Until(() => engine.State == OrchestratorState.Idle, "idle");
-        }
-        Assert.Empty(brain.Messages);
-        var saved = (await ideas.LoadAsync()).Single();
-        Assert.Equal(IdeaStatus.Paused, saved.Status);
-        Assert.Contains("pipeline_location", saved.StatusNote);
     }
 }

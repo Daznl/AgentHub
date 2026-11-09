@@ -4,7 +4,7 @@
 
 **Repo first, agent second.**
 
-AgentHub owns workflow metadata and orchestration. Git owns code history. GitHub owns the canonical remote. Provider CLIs own model authentication and execution.
+AgentHub owns the orchestration templates and the orchestrators attached to Cockpit sessions. Git owns code history. GitHub owns the canonical remote. Provider CLIs own model authentication and execution.
 
 ## Current components
 

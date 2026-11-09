@@ -75,6 +75,12 @@ public sealed class AppSettings
     public long ClaudeContextWindowTokens { get; set; } = 1_000_000;
 
     /// <summary>
+    /// Context window fraction (0.40–0.95) at which a pane orchestrator (🧭 Orchestrate) hands its session off to a fresh one,
+    /// when the picked workflow sets none. The field in the orchestrator box changes it live and saves it here for the next one.
+    /// </summary>
+    public double PaneOrchestratorContextThreshold { get; set; } = 0.75;
+
+    /// <summary>
     /// Keep AgentHub's own copy of every Claude Code and Codex transcript in <see cref="HistoryArchiveDirectory"/>, so
     /// session history survives the CLIs' cleanup. Synced at startup and every minute; nothing is ever deleted from it.
     /// </summary>

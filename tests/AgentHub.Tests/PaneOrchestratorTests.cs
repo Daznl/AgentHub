@@ -47,11 +47,14 @@ public class PaneOrchestratorTests
     {
         public List<string> Messages { get; } = [];
         public Func<string, PaneDecision> Answer { get; set; } = _ => new PaneDecision(null, null, "");
+        /// <summary>What the brain's own transcript says it used; null for a brain without one.</summary>
+        public ContextReading? Context { get; set; }
         public Task<PaneDecision> DecideAsync(string message, CancellationToken cancellationToken)
         {
             Messages.Add(message);
             return Task.FromResult(Answer(message));
         }
+        public ContextReading? ReadContext() => Context;
     }
 
     private static async Task Until(Func<bool> done, int ms = 3000)
@@ -173,7 +176,7 @@ public class PaneOrchestratorTests
             worker.Context(0.80); // over the 75% limit
             await Until(() => o.IsHandingOff);
             Assert.Equal(OrchestratorMessages.HandoffPrompt, worker.Submitted.Last());
-            Assert.Equal("HANDING OFF", OrchestratorBoxView.ForAttached(o).State);
+            Assert.Equal("HANDING OFF", OrchestratorBoxView.For(o).State);
 
             // The owner can still talk to it, but nothing is typed into a session that is writing its notes.
             brain.Answer = m => m.Contains("new_worker_session") ? new PaneDecision("Fresh session briefed.", "Read .agenthub/handoff.md, then write the tests.", "session 2") : new PaneDecision("Handing off now.", "also do X", "");
@@ -190,7 +193,7 @@ public class PaneOrchestratorTests
             Assert.Contains("[HANDOFF.MD]\n# Notes\nParser done; tests next.", briefing);
             Assert.DoesNotContain("[WORKER FINAL REPLY]", briefing);
             Assert.False(o.IsHandingOff);
-            Assert.Contains("session #2", OrchestratorBoxView.ForAttached(o).Title);
+            Assert.Contains("session #2", OrchestratorBoxView.For(o).Title);
 
             // The new session's own first reading is its baseline, not a reason to hand off again.
             worker.Context(0.80);
@@ -198,6 +201,62 @@ public class PaneOrchestratorTests
             Assert.False(o.IsHandingOff);
         }
         finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task Lowering_the_handoff_limit_below_the_current_context_hands_off_at_once()
+    {
+        var worker = new ScriptedWorker { SessionLaunch = new SessionLaunch("claude --x", "C:\\x", "Pane Test", "Pane Test") };
+        var brain = new ScriptedBrain { Answer = _ => new PaneDecision(null, "go", "") };
+        using var o = new PaneOrchestrator(worker, brain, "Orchestrator") { TurnSettle = TimeSpan.Zero };
+        await o.SendAsync("build it");
+        Assert.Equal(0.75, o.ContextThreshold);
+        Assert.Equal(0.75, OrchestratorBoxView.For(o).HandoffThreshold);
+
+        worker.Context(0.20); // baseline
+        worker.Context(0.55); // under 75%
+        Assert.False(o.IsHandingOff);
+        Assert.Equal("55% of 100k", OrchestratorBoxView.For(o).ContextUsed);
+
+        o.ContextThreshold = 0.50; // the owner lowers the limit in the box: checked against the latest reading, no new reading needed
+        await Until(() => o.IsHandingOff);
+        Assert.Equal(OrchestratorMessages.HandoffPrompt, worker.Submitted.Last());
+        Assert.Contains(o.Conversation, x => x.Kind == ExchangeKind.Note && x.Text == "Handoff limit set to 50% of the context window.");
+        Assert.Contains(o.Conversation, x => x.Kind == ExchangeKind.Note && x.Text.Contains("limit 50%"));
+    }
+
+    [Fact]
+    public async Task The_orchestrators_own_context_is_read_after_each_decision_for_its_bar()
+    {
+        var worker = new ScriptedWorker();
+        var brain = new ScriptedBrain { Answer = _ => new PaneDecision("ok", null, "") };
+        using var o = new PaneOrchestrator(worker, brain, "Orchestrator") { TurnSettle = TimeSpan.Zero };
+        Assert.Null(o.OrchestratorContext);
+        Assert.Null(OrchestratorBoxView.For(o).OrchestratorContext);
+
+        brain.Context = new ContextReading(12_000, 200_000, WindowIsAssumed: true, "sonnet", DateTimeOffset.Now, "test", "brain.jsonl");
+        await o.SendAsync("hello");
+        Assert.Equal(12_000, o.OrchestratorContext!.UsedTokens);
+        Assert.Equal(0.06, OrchestratorBoxView.For(o).OrchestratorContext!.UsedFraction, 3);
+
+        brain.Context = null; // a read that fails keeps the last reading rather than blanking the bar
+        await o.SendAsync("again");
+        Assert.Equal(12_000, o.OrchestratorContext!.UsedTokens);
+    }
+
+    [Fact]
+    public void The_handoff_limit_is_clamped_and_a_workflow_sets_it_without_a_note()
+    {
+        var worker = new ScriptedWorker();
+        using var o = new PaneOrchestrator(worker, new ScriptedBrain(), "Orchestrator", new OrchestratorWorkflow { Name = "w", ContextThreshold = 0.60 });
+        Assert.Equal(0.60, o.ContextThreshold);
+        Assert.Empty(o.Conversation);
+
+        o.ContextThreshold = 0.10;
+        Assert.Equal(PaneOrchestrator.MinContextThreshold, o.ContextThreshold);
+        o.ContextThreshold = 1.5;
+        Assert.Equal(PaneOrchestrator.MaxContextThreshold, o.ContextThreshold);
+        Assert.Equal(2, o.Conversation.Count(x => x.Kind == ExchangeKind.Note && x.Text.StartsWith("Handoff limit set to")));
     }
 
     [Fact]
@@ -210,7 +269,7 @@ public class PaneOrchestratorTests
         await o.SendAsync("build it");
         Assert.Empty(worker.Submitted);
         Assert.Equal("Create todo.py.", o.HeldForWorker);
-        Assert.Equal("WAITING FOR YOU", OrchestratorBoxView.ForAttached(o).State);
+        Assert.Equal("WAITING FOR YOU", OrchestratorBoxView.For(o).State);
         Assert.Contains(o.Conversation, x => x.Kind == ExchangeKind.Note && x.Text.StartsWith("Held: the session is showing a security check"));
 
         worker.EndTurn("ignored: a dialog is not a turn end");
@@ -221,7 +280,7 @@ public class PaneOrchestratorTests
         await Until(() => worker.Submitted.Count == 1);
         Assert.Equal("Create todo.py.", worker.Submitted[0]);
         Assert.Null(o.HeldForWorker);
-        Assert.Equal("ATTACHED", OrchestratorBoxView.ForAttached(o).State);
+        Assert.Equal("ATTACHED", OrchestratorBoxView.For(o).State);
     }
 
     [Fact]
@@ -262,14 +321,14 @@ public class PaneOrchestratorTests
     }
 
     [Fact]
-    public void Attached_box_has_a_message_line_and_no_pause()
+    public void A_fresh_box_listens_and_carries_the_handoff_limit()
     {
         var worker = new ScriptedWorker();
         using var o = new PaneOrchestrator(worker, new ScriptedBrain(), "Reviewer");
-        var view = OrchestratorBoxView.ForAttached(o);
-        Assert.True(view.Attached);
+        var view = OrchestratorBoxView.For(o);
         Assert.Equal("LISTENING", view.State);
         Assert.Equal("🧭 Reviewer", view.Title);
-        Assert.False(view.Paused);
+        Assert.Equal(0.75, view.HandoffThreshold);
+        Assert.Null(view.ContextUsed);
     }
 }

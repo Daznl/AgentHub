@@ -1,5 +1,5 @@
 ﻿# UI test for the workflow editor (edit a template, save as own workflow, use it), on a TEST AgentHub with its own settings,
-# ideas, workflows folder and projects folder. UI Automation patterns only: no mouse, no keyboard, no focus stealing.
+# workflows folder and projects folder. UI Automation patterns only: no mouse, no keyboard, no focus stealing.
 param([string]$Exe = 'C:\data\agenthub\build-repo\AgentHub.exe')
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
@@ -50,36 +50,30 @@ function Dialog($titleLike, [int]$wait = 10) {
       foreach ($c in $w.FindAll($TS::Descendants, (Cond $A::ControlTypeProperty ([System.Windows.Automation.ControlType]::Window)))) { if ($c.Current.Name -like $titleLike) { return $c } } }
     Start-Sleep -Milliseconds 250 }
   throw "dialog not found: $titleLike" }
-function Ideas { $x = Get-Content (Join-Path $T 'ideas.json') -Raw | ConvertFrom-Json; return ,@($x | ForEach-Object { $_ }) }
 function Repos { (Get-Content "$T\settings.json" -Raw | ConvertFrom-Json).Repositories }
 
 function Value($el) { $el.GetCurrentPattern($Val).Current.Value }
 function ReadOnly($el) { $el.GetCurrentPattern($Val).Current.IsReadOnly }
 function SetText($el, $text) { $el.GetCurrentPattern($Val).SetValue($text) }
 
-# ---- fresh test state: one idea, no own workflows ----
+# ---- fresh test state: no own templates ----
 Remove-Item $T -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force "$T\projects" | Out-Null
 $settings = Get-Content "$env:APPDATA\AgentHub\settings.json" -Raw | ConvertFrom-Json
 $settings.PaneLayout = @(); $settings.SessionsDirectory = "$T\sessions"; $settings.HistoryArchiveEnabled = $false; $settings.SessionsOutliveAgentHub = $false; $settings.AnimatedBackground = $false
 [IO.File]::WriteAllText("$T\settings.json", ($settings | ConvertTo-Json -Depth 20))
-[IO.File]::WriteAllText("$T\ideas.json", '[{"Id":"uitestidea","Title":"Sales data","Description":"Process the sales data","TargetDirectory":"C:\\Work\\Pie","AgentCommand":"claude","ContextHandoffThreshold":0.75,"Status":0,"WorkflowId":"template:builder"}]')
 $templateFile = Join-Path (Split-Path $Exe) 'workflows\data-processing.md'
 $templateBefore = (Get-FileHash $templateFile).Hash
 
-$env:AGENTHUB_SETTINGS_DIR = $T; $env:AGENTHUB_RUNS_DIR = "$T\runs"
+$env:AGENTHUB_SETTINGS_DIR = $T
 $env:AGENTHUB_WORKFLOWS_DIR = "$T\workflows"; $env:AGENTHUB_PROJECTS_DIR = "$T\projects"
 $p = Start-Process $Exe -PassThru; $script:procId = $p.Id
 try {
   $main = $null
   for ($i = 0; $i -lt 80 -and -not $main; $i++) { $main = $A::RootElement.FindFirst($TS::Children, (Cond $A::ProcessIdProperty $p.Id)); Start-Sleep -Milliseconds 250 }
   Start-Sleep 2
-  Click (FindName $main '*Orchestration')
-  $orch = $null
-  for ($i = 0; $i -lt 40 -and -not $orch; $i++) { $orch = $main.FindFirst($TS::Children, (Cond $A::ControlTypeProperty ([System.Windows.Automation.ControlType]::Window))); Start-Sleep -Milliseconds 250 }
-  Start-Sleep 2
-  Click (Find $orch 'WorkflowsBtn')
-  $wf = Dialog '*Orchestrator Workflows*'
+  Click (FindName $main '*Templates')
+  $wf = Dialog '*Orchestration Templates*'
   Start-Sleep 2
 
   "1. A template can be edited"
@@ -113,11 +107,6 @@ try {
   Check ((Get-FileHash $templateFile).Hash -eq $templateBefore) 'template file unchanged'
   Check ((Find $wf 'SaveBtn').Current.Name -eq '💾 Save') "now editing the own copy (button '$((Find $wf 'SaveBtn').Current.Name)')"
   Shot $wf 'w-saved.png'
-
-  "3. Use it for the idea"
-  Click (Find $wf 'UseBtn'); Start-Sleep 2
-  Check ((Ideas)[0].WorkflowId -eq 'sales-pipeline') "idea uses sales-pipeline (got '$((Ideas)[0].WorkflowId)')"
-  Check ((Selected (Find $orch 'EditWorkflowCombo')) -eq 'Sales pipeline') "Orchestration window shows it (got '$(Selected (Find $orch 'EditWorkflowCombo'))')"
 } finally {
   Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
 }

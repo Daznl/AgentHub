@@ -51,7 +51,7 @@ $settings.Repositories = @(@{ Id = 'panetest'; Name = 'Pane Test'; LocalPath = $
 $fake = Join-Path $T 'fake-orchestrator.cmd'
 [IO.File]::WriteAllText($fake, "@echo off`r`nmore > nul`r`necho {""type"":""result"",""is_error"":false,""result"":""ok"",""session_id"":""00000000-0000-0000-0000-000000000002"",""structured_output"":{""to_owner"":""Understood: I will have the session list the folder first."",""to_worker"":""dir"",""note"":""Scripted pane orchestrator""}}`r`n")
 
-$env:AGENTHUB_SETTINGS_DIR = $T; $env:AGENTHUB_RUNS_DIR = "$T\runs"; $env:AGENTHUB_PANE_ORCHESTRATORS_DIR = "$T\pane-orchestrators"
+$env:AGENTHUB_SETTINGS_DIR = $T; $env:AGENTHUB_PANE_ORCHESTRATORS_DIR = "$T\pane-orchestrators"
 $env:AGENTHUB_WORKFLOWS_DIR = "$T\workflows"; $env:AGENTHUB_PROJECTS_DIR = "$T\projects"; $env:AGENTHUB_ORCHESTRATOR_COMMAND = $fake
 $p = Start-Process $Exe -PassThru; $script:procId = $p.Id
 try {

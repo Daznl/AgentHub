@@ -1,8 +1,4 @@
 using System.IO;
-using AgentHub.Services;
-using AgentHub.Services.Ideas;
-using AgentHub.Services.Orchestrator;
-using AgentHub.Models;
 using AgentHub.Terminal;
 using Xunit;
 
@@ -40,93 +36,9 @@ public class DeliveryTests
         Assert.Equal("\x1b[200~a b\x1b[201~", p.Wrap("a b"));
         Assert.Equal("\x1b[200~x[201~ y\x1b[201~", p.Wrap("x\x1b[201~ y"));
     }
-
-    private static readonly string Long = string.Join(" ", Enumerable.Range(1, 120).Select(i => $"word{i}")) + " Report the commands you ran.";
-
-    [Fact]
-    public void Delivery_is_whole_inside_Claude_Codes_pasted_content_wrapper_and_cut_when_only_the_end_arrived()
-    {
-        Assert.Equal("whole", OrchestratorEngine.DeliveryOf(Long, "\n\n<pasted_content id=\"18bd\">\n" + Long + "\n</pasted_content>"));
-        Assert.Equal("cut", OrchestratorEngine.DeliveryOf(Long, Long[^76..]));
-        Assert.Null(OrchestratorEngine.DeliveryOf(Long, "an older prompt"));
-        Assert.Null(OrchestratorEngine.DeliveryOf(Long, null));
-    }
 }
 
-public class DeliveryLoopTests : IDisposable
-{
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), "AgentHub Delivery " + Guid.NewGuid().ToString("n")[..8]);
-
-    public DeliveryLoopTests() => Directory.CreateDirectory(_dir);
-
-    public void Dispose()
-    {
-        try
-        {
-            foreach (var f in Directory.EnumerateFiles(_dir, "*", SearchOption.AllDirectories)) File.SetAttributes(f, FileAttributes.Normal);
-            Directory.Delete(_dir, recursive: true);
-        }
-        catch { }
-    }
-
-    [Fact]
-    public async Task A_message_that_reached_the_worker_cut_off_is_flagged_and_the_orchestrator_is_told()
-    {
-        var first = "Build slice 1. " + string.Join(" ", Enumerable.Range(1, 150).Select(i => $"point{i}")) + " Commit when the tests pass.";
-        var brain = new ScriptedBrain(
-            new OrchestratorDecision(OrchestratorAction.Send, first, "none", "start", "working"),
-            new OrchestratorDecision(OrchestratorAction.Send, "Here is what was missing.", "none", "resend", "working"));
-        var runner = new ProcessRunner();
-        var ideas = new IdeaService(Path.Combine(_dir, "ideas.json"));
-        var idea = new ProjectIdea { Title = "Delivery", Description = "d", TargetDirectory = Path.Combine(_dir, "Delivery app") };
-        await ideas.AddIdeaAsync(idea);
-        await OrchestratorLoopTests.OnlyThisIdea(ideas, idea);
-        var runs = Path.Combine(_dir, "runs");
-        using var engine = new OrchestratorEngine(ideas, new GitService(runner), runner, new SteeringService(Path.Combine(_dir, "steering.json")))
-        {
-            RunsRoot = runs,
-            BrainFactory = (_, _) => brain,
-            UsageReader = () => Task.FromResult<UsageSnapshot?>(null),
-            TurnSettle = TimeSpan.Zero,
-            WorkerStartupDelay = TimeSpan.Zero,
-            LoopInterval = TimeSpan.FromMilliseconds(50),
-            IdleRecheck = TimeSpan.FromHours(1),
-            DeliveryCheckTimeout = TimeSpan.FromSeconds(2)
-        };
-        var worker = new ScriptedWorker { Arrives = p => p[^76..] }; // only the end arrives, as on 2026-11-05
-        await engine.BuildIdeaImmediatelyAsync(idea, worker);
-        // Wait for the delivery check itself, not a fixed time: under a full test run it can take seconds (it was flaky at 600 ms).
-        // Reading events.jsonl while the engine appends must not block it (2026-11-06: the reader made the append fail).
-        await Until(() => DeliveryCuts(runs).Any(e => e.Flag), "the delivery check flags the cut message");
-
-        worker.Arrives = null;
-        worker.FinishTurn("I only got the end of your message.");
-        await Until(() => brain.Messages.Count >= 2, "the orchestrator hears about the cut");
-
-        Assert.StartsWith("[EVENT] worker_turn_ended", brain.Messages[1]);
-        Assert.Contains("[DELIVERY] Your previous message reached the worker cut off. It received only: \"", brain.Messages[1]);
-        engine.Stop();
-    }
-
-    private static IEnumerable<RunEvent> DeliveryCuts(string runs)
-    {
-        var events = Directory.Exists(runs) ? Directory.GetDirectories(runs).Select(d => Path.Combine(d, "events.jsonl")).FirstOrDefault(File.Exists) : null;
-        try { return events is null ? [] : RunRecorder.ReadEvents(events).Where(e => e.Kind == "delivery_cut").ToList(); }
-        catch (IOException) { return []; } // being written
-    }
-
-    private static async Task Until(Func<bool> condition, string what)
-    {
-        var until = DateTime.UtcNow.AddSeconds(30);
-        while (!condition())
-        {
-            if (DateTime.UtcNow > until) throw new TimeoutException($"Timed out waiting for {what}.");
-            await Task.Delay(25);
-        }
-    }
-}
-
-/// <summary>2026-11-05: every orchestrated build in a new project folder stopped at Claude Code's folder trust check, whose
+/// <summary>2026-11-05: every orchestrated session in a new project folder stopped at Claude Code's folder trust check, whose
 /// default is "No, exit"; the first prompt and its Enter answered it and the worker exited.</summary>
 public class FolderTrustPromptTests
 {

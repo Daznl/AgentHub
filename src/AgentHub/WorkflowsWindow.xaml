@@ -1,7 +1,7 @@
 <Window x:Class="AgentHub.WorkflowsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="AgentHub - Orchestrator Workflows" Height="780" Width="1120" MinHeight="560" MinWidth="860"
+        Title="AgentHub - Orchestration Templates" Height="700" Width="1120" MinHeight="520" MinWidth="860"
         Icon="Assets/AppIcon.png" WindowStartupLocation="CenterOwner"
         Background="{StaticResource WindowBackgroundBrush}" Foreground="{StaticResource TextBrush}" FontFamily="Segoe UI">
     <Window.Resources>
@@ -46,8 +46,8 @@
         <Border Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-                    <TextBlock Text="📚 Workflow catalogue" FontSize="15" FontWeight="Bold" />
-                    <TextBlock Text="📋 templates: edit one and Save to make your own; the template stays as it is." Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0" />
+                    <TextBlock Text="📚 Template catalogue" FontSize="15" FontWeight="Bold" />
+                    <TextBlock Text="📋 shipped templates: edit one and Save to make your own; the template stays as it is. Each is a context the 🧭 Orchestrate menu offers." Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0" />
                 </StackPanel>
                 <TextBlock x:Name="StorageText" DockPanel.Dock="Bottom" Foreground="{StaticResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0" />
                 <ListBox x:Name="WorkflowList" SelectionChanged="WorkflowList_SelectionChanged" Background="#0A111B" BorderBrush="{StaticResource BorderBrush}" Foreground="{StaticResource TextBrush}">
@@ -71,8 +71,6 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="2*" />
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
@@ -91,9 +89,7 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="110" />
-                        <ColumnDefinition Width="150" />
                         <ColumnDefinition Width="90" />
-                        <ColumnDefinition Width="110" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0" Margin="0,0,8,0">
                         <TextBlock Text="Name" Style="{StaticResource Label}" />
@@ -107,20 +103,9 @@
                             <ComboBoxItem Content="haiku" />
                         </ComboBox>
                     </StackPanel>
-                    <StackPanel Grid.Column="2" Margin="0,0,8,0">
-                        <TextBlock Text="Fresh worker" Style="{StaticResource Label}" />
-                        <ComboBox x:Name="HandoffCombo" Height="28" Margin="0" Background="#0E1624" Foreground="{StaticResource TextBrush}">
-                            <ComboBoxItem Content="when context fills" Tag="on-context" />
-                            <ComboBoxItem Content="after each stage" Tag="after-each-stage" />
-                        </ComboBox>
-                    </StackPanel>
-                    <StackPanel Grid.Column="3" Margin="0,0,8,0">
-                        <TextBlock Text="Context limit" Style="{StaticResource Label}" />
-                        <TextBox x:Name="ThresholdBox" Style="{StaticResource FieldInput}" ToolTip="Context window % that forces a fresh worker; blank uses the idea's own setting" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="4">
-                        <TextBlock Text="Worker CLI" Style="{StaticResource Label}" />
-                        <TextBox x:Name="WorkerCommandBox" Style="{StaticResource FieldInput}" ToolTip="Blank uses the idea's Agent CLI" />
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="Handoff at %" Style="{StaticResource Label}" />
+                        <TextBox x:Name="ThresholdBox" Style="{StaticResource FieldInput}" ToolTip="Context window % at which the session hands off to a fresh one (40–95). Blank: the Handoff at field in the orchestrator box decides, starting from its last value." />
                     </StackPanel>
                 </Grid>
 
@@ -147,16 +132,11 @@
 
                 <DockPanel Grid.Row="4" Margin="0,0,0,8">
                     <TextBlock DockPanel.Dock="Top" Style="{StaticResource Label}" TextWrapping="Wrap"
-                                   Text="Orchestrator instructions: what the orchestrator (the Sonnet session directing the build) should make the worker do, check, and count as done. Add your own steps at the end. AgentHub adds the decision format and limits itself." />
+                                   Text="Orchestrator instructions: what the orchestrator (the headless Claude session put on a pane with 🧭 Orchestrate) should make the session do, check, and count as done. Your messages in its box add to these. AgentHub adds the reply format itself." />
                     <TextBox x:Name="InstructionsBox" Style="{StaticResource Editor}" />
                 </DockPanel>
 
-                <TextBlock Grid.Row="5" Style="{StaticResource Label}" TextWrapping="Wrap"
-                           Text="Worker rules: standing rules for the worker (the Claude Code session doing the building), sent at the start of every worker session. E.g. never overwrite the raw input files." />
-                <TextBox Grid.Row="6" x:Name="WorkerRulesBox" Style="{StaticResource Editor}" Margin="0,0,0,8" />
-
-                <DockPanel Grid.Row="7">
-                    <Button DockPanel.Dock="Right" x:Name="UseBtn" Content="✔ Use for this idea" Click="Use_Click" Background="#10B981" FontWeight="SemiBold" Padding="12,5" />
+                <DockPanel Grid.Row="5">
                     <TextBlock x:Name="StatusText" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" />
                 </DockPanel>
             </Grid>

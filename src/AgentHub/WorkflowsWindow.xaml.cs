@@ -6,29 +6,23 @@ using MessageBox = System.Windows.MessageBox;
 namespace AgentHub;
 
 /// <summary>
-/// The workflow catalogue: built-in templates (read-only) and the owner's own workflows. Duplicate a template, fill in its
-/// inputs (a pipeline location, say) and instructions, save it, and pick it for an idea. Saved workflows live in
+/// 📚 Templates: the orchestration templates the 🧭 Orchestrate menu offers. Built-in ones (read-only) and the owner's own.
+/// Duplicate a template, fill in its inputs (a pipeline location, say) and instructions, and save it. Saved templates live in
 /// workflows/local of the AgentHub repository, which git ignores: they stay on this computer.
 /// </summary>
 public partial class WorkflowsWindow : Window
 {
     private readonly WorkflowCatalogue _catalogue;
-    private readonly bool _canUse;
     private List<OrchestratorWorkflow> _workflows = [];
     private OrchestratorWorkflow? _current;
     private bool _loading;
 
-    /// <summary>The workflow the owner chose with "Use for this idea"; null when they just closed the window.</summary>
-    public string? ChosenWorkflowId { get; private set; }
-
-    public WorkflowsWindow(WorkflowCatalogue catalogue, string? selectedId, bool canUse)
+    public WorkflowsWindow(WorkflowCatalogue catalogue, string? selectedId)
     {
         InitializeComponent();
         Controls.DarkTitleBar.Apply(this);
         Controls.WindowPlacement.KeepOnScreen(this);
         _catalogue = catalogue;
-        _canUse = canUse;
-        UseBtn.Visibility = canUse ? Visibility.Visible : Visibility.Collapsed;
         StorageText.Text = $"Your workflows: {catalogue.OwnFolder}\nTemplates: {catalogue.TemplatesFolder}";
         Loaded += async (_, _) => await ReloadAsync(selectedId);
     }
@@ -65,16 +59,13 @@ public partial class WorkflowsWindow : Window
         DescriptionBox.Text = w?.Description ?? "";
         UseWhenBox.Text = w?.UseWhen ?? "";
         SelectModel(w?.Model ?? "sonnet");
-        HandoffCombo.SelectedIndex = w?.Handoff == WorkflowHandoff.AfterEachStage ? 1 : 0;
         ThresholdBox.Text = w?.ContextThreshold is { } t ? $"{t * 100:0}%" : "";
-        WorkerCommandBox.Text = w?.WorkerCommand ?? "";
         InputsBox.Text = w?.InputsText ?? "";
         InstructionsBox.Text = w?.Instructions ?? "";
-        WorkerRulesBox.Text = w?.WorkerRules ?? "";
 
-        foreach (var box in new[] { NameBox, DescriptionBox, UseWhenBox, ThresholdBox, WorkerCommandBox, InputsBox, InstructionsBox, WorkerRulesBox })
+        foreach (var box in new[] { NameBox, DescriptionBox, UseWhenBox, ThresholdBox, InputsBox, InstructionsBox })
             box.IsReadOnly = !editable;
-        ModelCombo.IsEnabled = HandoffCombo.IsEnabled = editable;
+        ModelCombo.IsEnabled = editable;
         SaveBtn.IsEnabled = editable;
         SaveBtn.Content = w is { IsTemplate: true } ? "💾 Save as my workflow" : "💾 Save";
         DeleteBtn.IsEnabled = w is { IsTemplate: false, Id.Length: > 0 };
@@ -105,13 +96,10 @@ public partial class WorkflowsWindow : Window
         w.Description = DescriptionBox.Text.Trim();
         w.UseWhen = UseWhenBox.Text.Trim();
         w.Model = (ModelCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() is { Length: > 0 } m ? m : "sonnet";
-        w.Handoff = (HandoffCombo.SelectedItem as ComboBoxItem)?.Tag as string == "after-each-stage" ? WorkflowHandoff.AfterEachStage : WorkflowHandoff.OnContext;
         var t = ThresholdBox.Text.Replace("%", "").Trim();
         w.ContextThreshold = double.TryParse(t, out var v) ? Math.Clamp(v > 1 ? v / 100 : v, 0.40, 0.95) : null;
-        w.WorkerCommand = string.IsNullOrWhiteSpace(WorkerCommandBox.Text) ? null : WorkerCommandBox.Text.Trim();
         w.InputsText = InputsBox.Text;
         w.Instructions = InstructionsBox.Text;
-        w.WorkerRules = WorkerRulesBox.Text;
     }
 
     private void Duplicate_Click(object sender, RoutedEventArgs e)
@@ -154,15 +142,6 @@ public partial class WorkflowsWindow : Window
         return copy;
     }
 
-    /// <summary>True when the editor shows something other than the template as shipped.</summary>
-    private bool TemplateEdited(OrchestratorWorkflow template)
-    {
-        var probe = template.Duplicate(template.Name);
-        ReadFields(probe);
-        probe.BasedOn = template.BasedOn;
-        return probe.Serialize() != template.Duplicate(template.Name).Also(c => c.BasedOn = template.BasedOn).Serialize();
-    }
-
     private async Task<bool> SaveAsync()
     {
         if (_current == null) return false;
@@ -187,8 +166,8 @@ public partial class WorkflowsWindow : Window
     private async void Delete_Click(object sender, RoutedEventArgs e)
     {
         if (_current is not { IsTemplate: false, Id.Length: > 0 } w) return;
-        if (MessageBox.Show(this, $"Delete the workflow \"{w.Name}\"? Ideas using it fall back to Builder. Its past runs keep their copy.",
-                "Delete workflow", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (MessageBox.Show(this, $"Delete the template \"{w.Name}\"? Orchestrators already running with it keep it; the 🧭 Orchestrate menu stops offering it.",
+                "Delete template", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         try
         {
             StatusText.Text = await _catalogue.DeleteAsync(w);
@@ -200,27 +179,4 @@ public partial class WorkflowsWindow : Window
         }
     }
 
-    private async void Use_Click(object sender, RoutedEventArgs e)
-    {
-        if (!_canUse || _current == null) return;
-        // Edits are saved first (a changed template becomes the owner's own workflow), so the idea points at what is on screen.
-        if ((!_current.IsTemplate || TemplateEdited(_current)) && !await SaveAsync()) return;
-        var chosen = _current;
-        if (chosen.MissingInputs() is { Count: > 0 } missing)
-        {
-            MessageBox.Show(this,
-                chosen.IsTemplate
-                    ? $"\"{chosen.Name}\" needs {string.Join(", ", missing)} filled in: replace the <…> in the Inputs box with your value, then Use for this idea again."
-                    : $"Fill in {string.Join(", ", missing)} first.",
-                "Workflow inputs", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-        ChosenWorkflowId = chosen.Id;
-        DialogResult = true;
-    }
-}
-
-internal static class ObjectExtensions
-{
-    public static T Also<T>(this T value, Action<T> action) { action(value); return value; }
 }

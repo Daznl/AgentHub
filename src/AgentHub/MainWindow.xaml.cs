@@ -9,7 +9,6 @@ using AgentHub.Models;
 using AgentHub.Services;
 using AgentHub.Services.History;
 using AgentHub.Services.Usage;
-using AgentHub.Services.Ideas;
 using AgentHub.Services.Orchestrator;
 using AgentHub.Terminal;
 using Color = System.Windows.Media.Color;
@@ -44,9 +43,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _usageRefreshTimer = new();
     private readonly List<ShellOption> _shellOptions = new();
     private readonly List<TerminalPaneControl> _panes = new();
-    private readonly IdeaService _ideaService = new();
-    private OrchestratorFleet? _orchestrators;
-    private IdeasWindow? _ideasWindow;
+    private WorkflowsWindow? _workflowsWindow;
     private static readonly SolidColorBrush[] PaneAccentBrushes =
     [
         new(Color.FromRgb(96, 165, 250)),  // Blue (Terminal 1)
@@ -251,11 +248,10 @@ public partial class MainWindow : Window
         pane.RepoContextRequested += p => ShowContext(p.ContextFolder, p.ContextCli);
         pane.TimelineRequested += p => ShowTimeline(p.HistoryFolder);
         pane.UpdateShellOptions(_shellOptions);
-        pane.OrchestratorPauseRequested += p => { _ = ToggleOrchestratorPauseAsync(p); };
-        pane.OrchestratorOpenRequested += _ => ShowIdeas();
         pane.OrchestratorAttachRequested += (p, at) => { _ = OfferPaneOrchestratorAsync(p, at); };
         pane.OrchestratorDetachRequested += DetachPaneOrchestrator;
         pane.OrchestratorMessageSent += (p, text) => { if (_paneOrchestrators.TryGetValue(p, out var o)) _ = o.SendAsync(text); };
+        pane.OrchestratorThresholdChanged += SetPaneOrchestratorThreshold;
         // The session ended: the orchestrator goes with it, unless it ended the session itself for a handoff and is starting the next.
         pane.SessionStateChanged += () => { if (!pane.IsRunning && _paneOrchestrators.TryGetValue(pane, out var o) && !o.IsRestarting) DetachPaneOrchestrator(pane); };
         return pane;
@@ -271,8 +267,8 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task OfferPaneOrchestratorAsync(TerminalPaneControl pane, Button at)
     {
-        if (!pane.IsRunning || _paneOrchestrators.ContainsKey(pane) || _orchestrators?.EngineDriving(pane) != null) return;
-        var workflows = await new WorkflowCatalogue().ListAsync();
+        if (!pane.IsRunning || _paneOrchestrators.ContainsKey(pane)) return;
+        var workflows = await _workflows.ListAsync();
         var menu = new ContextMenu { PlacementTarget = at, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
         var plain = new MenuItem { Header = "Orchestrator with no preset context", ToolTip = "Tell it the job and how to run it by messaging it." };
         plain.Click += (_, _) => AttachPaneOrchestrator(pane, null);
@@ -292,9 +288,22 @@ public partial class MainWindow : Window
     {
         if (!pane.IsRunning || _paneOrchestrators.ContainsKey(pane)) return;
         var orchestrator = PaneOrchestrator.ForPane(new PaneBuildWorker(pane), _runner, PaneOrchestrator.DefaultCommand, "sonnet",
-            pane.ContextFolder, $"Terminal {pane.PaneIndex}", workflow);
+            pane.ContextFolder, $"Terminal {pane.PaneIndex}", workflow, assumedWindowTokens: _settings.ClaudeContextWindowTokens);
+        // No workflow limit: the limit last set in a box (settings), so a chosen value carries over to the next orchestrator.
+        if (workflow?.ContextThreshold is null && _settings.PaneOrchestratorContextThreshold > 0)
+            orchestrator.ContextThreshold = _settings.PaneOrchestratorContextThreshold;
         orchestrator.Changed += RefreshOrchestratorBoxes;
         _paneOrchestrators[pane] = orchestrator;
+        RefreshOrchestratorBoxes();
+    }
+
+    /// <summary>The handoff limit typed into a pane's box: applied to that orchestrator at once, and kept as the default for the next one.</summary>
+    private void SetPaneOrchestratorThreshold(TerminalPaneControl pane, double fraction)
+    {
+        if (!_paneOrchestrators.TryGetValue(pane, out var orchestrator)) return;
+        orchestrator.ContextThreshold = fraction;
+        _settings.PaneOrchestratorContextThreshold = orchestrator.ContextThreshold;
+        _ = _settingsService.SaveAsync(_settings);
         RefreshOrchestratorBoxes();
     }
 
@@ -307,8 +316,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Each pane an orchestration run drives gets that run's box, and only those panes: the owner's own terminals never show
-    /// one. Engine events come from any thread.
+    /// Each pane with an orchestrator attached gets its box, and only those panes: the owner's own terminals never show one.
+    /// Orchestrator events come from any thread.
     /// </summary>
     private void RefreshOrchestratorBoxes()
     {
@@ -319,83 +328,28 @@ public partial class MainWindow : Window
         }
         foreach (var pane in _panes)
         {
-            var o = _orchestrators?.EngineDriving(pane);
-            var next = o is not null
-                ? OrchestratorBoxView.For(o.State, o.IsThinking, o.CurrentIdea?.Title, o.WorkerSession, o.LatestProgress, o.Conversation, o.WorktreeBranch)
-                : _paneOrchestrators.TryGetValue(pane, out var attached) ? OrchestratorBoxView.ForAttached(attached) : null;
+            var next = _paneOrchestrators.TryGetValue(pane, out var attached) ? OrchestratorBoxView.For(attached) : null;
             if (next != pane.OrchestratorView) pane.ShowOrchestrator(next);
         }
     }
 
-    /// <summary>Pause / Resume in a pane's box acts on the run driving that pane, not on the others.</summary>
-    private async Task ToggleOrchestratorPauseAsync(TerminalPaneControl pane)
-    {
-        if (_orchestrators?.EngineDriving(pane) is not { } o) return;
-        if (o.State == OrchestratorState.Paused) await o.ResumeAsync();
-        else o.Pause();
-        RefreshOrchestratorBoxes();
-    }
+    /// <summary>The orchestration templates every 🧭 Orchestrate menu offers.</summary>
+    private readonly WorkflowCatalogue _workflows = new();
 
-    private void OpenIdeas_Click(object sender, RoutedEventArgs e) => ShowIdeas();
+    private void OpenWorkflows_Click(object sender, RoutedEventArgs e) => ShowWorkflows();
 
-    /// <summary>
-    /// The pane an engine's worker runs in: the one it already has, else an idle pane no other run drives, else a new one.
-    /// Never a pane with a running session of the owner's (AGENTS.md: never replace a running session). Null when every pane
-    /// is busy. An idle engine still holding the chosen pane lets go of it.
-    /// </summary>
-    private TerminalPaneControl? PaneForOrchestrator(OrchestratorEngine? engine)
+    /// <summary>📚 Templates: the orchestration templates (workflows) the 🧭 Orchestrate menu offers, to read, copy and edit.</summary>
+    private void ShowWorkflows()
     {
-        if (engine?.ActivePane is { } current && _panes.Contains(current)
-            && _orchestrators?.EngineDriving(current) is var driver && (driver == engine || driver == null && !current.IsRunning))
-            return current;
-        var pane = _panes.FirstOrDefault(p => !p.IsRunning && _orchestrators?.IsPaneTaken(p) != true);
-        if (pane == null)
+        if (_workflowsWindow is not null)
         {
-            if (_panes.Count >= MaxPanes) return null;
-            pane = CreateTerminalPane();
-            _panes.Add(pane);
-            RebuildTerminalLayout();
-        }
-        foreach (var idle in _orchestrators?.Engines ?? [])
-            if (idle != engine && idle.ActivePane == pane) idle.ReleaseWorker();
-        return pane;
-    }
-
-    private OrchestratorFleet Orchestrators()
-    {
-        if (_orchestrators != null) return _orchestrators;
-        var workflows = new WorkflowCatalogue();
-        _orchestrators = new OrchestratorFleet(_ideaService, steering => new OrchestratorEngine(_ideaService, _git, _runner, steering)
-        {
-            Workflows = workflows,
-            RepositoryInUse = path => Dispatcher.InvokeAsync(() => EnsureRepositoryAsync(path)).Task.Unwrap()
-        }) { Workflows = workflows };
-        _orchestrators.Changed += RefreshOrchestratorBoxes;
-        return _orchestrators;
-    }
-
-    private void ShowIdeas()
-    {
-        if (_ideasWindow is not null)
-        {
-            _ideasWindow.WindowState = WindowState.Normal;
-            _ideasWindow.Activate();
+            _workflowsWindow.WindowState = WindowState.Normal;
+            _workflowsWindow.Activate();
             return;
         }
-
-        var window = new IdeasWindow(
-            _ideaService,
-            Orchestrators(),
-            _usageService,
-            paneProvider: PaneForOrchestrator,
-            openContextAction: folder => ShowContext(folder, null),
-            repositories: () => _settings.Repositories.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList(),
-            addRepository: EnsureRepositoryAsync)
-        {
-            Owner = this
-        };
-        _ideasWindow = window;
-        window.Closed += (_, _) => _ideasWindow = null;
+        var window = new WorkflowsWindow(_workflows, null) { Owner = this };
+        _workflowsWindow = window;
+        window.Closed += (_, _) => _workflowsWindow = null;
         window.Show();
     }
 
@@ -955,7 +909,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// The repository entry for a folder, added to AgentHub's list when it is not there yet. A missing folder is created and a folder
-    /// without Git is initialised, so an idea's new project shows up beside the others (Orchestration window, builds).
+    /// without Git is initialised, so a new project shows up beside the others.
     /// </summary>
     private async Task<RepositoryDefinition> EnsureRepositoryAsync(string path)
     {
@@ -2226,7 +2180,6 @@ public partial class MainWindow : Window
         _usageRefreshTimer.Stop();
         foreach (var o in _paneOrchestrators.Values) o.Dispose();
         _paneOrchestrators.Clear();
-        _orchestrators?.Dispose();
         _historyArchive?.Dispose();
         try
         {

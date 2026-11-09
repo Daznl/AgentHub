@@ -26,7 +26,7 @@ public partial class AppHelperPane : UserControl
     [
         "How do I start Claude Code in one of my repositories?",
         "What does the context badge on a pane mean?",
-        "How do I let an orchestration build while I'm away?",
+        "How do I put an orchestrator on a running session?",
         "How do I add a rule to my CLAUDE.md?",
     ];
     private readonly List<HelpTurn> _history = [];

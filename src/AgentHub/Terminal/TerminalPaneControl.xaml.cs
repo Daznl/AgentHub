@@ -157,13 +157,9 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     /// <summary>Window size assumed for Claude Code sessions, which do not record it. Applies from the next launch.</summary>
     public void ConfigureContext(long claudeContextWindowTokens) => _claudeContextWindowTokens = claudeContextWindowTokens;
 
-    // ---- The orchestrator driving this pane ----
+    // ---- The orchestrator attached to this pane ----
 
-    /// <summary>Pause or Resume pressed in the orchestrator box above this pane.</summary>
-    public event Action<TerminalPaneControl>? OrchestratorPauseRequested;
-    public event Action<TerminalPaneControl>? OrchestratorOpenRequested;
-
-    /// <summary>What the orchestrator box shows; null hides it. Only the pane an orchestration run controls gets one.</summary>
+    /// <summary>What the orchestrator box shows; null hides it. Only a pane with an orchestrator attached gets one.</summary>
     public OrchestratorBoxView? OrchestratorView { get; private set; }
 
     /// <summary>🧭 Orchestrate pressed in the header: the owner wants an orchestrator put on this running session.</summary>
@@ -172,10 +168,12 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     public event Action<TerminalPaneControl>? OrchestratorDetachRequested;
     /// <summary>The owner sent a message to the attached orchestrator.</summary>
     public event Action<TerminalPaneControl, string>? OrchestratorMessageSent;
+    /// <summary>The owner set the attached orchestrator's handoff limit (a fraction of the context window) in its box.</summary>
+    public event Action<TerminalPaneControl, double>? OrchestratorThresholdChanged;
 
     public void ShowOrchestrator(OrchestratorBoxView? view)
     {
-        var wasAttached = OrchestratorView?.Attached == true;
+        var wasAttached = OrchestratorView is not null;
         OrchestratorView = view;
         if (view is null)
         {
@@ -185,20 +183,72 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         }
         OrchestratorStateText.Text = view.State;
         OrchestratorTitle.Text = view.Title;
-        OrchestratorProgress.Text = view.Progress;
-        OrchestratorProgress.ToolTip = string.IsNullOrEmpty(view.Progress) ? null : view.Progress;
-        OrchestratorProgress.Visibility = string.IsNullOrEmpty(view.Progress) ? Visibility.Collapsed : Visibility.Visible;
+        OrchestratorProgress.Text = view.Note;
+        OrchestratorProgress.ToolTip = string.IsNullOrEmpty(view.Note) ? null : view.Note;
+        OrchestratorProgress.Visibility = string.IsNullOrEmpty(view.Note) ? Visibility.Collapsed : Visibility.Visible;
         ShowConversation(view.Conversation);
-        OrchestratorPauseBtn.Content = view.Paused ? "▶ Resume" : "⏸ Pause";
-        OrchestratorPauseBtn.ToolTip = view.Paused ? "Resume the orchestrator" : "Pause the orchestrator: the worker is left as it is and gets nothing new";
-        OrchestratorPauseBtn.Visibility = view.Attached ? Visibility.Collapsed : Visibility.Visible;
-        OrchestratorOpenBtn.Visibility = view.Attached ? Visibility.Collapsed : Visibility.Visible;
-        OrchestratorDetachBtn.Visibility = view.Attached ? Visibility.Visible : Visibility.Collapsed;
-        OrchestratorInputRow.Visibility = view.Attached ? Visibility.Visible : Visibility.Collapsed;
+        ShowOrchestratorContext(view.OrchestratorContext);
+        OrchestratorContextUsed.Text = view.ContextUsed is { } used ? "context " + used + " ·" : "";
+        // Not while the owner is typing a new value into it.
+        if (!OrchestratorThresholdBox.IsKeyboardFocused) OrchestratorThresholdBox.Text = $"{view.HandoffThreshold * 100:0}";
         OrchestratorBox.Visibility = Visibility.Visible;
         RefreshOrchestrateButton();
         // Just attached: the owner's next keystrokes are meant for the orchestrator.
-        if (view.Attached && !wasAttached) Dispatcher.BeginInvoke(() => OrchestratorInput.Focus(), System.Windows.Threading.DispatcherPriority.Input);
+        if (!wasAttached) Dispatcher.BeginInvoke(() => OrchestratorInput.Focus(), System.Windows.Threading.DispatcherPriority.Input);
+    }
+
+    private void OrchestratorThreshold_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter) { e.Handled = true; ApplyOrchestratorThreshold(); OrchestratorInput.Focus(); }
+        else if (e.Key == System.Windows.Input.Key.Escape) { e.Handled = true; ShowOrchestratorThreshold(); OrchestratorInput.Focus(); }
+    }
+
+    private void OrchestratorThreshold_LostFocus(object sender, System.Windows.Input.KeyboardFocusChangedEventArgs e) => ApplyOrchestratorThreshold();
+
+    /// <summary>Reads the field as a per cent (or a fraction), clamps it to the orchestrator's range and raises it; anything else restores the shown value.</summary>
+    private void ApplyOrchestratorThreshold()
+    {
+        if (OrchestratorView is not { HandoffThreshold: var current }) return;
+        var text = OrchestratorThresholdBox.Text.Trim().TrimEnd('%').Trim();
+        if (!double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value) || value <= 0)
+        {
+            ShowOrchestratorThreshold();
+            return;
+        }
+        var fraction = Math.Clamp(value > 1 ? value / 100 : value, PaneOrchestrator.MinContextThreshold, PaneOrchestrator.MaxContextThreshold);
+        OrchestratorThresholdBox.Text = $"{fraction * 100:0}";
+        if (Math.Abs(fraction - current) < 0.0005) return;
+        OrchestratorThresholdChanged?.Invoke(this, fraction);
+    }
+
+    private void ShowOrchestratorThreshold()
+    {
+        if (OrchestratorView is { HandoffThreshold: var t }) OrchestratorThresholdBox.Text = $"{t * 100:0}";
+    }
+
+    /// <summary>The orchestrator's own context bar in its box, styled as the pane's badge; hidden until it has decided once.</summary>
+    private void ShowOrchestratorContext(ContextReading? reading)
+    {
+        if (reading is null)
+        {
+            OrchestratorContextBadge.Visibility = Visibility.Collapsed;
+            return;
+        }
+        var fraction = reading.UsedFraction;
+        OrchestratorContextFill.Width = ContextBarWidth * fraction;
+        OrchestratorContextFill.Background = fraction switch
+        {
+            >= 0.85 => ContextFullBrush,
+            >= 0.6 => ContextWarnBrush,
+            _ => ContextOkBrush
+        };
+        OrchestratorContextText.Text = $"{FormatTokens(reading.UsedTokens)} / {FormatTokens(reading.WindowTokens)} · {fraction:P0}";
+        OrchestratorContextBadge.ToolTip =
+            $"The orchestrator's own context window: {reading.UsedTokens:N0} tokens in its last decision\n" +
+            $"Window {reading.WindowTokens:N0} tokens is assumed (claudeContextWindowTokens in settings; Claude Code does not record it).\n" +
+            (reading.Model is null ? "" : $"Model: {reading.Model}\n") +
+            $"As of {reading.RecordedAt.ToLocalTime():HH:mm:ss}\n{reading.FilePath}";
+        OrchestratorContextBadge.Visibility = Visibility.Visible;
     }
 
     private bool _sessionRunning;
@@ -238,14 +288,11 @@ public partial class TerminalPaneControl : UserControl, IDisposable
             || _conversation.Count > 0 && (next.Count == 0 || !ReferenceEquals(_conversation[0], next[0])); // a new session starts at its end
         var changed = OrchestratorBoxView.Sync(_conversation, next);
 
-        OrchestratorNothingYet.Text = OrchestratorView?.Attached == true ? OrchestratorBoxView.NothingYetAttached : OrchestratorBoxView.NothingYet;
+        OrchestratorNothingYet.Text = OrchestratorBoxView.NothingYet;
         OrchestratorNothingYet.Visibility = next.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (changed && following)
             Dispatcher.BeginInvoke(scroll.ScrollToEnd, System.Windows.Threading.DispatcherPriority.Loaded);
     }
-
-    private void OrchestratorPause_Click(object sender, RoutedEventArgs e) => OrchestratorPauseRequested?.Invoke(this);
-    private void OrchestratorOpen_Click(object sender, RoutedEventArgs e) => OrchestratorOpenRequested?.Invoke(this);
 
     public ContextReading? LatestContextReading { get; private set; }
     public event Action<ContextReading?>? ContextReadingChanged;

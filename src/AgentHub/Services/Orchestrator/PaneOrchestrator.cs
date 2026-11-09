@@ -35,13 +35,18 @@ public sealed record PaneDecision(string? ToOwner, string? ToWorker, string Note
 public interface IPaneBrain
 {
     Task<PaneDecision> DecideAsync(string message, CancellationToken cancellationToken);
+
+    /// <summary>The brain's own context window use after its last decision; null when unknown (scripted brains).</summary>
+    ContextReading? ReadContext() => null;
 }
 
 /// <summary>The real brain: a <see cref="ClaudeJsonSession"/> answering with <see cref="PaneDecision"/>s.</summary>
-public sealed class ClaudePaneBrain(ClaudeJsonSession session) : IPaneBrain
+public sealed class ClaudePaneBrain(ClaudeJsonSession session, long assumedWindowTokens = 200_000) : IPaneBrain
 {
     public async Task<PaneDecision> DecideAsync(string message, CancellationToken cancellationToken) =>
         (await session.AskAsync(message, PaneDecision.Parse, cancellationToken)).Value;
+
+    public ContextReading? ReadContext() => session.ReadContext(assumedWindowTokens);
 }
 
 /// <summary>
@@ -114,9 +119,31 @@ public sealed class PaneOrchestrator : IDisposable
     public TimeSpan LoopInterval { get; set; } = TimeSpan.FromSeconds(3);
     /// <summary>Upper bound on decisions, so a loop between the two sessions cannot run away.</summary>
     public int MaxDecisions { get; set; } = 300;
-    /// <summary>Context window fraction at which the session is handed off to a fresh one.</summary>
-    public double ContextThreshold { get => _contextThreshold; set => _contextThreshold = Math.Clamp(value, 0.40, 0.95); }
+    /// <summary>
+    /// Context window fraction at which the session is handed off to a fresh one. Changeable while the orchestrator runs
+    /// (the box above the pane has a field for it): the latest reading is checked against the new limit at once, so lowering
+    /// it below the session's current size hands off now.
+    /// </summary>
+    public double ContextThreshold
+    {
+        get => _contextThreshold;
+        set
+        {
+            var next = Math.Clamp(value, MinContextThreshold, MaxContextThreshold);
+            if (Math.Abs(next - _contextThreshold) < 0.0005) return;
+            _contextThreshold = next;
+            if (!_constructed) return; // the workflow's limit, set before anything runs: nothing to note or check yet
+            AddExchange(ExchangeKind.Note, $"Handoff limit set to {next:P0} of the context window.");
+            OnContextChanged(_worker.LatestContextReading);
+        }
+    }
     private double _contextThreshold = 0.75;
+    private bool _constructed;
+    public const double MinContextThreshold = 0.40;
+    public const double MaxContextThreshold = 0.95;
+
+    /// <summary>The worker's latest context reading, for the box (null until the first one).</summary>
+    public ContextReading? LatestContext => _worker.LatestContextReading;
     /// <summary>A handoff turn that takes longer than this is cut short and the fresh session started anyway.</summary>
     public TimeSpan HandoffTimeout { get; set; } = TimeSpan.FromMinutes(10);
     /// <summary>Time for a fresh CLI to show its prompt before its first instruction is typed.</summary>
@@ -132,6 +159,7 @@ public sealed class PaneOrchestrator : IDisposable
         Workflow = workflow;
         _projectDirectory = projectDirectory;
         if (workflow?.ContextThreshold is { } t) ContextThreshold = t;
+        _constructed = true;
         _worker.TurnEnded += OnWorkerTurnEnded;
         _worker.ContextChanged += OnContextChanged;
         _worker.Exited += OnWorkerExited;
@@ -147,13 +175,18 @@ public sealed class PaneOrchestrator : IDisposable
         Environment.GetEnvironmentVariable("AGENTHUB_PANE_ORCHESTRATORS_DIR") is { Length: > 0 } d ? d : @"C:\data\agenthub\pane-orchestrators";
 
     /// <summary>The real thing for a Cockpit pane: a Claude Code session on the owner's login reading the pane's folder.</summary>
+    /// <param name="assumedWindowTokens">The orchestrator's own context window, for its bar (Claude Code does not record it).</param>
     public static PaneOrchestrator ForPane(IBuildWorker worker, ProcessRunner runner, string command, string model, string projectDirectory,
-        string paneLabel, OrchestratorWorkflow? workflow, string? sessionsRoot = null)
+        string paneLabel, OrchestratorWorkflow? workflow, string? sessionsRoot = null, long assumedWindowTokens = 200_000)
     {
-        var folder = Path.Combine(sessionsRoot ?? DefaultSessionsRoot, $"{DateTimeOffset.Now:yyyyMMdd-HHmmss}-{RunRecorder.Slug(Path.GetFileName(projectDirectory.TrimEnd('\\', '/')))}");
+        var folder = Path.Combine(sessionsRoot ?? DefaultSessionsRoot, $"{DateTimeOffset.Now:yyyyMMdd-HHmmss}-{OrchestratorMessages.Slug(Path.GetFileName(projectDirectory.TrimEnd('\\', '/')))}");
         var session = new ClaudeJsonSession(runner, command, workflow?.Model ?? model, folder, projectDirectory, SystemPrompt(projectDirectory, paneLabel, workflow), PaneDecision.Schema);
-        return new PaneOrchestrator(worker, new ClaudePaneBrain(session), workflow?.Name ?? "Orchestrator", workflow, projectDirectory);
+        return new PaneOrchestrator(worker, new ClaudePaneBrain(session, assumedWindowTokens), workflow?.Name ?? "Orchestrator", workflow, projectDirectory);
     }
+
+    /// <summary>The orchestrator's own context window use, read from its transcript after each decision; null until it has decided once.</summary>
+    public ContextReading? OrchestratorContext => _orchestratorContext;
+    private ContextReading? _orchestratorContext;
 
     // ---- Prompts ----
 
@@ -472,6 +505,7 @@ public sealed class PaneOrchestrator : IDisposable
 
             _introduced = true;
             _decisions++;
+            _orchestratorContext = _brain.ReadContext() ?? _orchestratorContext; // its transcript has this decision's usage
             if (workerReply is not null) { _lastReplyHandled = workerReply; _sentSinceLastTurn = false; _turnEndedWhileThinking = false; }
             if (d.Note.Length > 0) { Note = d.Note; Changed?.Invoke(); }
 

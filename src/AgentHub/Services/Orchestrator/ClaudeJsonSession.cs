@@ -5,12 +5,19 @@ using AgentHub.Services.Instructions;
 
 namespace AgentHub.Services.Orchestrator;
 
+/// <summary>Thrown when the orchestrator session could not give a usable reply.</summary>
+public sealed class OrchestratorBrainException(string message, bool usageLimit = false) : Exception(message)
+{
+    /// <summary>The CLI reported a usage limit rather than a fault of its own.</summary>
+    public bool UsageLimit { get; } = usageLimit;
+}
+
 /// <summary>
 /// A headless Claude Code session (<c>claude -p</c>) on the user's own login that answers every message with one JSON
 /// object of a fixed schema. The first call creates it with a fixed session id, later calls resume it, so it remembers
 /// the whole conversation. Read-only tools on the project folder only, no user settings, hooks or MCP servers. A reply
-/// the parser refuses is sent back once with the reason, so the model can correct it. Shared by the run orchestrator
-/// (<see cref="ClaudeOrchestratorBrain"/>) and the pane orchestrator (<see cref="PaneOrchestrator"/>).
+/// the parser refuses is sent back once with the reason, so the model can correct it. The pane orchestrator
+/// (<see cref="PaneOrchestrator"/>) is built on it.
 /// </summary>
 public sealed class ClaudeJsonSession
 {
@@ -30,6 +37,22 @@ public sealed class ClaudeJsonSession
     private bool _started;
 
     public string SessionId { get; }
+
+    /// <summary>Where Claude Code writes this session's transcript (it exists once the first call has run).</summary>
+    public string TranscriptPath => Path.Combine(Context.SessionContextReader.ClaudeProjectsDir,
+        Context.SessionContextReader.EncodeClaudeProjectName(_workingDirectory), SessionId + ".jsonl");
+
+    /// <summary>
+    /// How much of its context window the session used in its last reply, from its transcript; null before the first reply.
+    /// <paramref name="assumedWindow"/> is the window to assume, as Claude Code does not record it.
+    /// </summary>
+    public Context.ContextReading? ReadContext(long assumedWindow)
+    {
+        var path = TranscriptPath;
+        if (!_started || !File.Exists(path)) return null;
+        try { return Context.SessionContextReader.ReadClaude(path, assumedWindow); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return null; }
+    }
 
     /// <param name="workingDirectory">Where the CLI runs, so its transcript is kept apart from the project's own sessions.</param>
     /// <param name="projectDirectory">The folder it may read.</param>
