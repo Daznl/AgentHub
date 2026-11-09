@@ -1,4 +1,5 @@
 using AgentHub.Services.Context;
+using AgentHub.Services.History;
 using AgentHub.Services.Timeline;
 using AgentHub.Terminal;
 
@@ -39,8 +40,8 @@ public interface IBuildWorker
     /// <summary>The worker's final reply of its latest turn, read from its transcript; null when unknown.</summary>
     string? ReadLastReply();
 
-    /// <summary>The last prompt the worker received, as its transcript recorded it; null when unknown.</summary>
-    string? ReadLastPrompt();
+    /// <summary>The session's conversation so far, oldest first, as its transcript recorded it; empty when unknown.</summary>
+    IReadOnlyList<HistoryEntry> ReadHistory();
 
     /// <summary>When the transcript says the latest turn ended (nothing sent since); null while a turn runs or when unknown.</summary>
     DateTimeOffset? ReadTurnEndedAt() => null;
@@ -144,12 +145,12 @@ public sealed class PaneBuildWorker : IBuildWorker, IDisposable
         return TranscriptTexts.TryRead(path, source).LastReply;
     }
 
-    public string? ReadLastPrompt()
+    public IReadOnlyList<HistoryEntry> ReadHistory()
     {
         var path = TranscriptPath;
-        if (string.IsNullOrEmpty(path)) return null;
+        if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path)) return [];
         var source = path.Contains(".codex", StringComparison.OrdinalIgnoreCase) ? ContextSource.Codex : ContextSource.ClaudeCode;
-        return TranscriptTexts.TryRead(path, source).Prompts.LastOrDefault()?.Text;
+        return SessionHistoryReader.ReadEntries(path, source).Entries;
     }
 
     public DateTimeOffset? ReadTurnEndedAt()
