@@ -180,7 +180,9 @@ public sealed class PaneOrchestrator : IDisposable
         string paneLabel, OrchestratorWorkflow? workflow, string? sessionsRoot = null, long assumedWindowTokens = 200_000)
     {
         var folder = Path.Combine(sessionsRoot ?? DefaultSessionsRoot, $"{DateTimeOffset.Now:yyyyMMdd-HHmmss}-{OrchestratorMessages.Slug(Path.GetFileName(projectDirectory.TrimEnd('\\', '/')))}");
-        var session = new ClaudeJsonSession(runner, command, workflow?.Model ?? model, folder, projectDirectory, SystemPrompt(projectDirectory, paneLabel, workflow), PaneDecision.Schema);
+        // Its own session loads no CLAUDE.md, so the worker's instruction files are copied into its prompt.
+        var rules = OrchestratorRules.Gather(projectDirectory, Instructions.InstructionFiles.DetectCli(worker.SessionLaunch?.CommandLine));
+        var session = new ClaudeJsonSession(runner, command, workflow?.Model ?? model, folder, projectDirectory, SystemPrompt(projectDirectory, paneLabel, workflow, rules), PaneDecision.Schema);
         return new PaneOrchestrator(worker, new ClaudePaneBrain(session, assumedWindowTokens), workflow?.Name ?? "Orchestrator", workflow, projectDirectory);
     }
 
@@ -190,7 +192,8 @@ public sealed class PaneOrchestrator : IDisposable
 
     // ---- Prompts ----
 
-    public static string SystemPrompt(string projectDirectory, string paneLabel, OrchestratorWorkflow? workflow)
+    /// <param name="rules">The worker's instruction files (<see cref="OrchestratorRules.Gather"/>); the fixed rules are always included.</param>
+    public static string SystemPrompt(string projectDirectory, string paneLabel, OrchestratorWorkflow? workflow, IReadOnlyList<RulesFile>? rules = null)
     {
         var core = $"""
             You are the ORCHESTRATOR attached to a running Claude Code session, the WORKER, in {projectDirectory} (AgentHub pane "{paneLabel}").
@@ -219,8 +222,11 @@ public sealed class PaneOrchestrator : IDisposable
               by reading .agenthub/handoff.md, and you carry over the job and the owner's standing instructions in your own words.
             - You can read the project folder (Read, Grep, Glob) to check claims; keep that brief.
 
+            {OrchestratorRules.HardRules}
             Your only output is the JSON: to_owner, to_worker, note (one line on where things stand).
             """;
+        var section = OrchestratorRules.Section(rules ?? []);
+        if (section.Length > 0) core += "\n\n" + section;
         if (workflow == null) return core;
         return core + $"""
 
