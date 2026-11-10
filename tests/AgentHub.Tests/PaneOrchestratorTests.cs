@@ -218,6 +218,55 @@ public class PaneOrchestratorTests
     }
 
     [Fact]
+    public async Task The_orchestrator_can_start_a_fresh_session_early_but_not_again_before_it_has_worked()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "agenthub-pane-new-session-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, ".agenthub"));
+        await File.WriteAllTextAsync(Path.Combine(dir, ".agenthub", "handoff.md"), "# Notes\nTask 1 done.");
+        try
+        {
+            var worker = new ScriptedWorker { SessionLaunch = new SessionLaunch("claude --x", dir, "Pane Test", "Pane Test") };
+            // Asked for a fresh session per task: after task 1 it asks for one, with a to_worker that must not reach the old session.
+            var brain = new ScriptedBrain
+            {
+                Answer = m => m.Contains("new_worker_session")
+                    ? new PaneDecision(null, "Read .agenthub/handoff.md, then do task 2.", "task 2", NewSession: "again, straight away")
+                    : m.Contains("[WORKER FINAL REPLY]")
+                    ? new PaneDecision("Task 1 done; fresh session for task 2 as you asked.", "start task 2", "task 1 done", NewSession: "owner wants a fresh session per task")
+                    : new PaneDecision(null, "do task 1", ""),
+            };
+            using var o = new PaneOrchestrator(worker, brain, "Orchestrator") { TurnSettle = TimeSpan.Zero, StopDelay = TimeSpan.Zero, StartupDelay = TimeSpan.Zero };
+            await o.SendAsync("Fresh session for each task, please. Start with task 1.");
+            Assert.Equal(["do task 1"], worker.Submitted);
+
+            worker.EndTurn("Task 1 done.");
+            await Until(() => o.IsHandingOff);
+            Assert.Equal(["do task 1", OrchestratorMessages.HandoffPrompt], worker.Submitted);
+            Assert.Contains(o.Conversation, x => x.Kind == ExchangeKind.Note && x.Text.Contains("early: owner wants a fresh session per task"));
+
+            worker.EndTurn("Handoff written.");
+            await Until(() => o.Session == 2 && worker.Submitted.Last().StartsWith("Read .agenthub/handoff.md"));
+            // The fresh session's briefing asked for yet another session: refused, its instruction delivered instead.
+            Assert.Contains(o.Conversation, x => x.Kind == ExchangeKind.Note && x.Text.Contains("session #2 has not finished any work yet"));
+            Assert.False(o.IsHandingOff);
+            Assert.Equal(1, worker.Stops);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task A_fresh_session_request_is_refused_when_the_launch_is_unknown()
+    {
+        var worker = new ScriptedWorker();
+        var brain = new ScriptedBrain { Answer = _ => new PaneDecision("Starting fresh.", "go", "", NewSession: "owner asked") };
+        using var o = new PaneOrchestrator(worker, brain, "Orchestrator") { TurnSettle = TimeSpan.Zero };
+        await o.SendAsync("start a fresh session");
+        Assert.False(o.IsHandingOff);
+        Assert.Equal(["go"], worker.Submitted);
+        Assert.Contains(o.Conversation, x => x.Kind == ExchangeKind.Note && x.Text.Contains("cannot start it again"));
+    }
+
+    [Fact]
     public async Task Lowering_the_handoff_limit_below_the_current_context_hands_off_at_once()
     {
         var worker = new ScriptedWorker { SessionLaunch = new SessionLaunch("claude --x", "C:\\x", "Pane Test", "Pane Test") };
@@ -312,13 +361,16 @@ public class PaneOrchestratorTests
     [Fact]
     public void Decision_parses_blank_strings_as_nothing()
     {
-        using var doc = JsonDocument.Parse("""{"to_owner":"  ","to_worker":" Run the tests. ","note":"n"}""");
+        using var doc = JsonDocument.Parse("""{"to_owner":"  ","to_worker":" Run the tests. ","note":"n","new_session":" "}""");
         var d = PaneDecision.Parse(doc.RootElement);
         Assert.Null(d.ToOwner);
         Assert.Equal("Run the tests.", d.ToWorker);
         Assert.Equal("n", d.Note);
+        Assert.Null(d.NewSession);
+        using var fresh = JsonDocument.Parse("""{"to_owner":null,"to_worker":null,"note":"n","new_session":" task done "}""");
+        Assert.Equal("task done", PaneDecision.Parse(fresh.RootElement).NewSession);
         using var schema = JsonDocument.Parse(PaneDecision.Schema);
-        Assert.Equal(["to_owner", "to_worker", "note"], schema.RootElement.GetProperty("required").EnumerateArray().Select(e => e.GetString()));
+        Assert.Equal(["to_owner", "to_worker", "note", "new_session"], schema.RootElement.GetProperty("required").EnumerateArray().Select(e => e.GetString()));
     }
 
     [Fact]

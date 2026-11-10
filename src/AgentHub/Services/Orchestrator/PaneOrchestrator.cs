@@ -5,8 +5,11 @@ using AgentHub.Services.Context;
 
 namespace AgentHub.Services.Orchestrator;
 
-/// <summary>The pane orchestrator's one output per message: a word for the owner, a message for the worker, or both.</summary>
-public sealed record PaneDecision(string? ToOwner, string? ToWorker, string Note)
+/// <summary>
+/// The pane orchestrator's one output per message: a word for the owner, a message for the worker, or both; rarely, a
+/// request to hand the worker off to a fresh session now (<paramref name="NewSession"/>, the reason), before its context fills.
+/// </summary>
+public sealed record PaneDecision(string? ToOwner, string? ToWorker, string Note, string? NewSession = null)
 {
     public const string Schema = """
         {
@@ -15,9 +18,10 @@ public sealed record PaneDecision(string? ToOwner, string? ToWorker, string Note
           "properties": {
             "to_owner": { "type": ["string", "null"], "description": "Your reply to the owner, shown in AgentHub. Null when there is nothing to tell them now." },
             "to_worker": { "type": ["string", "null"], "description": "The exact message to type into the worker session. Null to send it nothing now." },
-            "note": { "type": "string", "description": "One line on where things stand, shown under the box title." }
+            "note": { "type": "string", "description": "One line on where things stand, shown under the box title." },
+            "new_session": { "type": ["string", "null"], "description": "Almost always null. Only when the owner's instructions call for it: the reason to hand the worker off to a fresh session now." }
           },
-          "required": ["to_owner", "to_worker", "note"]
+          "required": ["to_owner", "to_worker", "note", "new_session"]
         }
         """;
 
@@ -25,9 +29,8 @@ public sealed record PaneDecision(string? ToOwner, string? ToWorker, string Note
     {
         if (root.ValueKind != JsonValueKind.Object) throw new FormatException("The reply must be a JSON object.");
         string? Str(string name) => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()?.Trim() : null;
-        var owner = Str("to_owner");
-        var worker = Str("to_worker");
-        return new PaneDecision(string.IsNullOrWhiteSpace(owner) ? null : owner, string.IsNullOrWhiteSpace(worker) ? null : worker, Str("note") ?? "");
+        string? NonBlank(string name) => Str(name) is { Length: > 0 } s ? s : null;
+        return new PaneDecision(NonBlank("to_owner"), NonBlank("to_worker"), Str("note") ?? "", NonBlank("new_session"));
     }
 }
 
@@ -58,7 +61,8 @@ public sealed class ClaudePaneBrain(ClaudeJsonSession session, long assumedWindo
 /// Its context is whatever the owner tells it (its standing instructions) plus, optionally, a workflow's instructions.
 /// When the session's context window fills to <see cref="ContextThreshold"/>, AgentHub has the session write
 /// <c>.agenthub/handoff.md</c>, ends it and starts a fresh one with the same command in the same pane, which the orchestrator
-/// briefs from the handoff. No usage checks, stages or run archive: a thin loop on purpose.
+/// briefs from the handoff. The orchestrator can start the same handoff early (<see cref="PaneDecision.NewSession"/>), which
+/// its prompt allows only when the owner asked for it. No usage checks, stages or run archive: a thin loop on purpose.
 /// </summary>
 public sealed class PaneOrchestrator : IDisposable
 {
@@ -86,6 +90,8 @@ public sealed class PaneOrchestrator : IDisposable
     private int _session = 1;
     private DateTimeOffset _sessionStartedAt = DateTimeOffset.MinValue;
     private double? _contextBaseline;
+    /// <summary>The worker has ended a turn in this session that the orchestrator read: it may then ask for a fresh session.</summary>
+    private bool _workedThisSession;
 
     /// <summary>What the orchestrator is for, in the owner's words: shown in the box title.</summary>
     public string Title { get; }
@@ -220,10 +226,16 @@ public sealed class PaneOrchestrator : IDisposable
             - Handoffs: when the worker's context window fills, AgentHub has it write .agenthub/handoff.md, ends that session and starts a
               fresh one with an empty memory in the same pane. You are then asked for the fresh session's first instruction: it must start
               by reading .agenthub/handoff.md, and you carry over the job and the owner's standing instructions in your own words.
+            - new_session: null, almost always. You may start that handoff early, before the context fills, only when the owner asked for
+              it: now, or in their standing instructions (for example "a fresh session for each task") and the moment they named has come.
+              Never on your own judgement, never twice in a row without new work in between. Put the reason in new_session, tell the
+              owner in to_owner, and leave to_worker null: AgentHub sends the handoff request itself and asks you for the fresh
+              session's first instruction afterwards. Fresh sessions lose the worker's working memory; that cost is why this is rare.
+              If you think a fresh session would help but the owner has not asked, suggest it to them in to_owner instead.
             - You can read the project folder (Read, Grep, Glob) to check claims; keep that brief.
 
             {OrchestratorRules.HardRules}
-            Your only output is the JSON: to_owner, to_worker, note (one line on where things stand).
+            Your only output is the JSON: to_owner, to_worker, note (one line on where things stand), new_session (null unless above).
             """;
         var section = OrchestratorRules.Section(rules ?? []);
         if (section.Length > 0) core += "\n\n" + section;
@@ -435,6 +447,7 @@ public sealed class PaneOrchestrator : IDisposable
             _session++;
             _sessionStartedAt = DateTimeOffset.Now;
             _contextBaseline = null;
+            _workedThisSession = false;
             _lastReplyHandled = null;
             _sentSinceLastTurn = false;
             _turnEndedWhileThinking = false;
@@ -455,6 +468,19 @@ public sealed class PaneOrchestrator : IDisposable
         await AskAsync($"new_worker_session: session #{_session} is a fresh session with an empty memory, started after a handoff. It has not been given anything yet. " +
             "Write its first instruction (to_worker): read .agenthub/handoff.md first, then carry on with the job and the owner's standing instructions.",
             fromOwner: null, workerReply: null, handoff: handoff);
+    }
+
+    /// <summary>
+    /// Why the orchestrator's own request for a fresh session cannot go ahead now; null when it can. A fresh session must have
+    /// reported on some work first, so a confused orchestrator cannot start session after session.
+    /// </summary>
+    private string? NewSessionRefusal()
+    {
+        if (_handoffRequested || _restarting) return "a handoff is already under way";
+        if (!_worker.IsRunning) return "the session is not running";
+        if (_worker.SessionLaunch is null) return "AgentHub does not know how this session was started, so it cannot start it again";
+        if (_session > 1 && !_workedThisSession) return $"session #{_session} has not finished any work yet";
+        return null;
     }
 
     private string? ReadHandoff()
@@ -479,6 +505,7 @@ public sealed class PaneOrchestrator : IDisposable
 
     private async Task AskAsync(string eventText, string? fromOwner, string? workerReply, string? handoff = null)
     {
+        string? newSessionReason = null;
         await _gate.WaitAsync();
         try
         {
@@ -514,12 +541,22 @@ public sealed class PaneOrchestrator : IDisposable
             _introduced = true;
             _decisions++;
             _orchestratorContext = _brain.ReadContext() ?? _orchestratorContext; // its transcript has this decision's usage
-            if (workerReply is not null) { _lastReplyHandled = workerReply; _sentSinceLastTurn = false; _turnEndedWhileThinking = false; }
+            if (workerReply is not null) { _lastReplyHandled = workerReply; _sentSinceLastTurn = false; _turnEndedWhileThinking = false; _workedThisSession = true; }
             if (d.Note.Length > 0) { Note = d.Note; Changed?.Invoke(); }
 
             if (d.ToOwner != null) AddExchange(ExchangeKind.Reply, d.ToOwner);
             var toWorker = d.ToWorker;
-            if (toWorker == null && handoff != null)
+            if (d.NewSession is { } why)
+            {
+                if (NewSessionRefusal() is { } refusal)
+                    AddExchange(ExchangeKind.Note, $"The orchestrator asked for a fresh session ({why}), but {refusal}.");
+                else
+                {
+                    newSessionReason = why;
+                    toWorker = null; // the old session only gets the handoff request; the fresh one gets the orchestrator's next instruction
+                }
+            }
+            if (toWorker == null && handoff != null && newSessionReason == null)
                 toWorker = "Read .agenthub/handoff.md and the code, then carry on with the job in it."; // a fresh session must be told something
             if (toWorker != null && _handoffRequested)
             {
@@ -546,6 +583,12 @@ public sealed class PaneOrchestrator : IDisposable
         }
         finally { _gate.Release(); }
 
+        if (newSessionReason != null)
+        {
+            _turnEndedWhileThinking = false; // a turn end from before the handoff request is not the handoff turn's end
+            await RequestHandoffAsync($"the orchestrator started a fresh session early: {newSessionReason}");
+            return;
+        }
         if (_turnEndedWhileThinking)
         {
             _turnEndedWhileThinking = false;
