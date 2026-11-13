@@ -255,6 +255,7 @@ public partial class MainWindow : Window
         pane.OrchestratorDetachRequested += DetachPaneOrchestrator;
         pane.OrchestratorMessageSent += (p, text) => { if (_paneOrchestrators.TryGetValue(p, out var o)) _ = o.SendAsync(text); };
         pane.OrchestratorThresholdChanged += SetPaneOrchestratorThreshold;
+        pane.OrchestratorRunRequested += p => { if (_paneRuns.TryGetValue(p, out var run)) _ = OpenAdvancedTemplatesAsync(run.Project, run.TemplateId); };
         // The session ended: the orchestrator goes with it, unless it ended the session itself for a handoff and is starting the next, or follows a run that is not finished.
         pane.SessionStateChanged += () => { if (!pane.IsRunning && _paneOrchestrators.TryGetValue(pane, out var o) && !o.KeepsEndedSession) DetachPaneOrchestrator(pane); };
         return pane;
@@ -284,11 +285,27 @@ public partial class MainWindow : Window
             item.Click += (_, _) => AttachPaneOrchestrator(pane, picked);
             menu.Items.Add(item);
         }
+        // The project's advanced templates: an orchestrator that follows one step by step. Only those that can be run.
+        var project = await ResolveProjectAsync(pane.ContextFolder);
+        if (!pane.IsRunning || _paneOrchestrators.ContainsKey(pane)) return; // things moved on while git was asked
+        var runnable = project is null ? [] : ListAdvancedTemplates(project).Where(f => f.Template is { } t && t.Validate().Count == 0).ToList();
         menu.Items.Add(new Separator());
+        foreach (var file in runnable)
+        {
+            var template = file.Template!;
+            var item = new MenuItem
+            {
+                Header = $"🗺 Follow: {template.Name} ({AdvancedTemplateTree.Summary(template)})",
+                ToolTip = "An orchestrator that follows this advanced template step by step, ticking each step off. Its tree opens beside the Cockpit; nothing happens until you press ▶ Go there." +
+                          (string.IsNullOrWhiteSpace(template.Description) ? "" : "\n\n" + template.Description),
+            };
+            item.Click += (_, _) => AttachPaneOrchestrator(pane, null, template, project);
+            menu.Items.Add(item);
+        }
         var advanced = new MenuItem
         {
             Header = "🗺 Advanced templates of this project…",
-            ToolTip = "The sequences of stages and steps kept in this project's orchestration folder, each shown as a tree. Viewing only so far: an orchestrator cannot follow one yet.",
+            ToolTip = "The sequences of stages and steps kept in this project's orchestration folder, each shown as a tree.",
         };
         advanced.Click += (_, _) => ShowAdvancedTemplates(pane.ContextFolder);
         menu.Items.Add(advanced);
@@ -297,26 +314,44 @@ public partial class MainWindow : Window
 
     private readonly Dictionary<string, AdvancedTemplatesWindow> _advancedTemplateWindows = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>The panes whose orchestrator follows an advanced template: the project and the template's id, to find its tree again.</summary>
+    private readonly Dictionary<TerminalPaneControl, (string Project, string TemplateId)> _paneRuns = [];
+
     /// <summary>
-    /// 🗺 Advanced templates: one window per project, reused; not modal, so it sits beside the Cockpit. The project is the
-    /// checkout <paramref name="folder"/> is in (its own worktree, since templates are files of the branch), or the folder
-    /// itself outside a repository.
+    /// The project a folder belongs to: the checkout it is in (its own worktree, since templates are files of the branch),
+    /// or the folder itself outside a repository. Null when there is no such folder.
     /// </summary>
-    private async void ShowAdvancedTemplates(string? folder)
+    private async Task<string?> ResolveProjectAsync(string? folder)
     {
-        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return null;
+        try
+        {
+            var top = await _runner.RunAsync("git", ["rev-parse", "--show-toplevel"], folder);
+            if (top.ExitCode == 0 && top.StdOut.Trim() is { Length: > 0 } path && Directory.Exists(path)) return Path.GetFullPath(path);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or OperationCanceledException) { /* no git: the folder itself */ }
+        return Path.GetFullPath(folder);
+    }
+
+    private static IReadOnlyList<AdvancedTemplateFile> ListAdvancedTemplates(string project)
+    {
+        try { return new AdvancedTemplateStore(project).List(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
+    }
+
+    private void ShowAdvancedTemplates(string? folder) => _ = OpenAdvancedTemplatesAsync(folder, null);
+
+    /// <summary>
+    /// 🗺 Advanced templates: one window per project, reused; not modal, so it sits beside the Cockpit. Every run of one of
+    /// the project's templates on a pane is shown live in it.
+    /// </summary>
+    private async Task OpenAdvancedTemplatesAsync(string? folder, string? selectId)
+    {
+        if (await ResolveProjectAsync(folder) is not { } project)
         {
             StatusText.Text = "Advanced templates: this pane has no folder.";
             return;
         }
-        var project = folder;
-        try
-        {
-            var top = await _runner.RunAsync("git", ["rev-parse", "--show-toplevel"], folder);
-            if (top.ExitCode == 0 && top.StdOut.Trim() is { Length: > 0 } path && Directory.Exists(path)) project = Path.GetFullPath(path);
-        }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or OperationCanceledException) { /* no git: the folder itself */ }
-
         if (!_advancedTemplateWindows.TryGetValue(project, out var window))
         {
             window = new AdvancedTemplatesWindow(project) { Owner = this };
@@ -324,21 +359,40 @@ public partial class MainWindow : Window
             _advancedTemplateWindows[project] = window;
             window.Show();
         }
+        foreach (var (pane, run) in _paneRuns)
+            if (string.Equals(run.Project, project, StringComparison.OrdinalIgnoreCase) && _paneOrchestrators.TryGetValue(pane, out var orchestrator))
+                window.BindRun(run.TemplateId, orchestrator, $"Terminal {pane.PaneIndex}");
+        if (selectId is not null) window.Select(selectId);
         if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
         window.Activate();
     }
 
-    private void AttachPaneOrchestrator(TerminalPaneControl pane, OrchestratorWorkflow? workflow)
+    /// <param name="advanced">An advanced template of <paramref name="project"/> for the orchestrator to follow; its tree opens with the run waiting for Go.</param>
+    private void AttachPaneOrchestrator(TerminalPaneControl pane, OrchestratorWorkflow? workflow, AdvancedTemplate? advanced = null, string? project = null)
     {
         if (!pane.IsRunning || _paneOrchestrators.ContainsKey(pane)) return;
-        var orchestrator = PaneOrchestrator.ForPane(new PaneBuildWorker(pane), _runner, PaneOrchestrator.DefaultCommand, "sonnet",
-            pane.ContextFolder, $"Terminal {pane.PaneIndex}", workflow, assumedWindowTokens: _settings.ClaudeContextWindowTokens);
+        PaneOrchestrator orchestrator;
+        try
+        {
+            orchestrator = PaneOrchestrator.ForPane(new PaneBuildWorker(pane), _runner, PaneOrchestrator.DefaultCommand, "sonnet",
+                pane.ContextFolder, $"Terminal {pane.PaneIndex}", workflow, assumedWindowTokens: _settings.ClaudeContextWindowTokens, advanced: advanced);
+        }
+        catch (InvalidOperationException ex) // the template stopped being sound between the menu and the click
+        {
+            StatusText.Text = "Orchestrate: " + ex.Message;
+            return;
+        }
         // No workflow limit: the limit last set in a box (settings), so a chosen value carries over to the next orchestrator.
         if (workflow?.ContextThreshold is null && _settings.PaneOrchestratorContextThreshold > 0)
             orchestrator.ContextThreshold = _settings.PaneOrchestratorContextThreshold;
         orchestrator.Changed += RefreshOrchestratorBoxes;
         _paneOrchestrators[pane] = orchestrator;
         RefreshOrchestratorBoxes();
+        if (advanced is not null && project is not null)
+        {
+            _paneRuns[pane] = (project, advanced.Id);
+            _ = OpenAdvancedTemplatesAsync(project, advanced.Id);
+        }
     }
 
     /// <summary>The handoff limit typed into a pane's box: applied to that orchestrator at once, and kept as the default for the next one.</summary>
@@ -354,6 +408,7 @@ public partial class MainWindow : Window
     private void DetachPaneOrchestrator(TerminalPaneControl pane)
     {
         if (!_paneOrchestrators.Remove(pane, out var orchestrator)) return;
+        if (_paneRuns.Remove(pane, out var run) && _advancedTemplateWindows.TryGetValue(run.Project, out var tree)) tree.UnbindRun(orchestrator);
         orchestrator.Changed -= RefreshOrchestratorBoxes;
         orchestrator.Dispose();
         RefreshOrchestratorBoxes();

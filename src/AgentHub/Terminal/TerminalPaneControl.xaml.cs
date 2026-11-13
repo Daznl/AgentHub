@@ -170,6 +170,10 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     public event Action<TerminalPaneControl, string>? OrchestratorMessageSent;
     /// <summary>The owner set the attached orchestrator's handoff limit (a fraction of the context window) in its box.</summary>
     public event Action<TerminalPaneControl, double>? OrchestratorThresholdChanged;
+    /// <summary>🗺 Run pressed in the box of an orchestrator that follows an advanced template: the owner wants its tree.</summary>
+    public event Action<TerminalPaneControl>? OrchestratorRunRequested;
+
+    private void OrchestratorRun_Click(object sender, RoutedEventArgs e) => OrchestratorRunRequested?.Invoke(this);
 
     public void ShowOrchestrator(OrchestratorBoxView? view)
     {
@@ -183,6 +187,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         }
         OrchestratorStateText.Text = view.State;
         OrchestratorTitle.Text = view.Title;
+        OrchestratorRunBtn.Visibility = view.HasRun ? Visibility.Visible : Visibility.Collapsed;
         OrchestratorProgress.Text = view.Note;
         OrchestratorProgress.ToolTip = string.IsNullOrEmpty(view.Note) ? null : view.Note;
         OrchestratorProgress.Visibility = string.IsNullOrEmpty(view.Note) ? Visibility.Collapsed : Visibility.Visible;

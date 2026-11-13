@@ -2,7 +2,19 @@
 
 An **orchestration template** (📚 Templates, `workflows/*.md`) gives an orchestrator instructions and leaves the sequence to it. An **advanced template** is the sequence itself: stages and steps the orchestrator follows one by one, ticking each off, pausing when something needs the owner.
 
-Status (2026-11-13): the file format, its checks and the project store are built (`AdvancedTemplate`, `AdvancedTemplateStore`), and a window shows a project's templates as trees, read-only (`AdvancedTemplatesWindow`, `AdvancedTemplateTree`). The run engine, paused runs, editing and the helper crab are not; see "Build order" below.
+Status (2026-11-13): the file format, its checks and the project store are built (`AdvancedTemplate`, `AdvancedTemplateStore`), a window shows a project's templates as trees (`AdvancedTemplatesWindow`, `AdvancedTemplateTree`), and an orchestrator on a pane can follow one step by step, started, paused and sent on from that window (`TemplateRun`, `PaneOrchestrator.Run.cs`). A run is lost when its orchestrator is detached or AgentHub closes: keeping runs, editing and the helper crab are not built; see "Build order" below. Tested with a scripted orchestrator only, not yet with a real Claude session end to end.
+
+## Following one
+
+1. Start a session in a pane, in the project.
+2. **🧭 Orchestrate → 🗺 Follow: <template>**. Only templates without problems are offered. An orchestrator is put on the session and the template's window opens with a purple run bar: **RUN READY**. Nothing is sent yet; tell the orchestrator anything it should know in its box on the pane.
+3. **▶ Go** in the run bar. The current step is outlined and marked **● NOW**; steps turn green and **✓ DONE** as the orchestrator calls them done; the window follows the run down the tree.
+4. **⏸ Pause** stops the run at its step (**⏸ PAUSED HERE**); **▶ Go** carries it on.
+5. **▶ from here** on a step (shown under the pointer, or with the keyboard on it) sends the run on from that step after a confirmation: steps before it that are not done become **SKIPPED**.
+6. When the run needs you (an ask-owner step, or an escalation) the bar says **RUN WAITING FOR YOU** with the question, the step says **🙋 WAITING FOR YOU**, and the pane pulses as for any orchestrator message. Answer in the orchestrator's box on the pane.
+7. **🗺 Run** in the orchestrator's box brings the window back. **✕ Detach** ends the run.
+
+The run follows the template as it was when the orchestrator was attached; the window says so when the file has changed since.
 
 ## Seeing them
 
@@ -94,7 +106,7 @@ Two stages that do not depend on each other may run side by side on separate wor
 
 ## How a run works
 
-Built 2026-11-13 as the engine only (`TemplateRun`, `PaneOrchestrator.Run.cs`, `TemplateRunTests`): nothing in the app starts a run yet; the buttons and the live tree come next.
+Built 2026-11-13 (`TemplateRun`, `PaneOrchestrator.Run.cs`; tests `TemplateRunTests`, `tests/ui/advanced-template-run.ps1`).
 
 A run is a pane orchestrator (🧭) given an advanced template. It is attached to a running session, like any orchestrator, and waits for **Go**; until then it is an orchestrator like any other, so the owner can tell it the job first.
 
@@ -127,7 +139,7 @@ The orchestrator's fixed rules still hold in a run. A step of the template is th
 
 1. [x] File format, checks, project store (`AdvancedTemplate.cs`, `AdvancedTemplateTests.cs`)
 2. [x] Window: the tree, read-only, opened from 🧭 Orchestrate (`AdvancedTemplatesWindow`, `AdvancedTemplateTree`, `tests/ui/advanced-templates.ps1`)
-3. [ ] Run engine on `PaneOrchestrator`: step by step, live ticks, pause on escalation, Go / Pause / start from a step
+3. [x] Run engine on `PaneOrchestrator`: step by step, live ticks, pause on escalation, Go / Pause / go on from a step. Remaining: a live run with a real Claude session
 4. [ ] Runs kept on disk, a Paused runs panel, resume after AgentHub restarts
 5. [ ] Editing by hand through drafts, also while a run is paused
 6. [ ] The helper crab: builds a template from a plan, changes one from a request
