@@ -217,6 +217,66 @@ public sealed class TemplateRun
         return run;
     }
 
+    // ---- A changed template ----
+
+    /// <summary>
+    /// The steps the run has reached, in order: those done or skipped and the one it is at (every step once finished, none
+    /// before the first Go). A changed template must keep them as they are, at the head of its order.
+    /// </summary>
+    public IReadOnlyList<string> StartedStepIds
+    {
+        get
+        {
+            lock (_lock)
+            {
+                var count = _state == RunState.Finished ? Steps.Count : _index < 0 ? 0 : _index + 1;
+                return Steps.Take(count).Select(s => s.Step.Id).ToList();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Why <paramref name="changed"/> cannot replace this run's template; empty when it can. It must be sound, and keep every
+    /// step the run has started (<see cref="StartedStepIds"/>) unchanged and in its place: only steps not yet started can be
+    /// added, removed, changed or moved, and none of them before the step the run is at.
+    /// </summary>
+    public IReadOnlyList<string> ProblemsWith(AdvancedTemplate changed)
+    {
+        var problems = changed.Validate().ToList();
+        if (problems.Count > 0) return problems;
+        var order = changed.ExecutionOrder().SelectMany(s => s.Steps).ToList();
+        var byId = order.ToDictionary(s => s.Id, StringComparer.Ordinal);
+        var started = StartedStepIds;
+        for (var i = 0; i < started.Count; i++)
+        {
+            var was = Steps[i].Step;
+            if (!byId.TryGetValue(was.Id, out var now)) problems.Add($"\"{was.DisplayTitle}\" was removed, but the run has already reached it.");
+            else if (!now.SameAs(was)) problems.Add($"\"{was.DisplayTitle}\" was changed, but the run has already reached it.");
+        }
+        if (problems.Count > 0) return problems;
+        for (var i = 0; i < started.Count; i++)
+        {
+            if (order[i].Id == started[i]) continue;
+            problems.Add($"\"{order[i].DisplayTitle}\" now comes before \"{Steps[i].Step.DisplayTitle}\", which the run has already reached. " +
+                         "Steps the run has reached stay in their place, and new steps go after the one it is at.");
+            break;
+        }
+        return problems;
+    }
+
+    /// <summary>
+    /// This run carried over to <paramref name="changed"/>: every step it reached keeps its state, steps the change added are
+    /// to do. A run that was paused stays paused as it was; a finished run the change gave new steps is paused at the first.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The run is running, or <see cref="ProblemsWith"/> has something to say.</exception>
+    public TemplateRun Rebase(AdvancedTemplate changed)
+    {
+        if (State == RunState.Running) throw new InvalidOperationException("Pause the run first: its template can only be changed while it stands still.");
+        var problems = ProblemsWith(changed);
+        if (problems.Count > 0) throw new InvalidOperationException(string.Join(" ", problems));
+        return Restore(changed, Snapshot(), "The template was changed and has new steps. Press Go to carry on.");
+    }
+
     /// <summary>"step 3 of 15 · Stage 1 · Build stage 1", or where the run stands when it is at no step.</summary>
     public string Progress
     {

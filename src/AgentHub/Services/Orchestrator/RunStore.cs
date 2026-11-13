@@ -59,6 +59,9 @@ public sealed class RunRecord
     {
         if (orchestrator.Run is not { } run) return;
         var s = run.Snapshot();
+        // The template the run follows now: the owner may have applied a changed one to it.
+        TemplateName = run.Template.Name;
+        Template = run.Template.Serialize();
         State = s.State;
         Cause = s.Cause;
         Reason = s.Reason;
@@ -78,7 +81,7 @@ public sealed class RunRecord
     }
 
     /// <summary>What changes when the run moves: a record is written again only when this does.</summary>
-    public string Signature() => $"{State}|{Cause}|{Reason}|{CurrentStepId}|{DoneCount}|{string.Join(",", Steps.Select(s => (int)s.Value))}|{BrainSessionId}|{WorkerCommand}|{WorkerFolder}";
+    public string Signature() => $"{State}|{Cause}|{Reason}|{CurrentStepId}|{DoneCount}|{string.Join(",", Steps.Select(s => $"{s.Key}={(int)s.Value}"))}|{BrainSessionId}|{WorkerCommand}|{WorkerFolder}|{Template}";
 }
 
 /// <summary>
