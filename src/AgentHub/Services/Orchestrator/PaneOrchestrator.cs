@@ -19,7 +19,7 @@ public sealed record PaneDecision(string? ToOwner, string? ToWorker, string Note
             "to_owner": { "type": ["string", "null"], "description": "Your reply to the owner, shown in AgentHub. Null when there is nothing to tell them now." },
             "to_worker": { "type": ["string", "null"], "description": "The exact message to type into the worker session. Null to send it nothing now." },
             "note": { "type": "string", "description": "One line on where things stand, shown under the box title." },
-            "new_session": { "type": ["string", "null"], "description": "Almost always null. Only when the owner's instructions call for it: the reason to hand the worker off to a fresh session now." }
+            "new_session": { "type": ["string", "null"], "description": "Null unless a fresh session is due under your rules (the owner asked, or new work on a context over the fresh-session mark): the reason to hand the worker off to a fresh session now." }
           },
           "required": ["to_owner", "to_worker", "note", "new_session"]
         }
@@ -62,7 +62,9 @@ public sealed class ClaudePaneBrain(ClaudeJsonSession session, long assumedWindo
 /// When the session's context window fills to <see cref="ContextThreshold"/>, AgentHub has the session write
 /// <c>.agenthub/handoff.md</c>, ends it and starts a fresh one with the same command in the same pane, which the orchestrator
 /// briefs from the handoff. The orchestrator can start the same handoff early (<see cref="PaneDecision.NewSession"/>), which
-/// its prompt allows only when the owner asked for it. No usage checks, stages or run archive: a thin loop on purpose.
+/// its prompt calls for when the owner asked for it, or on its own when new work comes to a session whose context is over
+/// <see cref="FreshSessionMark"/> (owner 2026-11-13: a review pass went into a session already at 187k tokens and hit the hard
+/// limit mid-deploy; "it should typically choose to handoff and create a new session"). No usage checks, stages or run archive: a thin loop on purpose.
 /// </summary>
 public sealed class PaneOrchestrator : IDisposable
 {
@@ -90,6 +92,8 @@ public sealed class PaneOrchestrator : IDisposable
     private int _session = 1;
     private DateTimeOffset _sessionStartedAt = DateTimeOffset.MinValue;
     private double? _contextBaseline;
+    /// <summary>The orchestrator's to_worker that came with its own new_session: held from the old session, handed back for the fresh one.</summary>
+    private string? _carriedInstruction;
     /// <summary>The worker has ended a turn in this session that the orchestrator read: it may then ask for a fresh session.</summary>
     private bool _workedThisSession;
 
@@ -147,6 +151,24 @@ public sealed class PaneOrchestrator : IDisposable
     private bool _constructed;
     public const double MinContextThreshold = 0.40;
     public const double MaxContextThreshold = 0.95;
+
+    /// <summary>Context size (tokens) from which new work goes to a fresh session: this, or half the handoff limit if lower.</summary>
+    public const long FreshSessionTokens = 150_000;
+
+    /// <summary>The fresh-session mark for a reading: <see cref="FreshSessionTokens"/>, or half the handoff limit on a small window.</summary>
+    public long FreshSessionMark(ContextReading c) => Math.Min(FreshSessionTokens, (long)(c.WindowTokens * ContextThreshold / 2));
+
+    /// <summary>The current session's latest context reading, when it is over the fresh-session mark.</summary>
+    private ContextReading? OverFreshSessionMark() =>
+        _worker.LatestContextReading is { } c && c.RecordedAt >= _sessionStartedAt && c.UsedTokens >= FreshSessionMark(c) ? c : null;
+
+    /// <summary>Added to an event when new work would now go to a fresh session, so the rule does not rest on reading [STATUS].</summary>
+    private string FreshSessionHint()
+    {
+        if (OverFreshSessionMark() is not { } c || NewSessionRefusal() != null) return "";
+        return $" The worker's context holds {c.UsedTokens:N0} tokens, over the {FreshSessionMark(c):N0}-token fresh-session mark: " +
+            "if what comes next is new work rather than the task in progress, set new_session and put that work in to_worker.";
+    }
 
     /// <summary>The worker's latest context reading, for the box (null until the first one).</summary>
     public ContextReading? LatestContext => _worker.LatestContextReading;
@@ -226,12 +248,19 @@ public sealed class PaneOrchestrator : IDisposable
             - Handoffs: when the worker's context window fills, AgentHub has it write .agenthub/handoff.md, ends that session and starts a
               fresh one with an empty memory in the same pane. You are then asked for the fresh session's first instruction: it must start
               by reading .agenthub/handoff.md, and you carry over the job and the owner's standing instructions in your own words.
-            - new_session: null, almost always. You may start that handoff early, before the context fills, only when the owner asked for
-              it: now, or in their standing instructions (for example "a fresh session for each task") and the moment they named has come.
-              Never on your own judgement, never twice in a row without new work in between. Put the reason in new_session, tell the
-              owner in to_owner, and leave to_worker null: AgentHub sends the handoff request itself and asks you for the fresh
-              session's first instruction afterwards. Fresh sessions lose the worker's working memory; that cost is why this is rare.
-              If you think a fresh session would help but the owner has not asked, suggest it to them in to_owner instead.
+            - new_session: the reason to start that handoff early, before the context fills; null otherwise. Set it:
+              (a) when the owner asks for it, now or in their standing instructions (for example "a fresh session for each task") and
+                  the moment they named has come; or
+              (b) on your own, when the next thing to do (the owner's new message, or the next item of their standing instructions) is
+                  new work, the worker's current task is finished, and [STATUS] shows the worker's context at or over the fresh-session
+                  mark. New work means anything beyond the task in progress: a new feature, a new stage, a review or test pass over
+                  finished work. A full context makes the worker slower, costlier and more error-prone, and new work would hit the hard
+                  limit midway. Keep the session only when the message continues the very task in progress (an answer to its question,
+                  a correction, a fix to what it just did), when the worker is mid-task, or when the owner said to stay in this session.
+              Never twice in a row without new work in between. With new_session set, tell the owner why in to_owner and put the new
+              task in to_worker as usual: the old session is only asked to write .agenthub/handoff.md, and AgentHub gives your
+              instruction back to you when the fresh session starts, for its first instruction. Under the mark, keep the session; if a
+              fresh one would still help, suggest it in to_owner.
             - You can read the project folder (Read, Grep, Glob) to check claims; keep that brief.
 
             {OrchestratorRules.HardRules}
@@ -280,7 +309,7 @@ public sealed class PaneOrchestrator : IDisposable
             ? "owner_message: the owner wrote to you. The worker is handing off (writing its notes before a fresh session starts): hold any instruction for the fresh session; answer the owner."
             : busy
             ? "owner_message: the owner wrote to you. The worker is mid-turn: a to_worker is typed in now and the worker reads it at its next step."
-            : "owner_message: the owner wrote to you. The worker is idle at its prompt.";
+            : "owner_message: the owner wrote to you. The worker is idle at its prompt." + FreshSessionHint();
         await AskAsync(eventText, fromOwner: text, workerReply: null);
     }
 
@@ -307,7 +336,7 @@ public sealed class PaneOrchestrator : IDisposable
         // The reply the orchestrator already read: the terminal went quiet (a long tool run, a dialog) before the worker's next
         // reply exists. Not a new turn end (live run 2026-11-07: "a duplicate step 2 report arrived").
         if (reply != null && reply == _lastReplyHandled) return;
-        await AskAsync("worker_turn_ended: the worker finished a turn and is waiting at its prompt.", fromOwner: null, workerReply: reply ?? "");
+        await AskAsync("worker_turn_ended: the worker finished a turn and is waiting at its prompt." + FreshSessionHint(), fromOwner: null, workerReply: reply ?? "");
     }
 
     private async Task<bool> SettleAsync()
@@ -465,8 +494,13 @@ public sealed class PaneOrchestrator : IDisposable
         Changed?.Invoke();
 
         var handoff = ReadHandoff();
+        var carried = _carriedInstruction;
+        _carriedInstruction = null;
+        var carry = carried == null ? ""
+            : " You started it for new work; the instruction you wrote for that work, not sent to the old session, was:\n\"\"\"\n" + carried +
+              "\n\"\"\"\nGive that work to this session now, adapted as needed.";
         await AskAsync($"new_worker_session: session #{_session} is a fresh session with an empty memory, started after a handoff. It has not been given anything yet. " +
-            "Write its first instruction (to_worker): read .agenthub/handoff.md first, then carry on with the job and the owner's standing instructions.",
+            "Write its first instruction (to_worker): read .agenthub/handoff.md first, then carry on with the job and the owner's standing instructions." + carry,
             fromOwner: null, workerReply: null, handoff: handoff);
     }
 
@@ -553,7 +587,8 @@ public sealed class PaneOrchestrator : IDisposable
                 else
                 {
                     newSessionReason = why;
-                    toWorker = null; // the old session only gets the handoff request; the fresh one gets the orchestrator's next instruction
+                    _carriedInstruction = toWorker; // the old session only gets the handoff request; this goes back to the orchestrator for the fresh one
+                    toWorker = null;
                 }
             }
             if (toWorker == null && handoff != null && newSessionReason == null)
@@ -587,6 +622,17 @@ public sealed class PaneOrchestrator : IDisposable
         {
             _turnEndedWhileThinking = false; // a turn end from before the handoff request is not the handoff turn's end
             await RequestHandoffAsync($"the orchestrator started a fresh session early: {newSessionReason}");
+            if (!_handoffRequested && !_restarting && _carriedInstruction is { } stranded)
+            {
+                // The handoff could not be asked for (a security check, the session gone): the new work must not vanish with it.
+                _carriedInstruction = null;
+                if (_worker.IsRunning && _worker.IsAtSecurityCheck)
+                {
+                    _held = stranded;
+                    AddExchange(ExchangeKind.Note, "No fresh session: the session is showing a security check. Answer it and the orchestrator's instruction goes to this session.");
+                }
+                else AddExchange(ExchangeKind.Note, "No fresh session could start, so the orchestrator's instruction was not sent: " + OrchestratorMessages.Cut(stranded, 200, keepTail: false));
+            }
             return;
         }
         if (_turnEndedWhileThinking)
@@ -599,7 +645,9 @@ public sealed class PaneOrchestrator : IDisposable
     private string Status()
     {
         var parts = new List<string> { $"session {_session}", $"decision {_decisions + 1}", _worker.IsRunning ? (_worker.IsAwaitingInput ? "worker idle" : "worker busy") : "worker not running" };
-        if (_worker.LatestContextReading is { } c) parts.Add($"worker context {c.UsedFraction:P0} of {c.WindowTokens / 1000:N0}k, handoff at {ContextThreshold:P0}");
+        if (_worker.LatestContextReading is { } c)
+            parts.Add($"worker context {c.UsedTokens / 1000:N0}k tokens ({c.UsedFraction:P0} of {c.WindowTokens / 1000:N0}k), handoff at {ContextThreshold:P0}, " +
+                $"fresh session for new work from {FreshSessionMark(c) / 1000:N0}k");
         return string.Join(" · ", parts);
     }
 
