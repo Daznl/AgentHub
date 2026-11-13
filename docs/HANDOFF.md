@@ -1,6 +1,6 @@
 # Handoff: advanced templates
 
-Written 2026-11-13 at the end of the session that built stage 5 (editing), for the next session, on this computer or another (a fresh clone). Stages 1 to 4 are on `main`; stage 5 is on `feature/advanced-template-editing` (pull request below) until it is merged.
+Written 2026-11-13 at the end of the session that built stage 5 (editing), for the next session, on this computer or another (a fresh clone). Stages 1 to 5 are on `main` (stage 5 merged as `13be3ea`); no work is left on a branch.
 
 Read first: `AGENTS.md`, then `docs/ADVANCED_TEMPLATES.md` (what the feature is, how it is used, the file format, how a run works, editing, the build order). This file only adds what that one does not say: where things stand, what was decided, what to do next and what to watch for.
 
@@ -18,15 +18,15 @@ Called **advanced templates**. The earlier, looser orchestration templates (📚
 | 2 | Window that draws a project's templates as trees (`AdvancedTemplatesWindow`, `AdvancedTemplateTree`) | merged, 11 |
 | 3 | Run engine (`TemplateRun`, `PaneOrchestrator.Run.cs`) and its controls: Follow, Go, Pause, from here, live tree | merged, 12 and 13 |
 | 4 | Runs kept on disk and resumed (`RunStore`, `RunRecorder`, `RunsWindow`) | merged, 14 |
-| 5 | Editing through drafts (`TemplateEditing`, `AdvancedTemplatesWindow.Editing.cs`); a saved change applied to a run that stands still (`TemplateRun.ProblemsWith` / `Rebase`, `PaneOrchestrator.ApplyTemplate`) | **built, branch `feature/advanced-template-editing`** |
+| 5 | Editing through drafts (`TemplateEditing`, `AdvancedTemplatesWindow.Editing.cs`); a saved change applied to a run that stands still (`TemplateRun.ProblemsWith` / `Rebase`, `PaneOrchestrator.ApplyTemplate`) | merged, 16 |
 | 6 | Helper crab: builds a template from a plan, changes one from a request | **next** |
 | 7 | Parallel stages across panes | not started |
 
-Tests on the branch: 341 unit tests pass, 4 live ones skipped. One live test fails on this computer, `LiveUsageServiceTests.Live_AntigravityUsage_ReturnsAvailableSnapshots` (the Antigravity CLI timed out); it has nothing to do with this work. Four interface tests pass: `tests/ui/advanced-templates.ps1`, `advanced-template-run.ps1`, `saved-runs.ps1` and the new `template-editing.ps1`.
+Tests on `main`: 341 unit tests pass, 4 live ones skipped. One live test fails on this computer, `LiveUsageServiceTests.Live_AntigravityUsage_ReturnsAvailableSnapshots` (the Antigravity CLI timed out); it has nothing to do with this work. Four interface tests pass: `tests/ui/advanced-templates.ps1`, `advanced-template-run.ps1`, `saved-runs.ps1` and the new `template-editing.ps1`.
 
 **Still not done: a run with a real Claude session, end to end.** Every run so far used a scripted orchestrator. The prompt the real orchestrator gets (`RunPrompt` in `PaneOrchestrator.Run.cs`, the `[RUN]` section from `TemplateRun.Describe`, and now the changed-template notice from `DescribeRun`) has never been read by a model. Expect to tune it. This is the biggest unknown; do it before or alongside stage 6.
 
-**The taskbar install** was updated this session to `f847e17` (stage 4). It does not have stage 5. Once the branch is merged, update it with `scripts\Deploy-Taskbar.ps1` (see `AGENTS.md`), after asking, since it closes the running app.
+**The taskbar install** is on `f847e17` (stage 4): it does not have stage 5. The owner was asked whether AgentHub may be closed to install it and has not answered yet. Update it only with `scripts\Deploy-Taskbar.ps1 -CloseRunning` (see `AGENTS.md`), after asking, and confirm with `-Check`.
 
 ## Decisions the owner made
 
@@ -83,6 +83,6 @@ Open question for the owner: should the helper also be able to change a template
 ## First steps for the next session
 
 1. `git pull` (or clone), then `dotnet build AgentHub.sln` and `dotnet test tests\AgentHub.Tests`.
-2. If stage 5's pull request is not merged yet, check its state first.
+2. Ask whether to put the latest `main` on the taskbar (`scripts\Deploy-Taskbar.ps1`); it closes the running app.
 3. Confirm the stage 5 defaults above with the owner, ask whether to do the live run with a real Claude session first, and ask the stage 6 question.
 4. Rewrite this file at the end of the session.
