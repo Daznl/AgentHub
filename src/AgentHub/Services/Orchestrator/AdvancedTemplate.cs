@@ -111,6 +111,40 @@ public sealed partial class AdvancedTemplate
 
     [JsonIgnore] public IEnumerable<TemplateStep> AllSteps => Stages.SelectMany(s => s.Steps);
 
+    /// <summary>
+    /// The pattern the owner described (2026-11-13) as a starting point to edit: per stage of a written plan, a branch, a
+    /// fresh session that reads the context and builds the stage, a watch with an escalation point, a handoff, a commit
+    /// and the session closed; a pull request after the last stage.
+    /// </summary>
+    public static AdvancedTemplate StagedBuildExample(int stages = 2, string plan = "docs/PLAN.md")
+    {
+        var template = new AdvancedTemplate
+        {
+            Name = "Staged build",
+            Description = $"Builds {plan} one stage at a time: a branch and a fresh session per stage, a handoff and a commit at the end of each.",
+        };
+        for (var n = 1; n <= stages; n++)
+        {
+            var p = $"s{n}-";
+            var stage = new TemplateStage { Id = $"stage-{n}", Title = $"Stage {n}" };
+            if (n > 1) stage.Steps.Add(new() { Id = p + "session", Kind = StepKind.NewSession });
+            stage.Steps.AddRange(
+            [
+                new() { Id = p + "branch", Kind = StepKind.CreateBranch, Branch = $"feature/stage-{n}" },
+                new() { Id = p + "read", Kind = StepKind.Instruct, Title = "Read the context", Text = $"Read {plan} and .agenthub/handoff.md, and the code stage {n} touches. Don't change anything yet." },
+                new() { Id = p + "build", Kind = StepKind.Instruct, Title = $"Build stage {n}", Text = $"Build stage {n} of {plan}, with tests. Don't start stage {n + 1}." },
+                new() { Id = p + "watch", Kind = StepKind.WaitForWorker, Escalate = true },
+                new() { Id = p + "handoff", Kind = StepKind.Handoff },
+                new() { Id = p + "commit", Kind = StepKind.Commit },
+            ]);
+            stage.Steps.Add(n < stages
+                ? new() { Id = p + "close", Kind = StepKind.CloseSession }
+                : new() { Id = p + "pr", Kind = StepKind.OpenPullRequest, Target = "main" });
+            template.Stages.Add(stage);
+        }
+        return template;
+    }
+
     // ---- File format ----
 
     private static readonly JsonSerializerOptions Json = new()
