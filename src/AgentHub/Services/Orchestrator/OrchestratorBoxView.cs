@@ -59,6 +59,9 @@ public sealed record OrchestratorBoxView(string Title, string State, string Note
     /// <summary>The orchestrator's own context window use after its last decision; null until it has decided once.</summary>
     public ContextReading? OrchestratorContext { get; init; }
 
+    /// <summary>The orchestrator follows an advanced template: the box offers its tree (🗺 Run).</summary>
+    public bool HasRun { get; init; }
+
     /// <summary>The box for an attached pane orchestrator.</summary>
     public static OrchestratorBoxView For(PaneOrchestrator o)
     {
@@ -71,12 +74,13 @@ public sealed record OrchestratorBoxView(string Title, string State, string Note
         {
             HandoffThreshold = o.ContextThreshold,
             ContextUsed = used,
-            OrchestratorContext = o.OrchestratorContext
+            OrchestratorContext = o.OrchestratorContext,
+            HasRun = o.Run is not null
         };
     }
 
     /// <summary>Where a run stands, as the box's state word.</summary>
-    private static string RunWord(TemplateRun run) => run.State switch
+    public static string RunWord(TemplateRun run) => run.State switch
     {
         RunState.Ready => "RUN READY",
         RunState.Running => "RUNNING",

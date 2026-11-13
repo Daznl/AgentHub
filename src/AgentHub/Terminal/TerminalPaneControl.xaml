@@ -109,6 +109,9 @@
                              AutomationProperties.Name="Handoff limit, per cent of the context window" />
                     <TextBlock Text="%" Foreground="#C4B5FD" FontSize="10" VerticalAlignment="Center" Margin="2,0,0,0" />
                 </StackPanel>
+                <Button x:Name="OrchestratorRunBtn" Click="OrchestratorRun_Click" Content="🗺 Run" Visibility="Collapsed"
+                        ToolTip="Open the tree of the advanced template this orchestrator follows: where the run stands, ▶ Go, ⏸ Pause, and going on from any step"
+                        Background="#221A3D" Foreground="#C4B5FD" Padding="8,2" FontSize="11" FontWeight="SemiBold" Margin="0,0,6,0" />
                 <Button x:Name="OrchestratorDetachBtn" Click="OrchestratorDetach_Click" Content="✕ Detach"
                         ToolTip="Take the orchestrator off this session: the session carries on as your own, and your typing goes straight to it again"
                         Background="#221A3D" Foreground="#C4B5FD" Padding="8,2" FontSize="11" FontWeight="SemiBold" />
