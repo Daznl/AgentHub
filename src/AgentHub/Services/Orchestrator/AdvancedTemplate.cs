@@ -48,6 +48,14 @@ public sealed class TemplateStep
     /// <summary>An escalation point: anything here the orchestrator cannot answer from the owner's instructions pauses the run and messages the owner.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool Escalate { get; set; }
 
+    /// <summary>The same step, field for field (surrounding spaces aside): what a run that has started it can keep.</summary>
+    public bool SameAs(TemplateStep other)
+    {
+        static string N(string? s) => s?.Trim() ?? "";
+        return Id == other.Id && Kind == other.Kind && N(Title) == N(other.Title) && N(Text) == N(other.Text) &&
+               N(Branch) == N(other.Branch) && N(Target) == N(other.Target) && Escalate == other.Escalate;
+    }
+
     [JsonIgnore]
     public string DisplayTitle
     {
@@ -180,6 +188,9 @@ public sealed partial class AdvancedTemplate
 
     /// <summary>The file's text: the same template always gives the same text (line feeds, fixed order), so git shows real changes only.</summary>
     public string Serialize() => JsonSerializer.Serialize(this, Json).ReplaceLineEndings("\n") + "\n";
+
+    /// <summary>A copy that shares nothing with this one: what a draft starts from.</summary>
+    public AdvancedTemplate Clone() => Parse(Serialize(), Id);
 
     // ---- Checks ----
 

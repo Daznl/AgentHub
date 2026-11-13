@@ -2,7 +2,7 @@
 
 An **orchestration template** (📚 Templates, `workflows/*.md`) gives an orchestrator instructions and leaves the sequence to it. An **advanced template** is the sequence itself: stages and steps the orchestrator follows one by one, ticking each off, pausing when something needs the owner.
 
-Status (2026-11-13): the file format, its checks and the project store are built (`AdvancedTemplate`, `AdvancedTemplateStore`), a window shows a project's templates as trees (`AdvancedTemplatesWindow`, `AdvancedTemplateTree`), and an orchestrator on a pane can follow one step by step, started, paused and sent on from that window (`TemplateRun`, `PaneOrchestrator.Run.cs`). Every run is kept on disk and can be picked up again after a detach or a restart, from **⏯ Runs** (`RunStore`, `RunRecorder`, `RunsWindow`). Editing and the helper crab are not built; see "Build order" below. Tested with a scripted orchestrator only, not yet with a real Claude session end to end.
+Status (2026-11-13): the file format, its checks and the project store are built (`AdvancedTemplate`, `AdvancedTemplateStore`), a window shows a project's templates as trees (`AdvancedTemplatesWindow`, `AdvancedTemplateTree`), and an orchestrator on a pane can follow one step by step, started, paused and sent on from that window (`TemplateRun`, `PaneOrchestrator.Run.cs`). Every run is kept on disk and can be picked up again after a detach or a restart, from **⏯ Runs** (`RunStore`, `RunRecorder`, `RunsWindow`). Templates are edited in the window through drafts, and a saved change can be given to a run that stands still (`TemplateEditing`, `TemplateRun.Rebase`). The helper crab is not built; see "Build order" below. Tested with a scripted orchestrator only, not yet with a real Claude session end to end.
 
 ## Following one
 
@@ -14,7 +14,7 @@ Status (2026-11-13): the file format, its checks and the project store are built
 6. When the run needs you (an ask-owner step, or an escalation) the bar says **RUN WAITING FOR YOU** with the question, the step says **🙋 WAITING FOR YOU**, and the pane pulses as for any orchestrator message. Answer in the orchestrator's box on the pane.
 7. **🗺 Run** in the orchestrator's box brings the window back. **✕ Detach** takes the orchestrator off; the run stays, paused, in **⏯ Runs**.
 
-The run follows the template as it was when the orchestrator was attached; the window says so when the file has changed since.
+The run follows the template as it was when the orchestrator was attached; the window says so when the file has changed since, and offers **⤵ Apply to this run** (see "Editing" below).
 
 ## Paused runs: ⏯ Runs
 
@@ -40,6 +40,24 @@ On resume the orchestrator is shown the worker's latest reply and judges whether
 
 The list on the left holds every file in `orchestration/`; a file that cannot be read, or has problems, is listed in amber and says what is wrong. The tree on the right runs from Start to Done: each stage a purple node with its steps beneath it, in the order a single worker follows. A step shows its kind on the right and **⚑ pauses for you** when it is an escalation point. A project without templates offers **➕ Add the staged build example**, which writes `orchestration/staged-build.json` (`AdvancedTemplate.StagedBuildExample`) to look at and change. The files are re-read on **↻ Refresh** and whenever the window is come back to.
 
+## Editing
+
+**✏ Edit** above the tree (**✏ Open the draft** when one is waiting) turns the tree into an editor of the template's draft:
+
+- Each stage's title can be typed over; **➕ Step** adds a step at its end; **↑ ↓** move it among the stages; **✕** removes it with its steps, after a confirmation. **➕ Add a stage** sits before Done.
+- Each step has **↑ ↓** (over the edge of its stage into the next), **✏** and **✕**. **✏**, or a click on the step, opens its fields: kind, title, the text (the instruction, the question, or extra detail, by kind), branch and target where the kind uses them, and the escalation point. **➕ Step below** adds one under it. Esc closes the fields.
+- The draft's name and description are in the edit bar.
+
+Every change goes to `orchestration/<id>.draft.json` a moment after it is made; the template itself is untouched. The draft's problems are listed as they come and go (a step with no text, a merge with no target); **💾 Save** is disabled while there are any. **💾 Save** puts the draft in the template's place (`AdvancedTemplateStore.AcceptDraftAsync`, which refuses a draft with problems all the same); **🗑 Discard** drops it, after a confirmation; **✓ Done** stops editing and keeps the draft for later. Closing the window writes the last change to the draft first. A new step gets an id of the form `<stage>-step-<n>` that no step of the saved template or of a run of it has had.
+
+### Changing a template while it is run
+
+A run keeps the template it was given until the owner gives it another:
+
+- Saving changes the file, not the run. While the saved template differs from the run's, the run bar offers **⤵ Apply to this run**. It is disabled while the run is running: pause it first. A ready, paused or finished run can take it.
+- **Only steps the run has not reached can change.** The steps it has done or skipped and the one it is at stay as they are, in their place; new steps go after the step it is at. The editor shows those steps with 🔒 and without tools, and says when the draft could not be given to the run and why. Apply checks again (`TemplateRun.ProblemsWith`) and says what stops it.
+- Applied, the run is rebuilt on the new template (`TemplateRun.Rebase`): steps keep their state by id, new ones are to do, a paused run stays paused as it was (an escalation or a question too), and a finished run that was given new steps is paused at the first of them. The saved run (`run.json`) holds the new template from then on.
+- The orchestrator is told with its next message: its `[RUN]` section carries the new outline once, with the steps done, skipped and current marked. Its system prompt keeps the outline it was attached with and says `[RUN]` wins.
 ## Where they live
 
 `orchestration/<id>.json` in the project's own repository, committed with it, so the template travels with the project. Not under `.agenthub/`, which holds the owner's own notes and is often git-ignored.
@@ -159,6 +177,6 @@ The orchestrator's fixed rules still hold in a run. A step of the template is th
 2. [x] Window: the tree, read-only, opened from 🧭 Orchestrate (`AdvancedTemplatesWindow`, `AdvancedTemplateTree`, `tests/ui/advanced-templates.ps1`)
 3. [x] Run engine on `PaneOrchestrator`: step by step, live ticks, pause on escalation, Go / Pause / go on from a step. Remaining: a live run with a real Claude session
 4. [x] Runs kept on disk, the ⏯ Runs panel, resume after a detach or an AgentHub restart (`RunStore`, `RunRecorder`, `RunsWindow`, `RunStoreTests`, `tests/ui/saved-runs.ps1`). Remaining: resume into a session AgentHub starts itself
-5. [ ] Editing by hand through drafts, also while a run is paused
+5. [x] Editing by hand through drafts, also while a run is paused (`TemplateEditing`, `AdvancedTemplatesWindow.Editing.cs`, `TemplateRun.Rebase`, `PaneOrchestrator.ApplyTemplate`, `TemplateEditingTests`, `tests/ui/template-editing.ps1`)
 6. [ ] The helper crab: builds a template from a plan, changes one from a request
 7. [ ] Parallel stages across panes

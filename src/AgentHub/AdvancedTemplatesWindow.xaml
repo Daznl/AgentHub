@@ -56,10 +56,47 @@
                     <DockPanel x:Name="TreePanel">
                         <StackPanel DockPanel.Dock="Top" Margin="0,0,8,10">
                             <DockPanel LastChildFill="True">
+                                <Button x:Name="EditBtn" DockPanel.Dock="Right" Click="Edit_Click" Content="✏ Edit" Padding="10,4" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"
+                                        ToolTip="Change this template: add, remove, move and change its stages and steps. Every change goes to a draft beside the file; the template itself changes only when you save." />
                                 <TextBlock x:Name="TemplateSummary" DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Bottom" Margin="12,0,0,2" />
                                 <TextBlock x:Name="TemplateName" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                             </DockPanel>
                             <TextBlock x:Name="TemplateDescription" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,3,0,0" />
+                            <!-- Editing: the draft's name and description, where it stands, Save, Discard and Done. -->
+                            <Border x:Name="EditBar" Visibility="Collapsed" Margin="0,10,0,0" Background="#0E1A2B" BorderBrush="#1D4ED8" BorderThickness="1" CornerRadius="8" Padding="10,8">
+                                <StackPanel>
+                                    <DockPanel LastChildFill="True">
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Button x:Name="SaveDraftBtn" Click="SaveDraft_Click" Content="💾 Save" Background="#2563EB" FontWeight="SemiBold" Padding="14,4" FontSize="12" Margin="10,0,0,0" />
+                                            <Button x:Name="DiscardDraftBtn" Click="DiscardDraft_Click" Content="🗑 Discard" Padding="10,4" FontSize="12" Margin="8,0,0,0"
+                                                    ToolTip="Drop the draft: the template stays as it was saved." />
+                                            <Button x:Name="DoneEditingBtn" Click="DoneEditing_Click" Content="✓ Done" Padding="10,4" FontSize="12" Margin="8,0,0,0"
+                                                    ToolTip="Stop editing and keep the draft beside the template, to save or discard later. ✏ Edit picks it up again." />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Border Background="#1E3A8A" CornerRadius="4" Padding="6,1" Margin="0,0,8,0" VerticalAlignment="Center">
+                                                <TextBlock Text="✏ EDITING" Foreground="#DBEAFE" FontSize="10" FontWeight="Bold" />
+                                            </Border>
+                                            <TextBlock x:Name="EditStateText" Foreground="{StaticResource MutedBrush}" FontSize="11.5" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                    <Grid Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="Name" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                        <TextBox x:Name="DraftNameBox" Grid.Column="1" TextChanged="DraftNameBox_TextChanged" FontSize="12" Padding="4,2" />
+                                        <TextBlock Grid.Row="1" Text="Description" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Top" Margin="0,8,10,0" />
+                                        <TextBox x:Name="DraftDescriptionBox" Grid.Row="1" Grid.Column="1" TextChanged="DraftDescriptionBox_TextChanged" FontSize="12" Padding="4,2" Margin="0,5,0,0"
+                                                 TextWrapping="Wrap" AcceptsReturn="True" MaxHeight="70" VerticalScrollBarVisibility="Auto" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
                             <Border x:Name="ProblemsBox" Visibility="Collapsed" Margin="0,10,0,0" Background="#2B2110" BorderBrush="#7A5A12" BorderThickness="1" CornerRadius="6" Padding="10,8">
                                 <StackPanel>
                                     <TextBlock x:Name="ProblemsTitle" Foreground="#FBBF24" FontSize="12" FontWeight="SemiBold" />
@@ -71,6 +108,7 @@
                             <Border x:Name="RunBar" Visibility="Collapsed" Margin="0,10,0,0" Background="#151129" BorderBrush="#4C3A8C" BorderThickness="1" CornerRadius="8" Padding="10,7">
                                 <DockPanel LastChildFill="True">
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button x:Name="ApplyBtn" Click="Apply_Click" Content="⤵ Apply to this run" Visibility="Collapsed" Background="#221A3D" Foreground="#C4B5FD" FontWeight="SemiBold" Padding="12,4" FontSize="12" Margin="10,0,0,0" />
                                         <Button x:Name="GoBtn" Click="Go_Click" Content="▶ Go" Background="#2563EB" FontWeight="SemiBold" Padding="14,4" FontSize="12" Margin="10,0,0,0" />
                                         <Button x:Name="PauseBtn" Click="Pause_Click" Content="⏸ Pause" Background="#221A3D" Foreground="#C4B5FD" FontWeight="SemiBold" Padding="12,4" FontSize="12" Margin="10,0,0,0"
                                                 ToolTip="Stop the run at its current step. The worker finishes what it is doing but is sent nothing more until Go." />

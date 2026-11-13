@@ -20,9 +20,10 @@ public static class AdvancedTemplateTree
     /// The rows, stage by stage. Stages come in <see cref="AdvancedTemplate.ExecutionOrder"/>; a template with problems
     /// (<see cref="AdvancedTemplate.Validate"/>) may have no such order and is shown in file order instead.
     /// </summary>
-    public static IReadOnlyList<TreeRow> Rows(AdvancedTemplate template)
+    /// <param name="fileOrder">Stages as the file has them, whatever their order: what editing moves up and down.</param>
+    public static IReadOnlyList<TreeRow> Rows(AdvancedTemplate template, bool fileOrder = false)
     {
-        var sound = template.Validate().Count == 0;
+        var sound = !fileOrder && template.Validate().Count == 0;
         var stages = sound ? template.ExecutionOrder() : template.Stages;
         var titles = template.Stages.GroupBy(s => s.Id).ToDictionary(g => g.Key, g => g.First().DisplayTitle);
 

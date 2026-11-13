@@ -11,8 +11,45 @@ public sealed partial class PaneOrchestrator
     private bool _freshSession;
     private string? _stepBegun;
 
-    /// <summary>The run of the advanced template this orchestrator follows; null for an orchestrator without one.</summary>
-    public TemplateRun? Run { get; }
+    private volatile TemplateRun? _run;
+    /// <summary>The template changed under the run (<see cref="ApplyTemplate"/>) and the orchestrator has not been told yet.</summary>
+    private volatile bool _planChanged;
+
+    /// <summary>
+    /// The run of the advanced template this orchestrator follows; null for an orchestrator without one. Replaced, never
+    /// changed in place, when the owner applies a changed template to it: read it once per use.
+    /// </summary>
+    public TemplateRun? Run { get => _run; private set => _run = value; }
+
+    /// <summary>
+    /// ⤵ Apply to this run: the run follows <paramref name="changed"/> from now on (<see cref="TemplateRun.Rebase"/>), keeping
+    /// what it has done. Only while it stands still (ready, paused or finished), and only when the change leaves every step
+    /// it has reached as it was. The orchestrator is shown the new outline with its next message.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No run, the run is running or moving on right now, or the change touches a step it has reached.</exception>
+    public void ApplyTemplate(AdvancedTemplate changed)
+    {
+        var run = Run ?? throw new InvalidOperationException("This orchestrator follows no advanced template.");
+        if (!_runGate.Wait(0)) throw new InvalidOperationException("The run is moving on right now. Pause it first.");
+        TemplateRun rebased;
+        try
+        {
+            rebased = run.Rebase(changed);
+            Run = rebased;
+            _planChanged = true;
+        }
+        finally { _runGate.Release(); }
+        AddExchange(ExchangeKind.Note, $"The template was changed and this run follows the new version: {rebased.Steps.Count} steps, {rebased.Progress}.");
+    }
+
+    /// <summary>The [RUN] section of the next message: where the run stands, and the new outline when the template was changed since the orchestrator last heard.</summary>
+    private string? DescribeRun(bool planChanged)
+    {
+        if (Run is not { } run) return null;
+        var text = run.Describe();
+        if (!planChanged) return text;
+        return text + "\n\nTHE OWNER HAS CHANGED THE TEMPLATE since you last saw its outline. Follow this one; the outline in your instructions is out of date:\n" + Outline(run.Template, run);
+    }
 
     /// <summary>How the pane's session was last started, as far as known: kept with a saved run.</summary>
     public SessionLaunch? Launch => _worker.SessionLaunch ?? _launch;
@@ -291,11 +328,28 @@ public sealed partial class PaneOrchestrator
             The template as it stood when you were attached:
 
             """);
+        sb.Append(Outline(template, run: null));
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>The template's stages and steps, one line each; with a run, each step it has reached is marked.</summary>
+    private static string Outline(AdvancedTemplate template, TemplateRun? run)
+    {
+        var sb = new StringBuilder();
+        var current = run?.Current?.Step.Id;
         foreach (var stage in template.ExecutionOrder())
         {
             sb.Append($"Stage \"{stage.DisplayTitle}\"\n");
             foreach (var step in stage.Steps)
-                sb.Append($"  - [{AdvancedTemplate.KindName(step.Kind)}] {step.DisplayTitle}{(step.Escalate ? " (escalation point)" : "")}\n");
+            {
+                var mark = run is null ? "" : step.Id == current ? " <- CURRENT STEP" : run.StateOf(step.Id) switch
+                {
+                    StepState.Done => " (done)",
+                    StepState.Skipped => " (skipped)",
+                    _ => "",
+                };
+                sb.Append($"  - [{AdvancedTemplate.KindName(step.Kind)}] {step.DisplayTitle}{(step.Escalate ? " (escalation point)" : "")}{mark}\n");
+            }
         }
         return sb.ToString().TrimEnd();
     }

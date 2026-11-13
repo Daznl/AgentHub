@@ -596,7 +596,8 @@ public sealed partial class PaneOrchestrator : IDisposable
                 history = ConversationHistory.Format(entries, lastReplyFollows: workerReply is not null,
                     lastTurnRunning: _worker.IsRunning && !_worker.IsAwaitingInput);
             }
-            var message = Compose(eventText, fromOwner, workerReply, history, Status(), handoff, Run?.Describe());
+            var planChanged = _planChanged;
+            var message = Compose(eventText, fromOwner, workerReply, history, Status(), handoff, DescribeRun(planChanged));
             if (workerReply is not null) AddExchange(ExchangeKind.Read, workerReply.Length == 0 ? "(no text reply)" : workerReply);
 
             SetThinking(true);
@@ -616,6 +617,7 @@ public sealed partial class PaneOrchestrator : IDisposable
             finally { SetThinking(false); }
 
             _introduced = true;
+            if (planChanged) _planChanged = false; // it has seen the new outline
             _decisions++;
             _orchestratorContext = _brain.ReadContext() ?? _orchestratorContext; // its transcript has this decision's usage
             if (workerReply is not null) { _lastReplyHandled = workerReply; _sentSinceLastTurn = false; _turnEndedWhileThinking = false; }

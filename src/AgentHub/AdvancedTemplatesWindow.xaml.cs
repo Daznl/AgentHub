@@ -7,7 +7,9 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using AgentHub.Services.Orchestrator;
 using Brush = System.Windows.Media.Brush;
+using Brushes = System.Windows.Media.Brushes;
 using Button = System.Windows.Controls.Button;
+using Cursors = System.Windows.Input.Cursors;
 using Color = System.Windows.Media.Color;
 using HorizontalAlignment = System.Windows.HorizontalAlignment;
 using MessageBox = System.Windows.MessageBox;
@@ -20,8 +22,9 @@ namespace AgentHub;
 /// 🗺 Advanced templates: a project's advanced templates (<c>orchestration/*.json</c> in its repository), each drawn as the
 /// tree an orchestrator follows: stages, and under each its steps, top to bottom in the order a single worker takes them.
 /// When an orchestrator on a pane follows one (<see cref="BindRun"/>), its tree is live: every step shows how far the run
-/// has got, and the run is started, paused and sent on from any step here. The files themselves are not edited here yet:
-/// they are changed by hand or by a session, and re-read when the window is come back to.
+/// has got, and the run is started, paused and sent on from any step here. ✏ Edit changes a template through its draft
+/// (<c>AdvancedTemplatesWindow.Editing.cs</c>); the files are also re-read when the window is come back to, for changes
+/// made by hand or by a session.
 /// </summary>
 public partial class AdvancedTemplatesWindow : Window
 {
@@ -65,9 +68,12 @@ public partial class AdvancedTemplatesWindow : Window
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key != Key.Escape) return;
-            Close();
+            // Editing, Esc first closes the step being edited; nothing is lost either way, every change is in the draft.
+            if (_selectedStep is not null) SelectStep(null);
+            else Close();
             e.Handled = true;
         };
+        Closing += OnClosing;
     }
 
     private string? _selectOnLoad;
@@ -172,7 +178,9 @@ public partial class AdvancedTemplatesWindow : Window
             _ => "Carry the run on at the step it stopped at: the orchestrator looks at the worker's latest reply and takes it from there.",
         };
         PauseBtn.Visibility = state == RunState.Running ? Visibility.Visible : Visibility.Collapsed;
+        UpdateApply(run);
 
+        var editing = _draft is not null;
         var current = run.Current?.Step.Id;
         var here = paused ? Amber : Cyan;
         foreach (var (id, parts) in _steps)
@@ -197,7 +205,7 @@ public partial class AdvancedTemplatesWindow : Window
             parts.ChipText.Text = chip;
             parts.ChipText.Foreground = chipBrush;
             parts.Chip.Visibility = chip.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-            parts.FromHere.Visibility = Visibility.Visible;
+            parts.FromHere.Visibility = editing || parts.FromHere.Tag is not RunStep ? Visibility.Collapsed : Visibility.Visible;
         }
         foreach (var (node, ids) in _stages.Values)
         {
@@ -207,8 +215,8 @@ public partial class AdvancedTemplatesWindow : Window
             node.Stroke = brush;
         }
 
-        // Follow the run down the tree: once per step, so the owner can scroll away from it.
-        if (current is not null && current != _scrolledTo && _steps.TryGetValue(current, out var at))
+        // Follow the run down the tree: once per step, so the owner can scroll away from it. Not while editing.
+        if (!editing && current is not null && current != _scrolledTo && _steps.TryGetValue(current, out var at))
         {
             _scrolledTo = current;
             at.Card.BringIntoView(new Rect(0, -60, at.Card.ActualWidth, at.Card.ActualHeight + 160));
@@ -243,7 +251,9 @@ public partial class AdvancedTemplatesWindow : Window
 
     private void TemplateList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_loading) Show((TemplateList.SelectedItem as ListItem)?.File);
+        if (_loading) return;
+        if (_draft is not null && SelectedId != _draftOf) _ = StopEditingAsync(); // the draft is kept on disk
+        Show((TemplateList.SelectedItem as ListItem)?.File);
     }
 
     /// <summary>Reads the folder again. Unless forced, nothing is redrawn when no file changed, so coming back to the window keeps its place.</summary>
@@ -275,14 +285,20 @@ public partial class AdvancedTemplatesWindow : Window
 
     private void Show(AdvancedTemplateFile? file)
     {
+        var editing = file is not null && _draft is not null && _draftOf == file.Id;
+        var keepScroll = editing && _shownFile?.Id == file!.Id; // a redraw while editing keeps the place
+        var offset = Scroller.VerticalOffset;
         RowsPanel.Children.Clear();
         _steps.Clear();
         _stages.Clear();
         _scrolledTo = null;
+        _shownFile = file;
         _shownRun = file is not null && _runs.TryGetValue(file.Id, out var bound) ? bound : null;
         ProblemsBox.Visibility = Visibility.Collapsed;
         NoteText.Visibility = Visibility.Collapsed;
         RunBar.Visibility = Visibility.Collapsed;
+        EditBar.Visibility = Visibility.Collapsed;
+        EditBtn.Visibility = Visibility.Collapsed;
         if (file is null)
         {
             TreePanel.Visibility = Visibility.Collapsed;
@@ -294,9 +310,10 @@ public partial class AdvancedTemplatesWindow : Window
         EmptyPanel.Visibility = Visibility.Collapsed;
         TreePanel.Visibility = Visibility.Visible;
 
-        // A run follows the template as it was when the orchestrator was attached, whatever the file says now.
+        // A run follows the template as it was when the orchestrator was attached (or last given a change), whatever the
+        // file says now. Editing shows the draft instead.
         var run = _shownRun?.Orchestrator.Run;
-        if ((run?.Template ?? file.Template) is not { } template)
+        if ((editing ? _draft : run?.Template ?? file.Template) is not { } template)
         {
             TemplateName.Text = file.Id;
             TemplateSummary.Text = "";
@@ -308,16 +325,32 @@ public partial class AdvancedTemplatesWindow : Window
         TemplateName.Text = template.Name.Length > 0 ? template.Name : file.Id;
         TemplateSummary.Text = AdvancedTemplateTree.Summary(template);
         TemplateDescription.Text = template.Description ?? "";
-        TemplateDescription.Visibility = string.IsNullOrWhiteSpace(template.Description) ? Visibility.Collapsed : Visibility.Visible;
+        TemplateDescription.Visibility = editing || string.IsNullOrWhiteSpace(template.Description) ? Visibility.Collapsed : Visibility.Visible;
+        if (file.Template is not null && !editing)
+        {
+            EditBtn.Visibility = Visibility.Visible;
+            EditBtn.Content = file.HasDraft ? "✏ Open the draft" : "✏ Edit";
+        }
 
-        var problems = template.Validate();
-        if (problems.Count > 0) ShowProblems(problems.Count == 1 ? "1 problem stops this template being run" : $"{problems.Count} problems stop this template being run", problems);
+        IReadOnlyList<string> problems;
+        if (editing)
+        {
+            ShowEditBar(template);
+            problems = ShowDraftProblems();
+        }
+        else
+        {
+            problems = template.Validate();
+            if (problems.Count > 0) ShowProblems(problems.Count == 1 ? "1 problem stops this template being run" : $"{problems.Count} problems stop this template being run", problems);
+        }
 
         var notes = new List<string>();
-        if (problems.Count == 0 && template.HasParallelStages) notes.Add("Some stages do not depend on each other and could run side by side. This is the order a single worker follows.");
-        if (file.HasDraft) notes.Add($"A change is waiting as a draft ({Path.GetFileName(_store.DraftPathFor(file.Id))}); it is not shown here.");
-        if (run is not null && file.Template is { } onDisk && onDisk.Serialize() != template.Serialize())
-            notes.Add("The file has changed since this run was attached. The run follows the template as it was then, shown here.");
+        if (problems.Count == 0 && template.HasParallelStages)
+            notes.Add(editing ? "Some stages do not depend on each other. Shown in the order of the file." : "Some stages do not depend on each other and could run side by side. This is the order a single worker follows.");
+        if (!editing && file.HasDraft) notes.Add($"A change is waiting as a draft ({Path.GetFileName(_store.DraftPathFor(file.Id))}): ✏ Open the draft to see it, then save or discard it.");
+        if (!editing && run is not null && file.Template is { } onDisk && onDisk.Serialize() != template.Serialize())
+            notes.Add("The file has changed since this run was given its template. The run follows the version shown here until you ⤵ Apply the saved one to it.");
+        if (editing && run is not null) notes.AddRange(RunNotes(run, template));
         if (notes.Count > 0)
         {
             NoteText.Text = string.Join("\n", notes);
@@ -327,9 +360,11 @@ public partial class AdvancedTemplatesWindow : Window
         var steps = run?.Steps.ToDictionary(s => s.Step.Id);
         string? stage = null;
         var stageSteps = new List<string>();
-        foreach (var row in AdvancedTemplateTree.Rows(template))
+        foreach (var row in AdvancedTemplateTree.Rows(template, fileOrder: editing))
         {
-            var built = BuildRow(row, row.Kind == TreeRowKind.Step && steps is not null && row.Id is not null && steps.TryGetValue(row.Id, out var s) ? s : null);
+            var built = BuildRow(row, row.Kind == TreeRowKind.Step && steps is not null && row.Id is not null && steps.TryGetValue(row.Id, out var s) ? s : null,
+                editing ? template : null);
+            if (editing && row.Kind == TreeRowKind.End) RowsPanel.Children.Add(AddStageRow(template));
             RowsPanel.Children.Add(built.Row);
             if (row.Kind == TreeRowKind.Stage && row.Id is not null)
             {
@@ -339,12 +374,14 @@ public partial class AdvancedTemplatesWindow : Window
             }
             else if (row.Kind == TreeRowKind.Step && row.Id is not null && built.Parts is not null)
             {
-                _steps[row.Id] = built.Parts;
+                _steps.TryAdd(row.Id, built.Parts);
                 if (stage is not null) stageSteps.Add(row.Id);
             }
         }
-        Scroller.ScrollToTop();
+        if (keepScroll) _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => Scroller.ScrollToVerticalOffset(offset));
+        else Scroller.ScrollToTop();
         UpdateRun();
+        if (editing) FocusEditorIfAsked();
     }
 
     private void ShowProblems(string title, IReadOnlyList<string> problems)
@@ -382,7 +419,8 @@ public partial class AdvancedTemplatesWindow : Window
 
     /// <summary>One row: the trunk with this row's node on the left, what the row says on the right.</summary>
     /// <param name="step">The step of the shown run this row stands for; null without a run, and for rows that are not steps.</param>
-    private (Grid Row, Ellipse Node, StepParts? Parts) BuildRow(TreeRow row, RunStep? step)
+    /// <param name="draft">The draft being edited, whose stages and steps the rows get their editing controls for; null when not editing.</param>
+    private (Grid Row, Ellipse Node, StepParts? Parts) BuildRow(TreeRow row, RunStep? step, AdvancedTemplate? draft = null)
     {
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(GutterWidth) });
@@ -403,11 +441,11 @@ public partial class AdvancedTemplatesWindow : Window
         {
             case TreeRowKind.Stage:
                 node = Node(14, StageDot, StageDot, top: 21);
-                content = StageContent(row);
+                content = draft?.Stages.FirstOrDefault(s => s.Id == row.Id) is { } editedStage ? EditStageContent(row, draft, editedStage) : StageContent(row);
                 break;
             case TreeRowKind.Step:
                 node = Node(10, PanelFill, Muted, top: 17);
-                parts = StepContent(row, node, step);
+                parts = StepContent(row, node, step, draft?.AllSteps.FirstOrDefault(s => s.Id == row.Id) is { } editedStep ? (draft, editedStep) : null);
                 content = parts.Card;
                 break;
             default:
@@ -466,9 +504,11 @@ public partial class AdvancedTemplatesWindow : Window
         Child = text,
     };
 
-    private StepParts StepContent(TreeRow row, Ellipse node, RunStep? step)
+    /// <param name="edit">The draft and its step this row stands for, when editing: the row gets its controls, and its editor when picked.</param>
+    private StepParts StepContent(TreeRow row, Ellipse node, RunStep? step, (AdvancedTemplate Draft, TemplateStep Step)? edit = null)
     {
         var head = new DockPanel { LastChildFill = true };
+        if (edit is { } e) AddStepTools(head, e.Draft, e.Step);
         // Right to left: the kind, the escalation flag, how far a run has got with the step, and its "from here" button.
         var kind = new TextBlock { Text = (row.Label ?? "").ToUpperInvariant(), Foreground = Faint, FontSize = 9.5, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 1, 0, 0) };
         DockPanel.SetDock(kind, Dock.Right);
@@ -501,19 +541,32 @@ public partial class AdvancedTemplatesWindow : Window
             ToolTip = "Send the run on from this step, whatever it is doing now. Steps before it that are not done are skipped.",
         };
         System.Windows.Automation.AutomationProperties.SetName(fromHere, "Go on from: " + row.Title);
-        if (step is not null) fromHere.Click += (_, _) => FromHere_Click(step);
+        if (step is not null)
+        {
+            fromHere.Tag = step;
+            fromHere.Click += (_, _) => FromHere_Click(step);
+        }
         DockPanel.SetDock(fromHere, Dock.Right);
         head.Children.Add(fromHere);
 
         var icon = new TextBlock { Text = row.Icon, FontFamily = new System.Windows.Media.FontFamily("Segoe UI Emoji"), FontSize = 12, Width = 22, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 1, 0, 0) };
         DockPanel.SetDock(icon, Dock.Left);
         head.Children.Add(icon);
-        head.Children.Add(new TextBlock { Text = row.Title, Foreground = Text, FontSize = 12.5, TextWrapping = TextWrapping.Wrap });
+        var title = new TextBlock { Text = row.Title, Foreground = Text, FontSize = 12.5, TextWrapping = TextWrapping.Wrap };
+        head.Children.Add(title);
 
         var body = new StackPanel();
         body.Children.Add(head);
-        if (row.Detail is { } detail)
-            body.Children.Add(new TextBlock { Text = detail, Foreground = Muted, FontSize = 11.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(22, 3, 0, 0) });
+        var detailText = new TextBlock { Text = row.Detail ?? "", Foreground = Muted, FontSize = 11.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(22, 3, 0, 0) };
+        detailText.Visibility = row.Detail is null ? Visibility.Collapsed : Visibility.Visible;
+        body.Children.Add(detailText);
+        if (edit is { } picked)
+        {
+            head.Cursor = Cursors.Hand;
+            head.Background = Brushes.Transparent; // so the whole head line takes the click, not only its text
+            head.MouseLeftButtonUp += (_, _) => SelectStep(ReferenceEquals(_selectedStep, picked.Step) ? null : picked.Step);
+            if (ReferenceEquals(_selectedStep, picked.Step)) body.Children.Add(StepEditor(picked.Draft, picked.Step, title, detailText));
+        }
 
         var card = new Border
         {
