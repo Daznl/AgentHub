@@ -173,12 +173,43 @@
       }
     }
 
+    function postToHost(message) {
+      if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(JSON.stringify(message));
+    }
+
+    // Copies go to the host, which writes the Windows clipboard (retrying while another program holds it) and says when
+    // it could not. navigator.clipboard.writeText fails without a word whenever the page is not focused.
     function copySelection() {
       const text = term.getSelection();
-      if (text && navigator.clipboard) {
-        navigator.clipboard.writeText(text).catch(() => {});
-      }
+      if (text) postToHost({ type: 'copy', text: text });
       return !!text;
+    }
+
+    // A program in the terminal asking for a copy (OSC 52). Claude Code turns mouse tracking on, draws its own selection
+    // and copies it this way; the host decodes it and never answers a read request. Output replayed while a session's
+    // screen is put back is old: its copies were made long ago.
+    term.parser.registerOscHandler(52, data => {
+      if (!restoring) postToHost({ type: 'osc52', data: data });
+      return true;
+    });
+
+    // A short note over the terminal (bottom right), e.g. "Copied".
+    const toast = document.createElement('div');
+    toast.style.cssText = [
+      'position:fixed', 'right:18px', 'bottom:10px', 'z-index:1001', 'pointer-events:none',
+      'padding:4px 10px', 'border-radius:6px', 'border:1px solid #24344B', 'background:#111A28',
+      'font-family:"Segoe UI", sans-serif', 'font-size:12px', 'color:#E6F1FF',
+      'opacity:0', 'transition:opacity 160ms ease'
+    ].join(';');
+    document.body.appendChild(toast);
+    let toastTimer = 0;
+    function showToast(text, isError) {
+      toast.textContent = text;
+      toast.style.color = isError ? '#FF8A7A' : '#E6F1FF';
+      toast.style.borderColor = isError ? '#5A2A2A' : '#24344B';
+      toast.style.opacity = '1';
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, isError ? 4000 : 1200);
     }
 
     function pasteClipboard() {
@@ -190,11 +221,16 @@
     // xterm renders to a canvas, so the browser's native copy/paste can't reach
     // the selection. Wire up the usual terminal shortcuts explicitly:
     //   Ctrl+Shift+C -> copy selection   Ctrl+Shift+V -> paste
-    // Ctrl+Shift+* is used (not plain Ctrl+C/V) so Ctrl+C still sends SIGINT.
+    //   Ctrl+C with text selected -> copy it (as in Windows Terminal); with nothing selected it still interrupts.
     term.attachCustomKeyEventHandler(e => {
       if (e.type !== 'keydown') return true;
       if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
         copySelection();
+        return false;
+      }
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'c' || e.key === 'C') && term.hasSelection()) {
+        copySelection();
+        term.clearSelection();
         return false;
       }
       if (e.ctrlKey && e.shiftKey && (e.key === 'V' || e.key === 'v')) {
@@ -276,6 +312,8 @@
           restoreTerminal(msg);
         } else if (msg && msg.type === 'capture') {
           captureTerminal(msg.token);
+        } else if (msg && msg.type === 'toast') {
+          showToast(msg.text || '', !!msg.error);
         }
       });
 
