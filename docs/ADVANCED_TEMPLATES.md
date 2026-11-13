@@ -2,7 +2,13 @@
 
 An **orchestration template** (📚 Templates, `workflows/*.md`) gives an orchestrator instructions and leaves the sequence to it. An **advanced template** is the sequence itself: stages and steps the orchestrator follows one by one, ticking each off, pausing when something needs the owner.
 
-Status (2026-11-13): the file format, its checks and the project store are built (`AdvancedTemplate`, `AdvancedTemplateStore`). The panel, the run engine, paused runs, editing and the helper crab are not; see "Build order" below.
+Status (2026-11-13): the file format, its checks and the project store are built (`AdvancedTemplate`, `AdvancedTemplateStore`), and a window shows a project's templates as trees, read-only (`AdvancedTemplatesWindow`, `AdvancedTemplateTree`). The run engine, paused runs, editing and the helper crab are not; see "Build order" below.
+
+## Seeing them
+
+**🧭 Orchestrate → 🗺 Advanced templates of this project…** on a running pane opens the window for the checkout the pane's folder is in (one window per project). `AgentHub.exe --advanced-templates <folder>` opens it at start.
+
+The list on the left holds every file in `orchestration/`; a file that cannot be read, or has problems, is listed in amber and says what is wrong. The tree on the right runs from Start to Done: each stage a purple node with its steps beneath it, in the order a single worker follows. A step shows its kind on the right and **⚑ pauses for you** when it is an escalation point. A project without templates offers **➕ Add the staged build example**, which writes `orchestration/staged-build.json` (`AdvancedTemplate.StagedBuildExample`) to look at and change. The files are re-read on **↻ Refresh** and whenever the window is come back to.
 
 ## Where they live
 
@@ -120,7 +126,7 @@ The orchestrator's fixed rules still hold in a run. A step of the template is th
 ## Build order
 
 1. [x] File format, checks, project store (`AdvancedTemplate.cs`, `AdvancedTemplateTests.cs`)
-2. [ ] Panel: the tree, read-only, opened from 🧭 Orchestrate
+2. [x] Window: the tree, read-only, opened from 🧭 Orchestrate (`AdvancedTemplatesWindow`, `AdvancedTemplateTree`, `tests/ui/advanced-templates.ps1`)
 3. [ ] Run engine on `PaneOrchestrator`: step by step, live ticks, pause on escalation, Go / Pause / start from a step
 4. [ ] Runs kept on disk, a Paused runs panel, resume after AgentHub restarts
 5. [ ] Editing by hand through drafts, also while a run is paused
