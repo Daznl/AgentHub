@@ -302,6 +302,18 @@ public partial class MainWindow : Window
             item.Click += (_, _) => AttachPaneOrchestrator(pane, null, template, project);
             menu.Items.Add(item);
         }
+        // The project's paused runs: picked up on this session where they stood.
+        foreach (var saved in project is null ? [] : SavedRuns().Where(r => !r.IsFinished && SameFolder(r.Project, project)).Take(5))
+        {
+            var item = new MenuItem
+            {
+                Header = $"▶ Resume run: {saved.TemplateName} · {saved.Progress}",
+                ToolTip = $"Pick this paused run up on this session and carry it on from where it stood. Last moved {saved.UpdatedAt.LocalDateTime:d MMM HH:mm}." +
+                          (string.IsNullOrWhiteSpace(saved.Reason) ? "" : "\n\n" + saved.Reason),
+            };
+            item.Click += (_, _) => ResumeRun(saved, pane);
+            menu.Items.Add(item);
+        }
         var advanced = new MenuItem
         {
             Header = "🗺 Advanced templates of this project…",
@@ -314,8 +326,86 @@ public partial class MainWindow : Window
 
     private readonly Dictionary<string, AdvancedTemplatesWindow> _advancedTemplateWindows = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>The panes whose orchestrator follows an advanced template: the project and the template's id, to find its tree again.</summary>
-    private readonly Dictionary<TerminalPaneControl, (string Project, string TemplateId)> _paneRuns = [];
+    /// <summary>A pane whose orchestrator follows an advanced template: the project and the template's id, to find its tree again, and the run's record on disk.</summary>
+    private sealed record PaneRun(string Project, string TemplateId, RunRecorder Recorder);
+
+    private readonly Dictionary<TerminalPaneControl, PaneRun> _paneRuns = [];
+
+    // ---- Runs kept on disk: every run is recorded as it goes, and a paused one is picked up again from ⏯ Runs or 🧭 Orchestrate ----
+
+    private readonly RunStore _runStore = new();
+    private RunsWindow? _runsWindow;
+
+    private static bool SameFolder(string a, string b) =>
+        string.Equals(Path.TrimEndingDirectorySeparator(a), Path.TrimEndingDirectorySeparator(b), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The runs on disk that no pane is following: paused, whatever their record says, or finished.</summary>
+    private IReadOnlyList<RunRecord> SavedRuns()
+    {
+        var live = _paneRuns.Values.Select(r => r.Recorder.Record.Id).ToHashSet();
+        try { return _runStore.List().Where(r => !live.Contains(r.Id)).ToList(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            StatusText.Text = "Runs: could not read " + _runStore.Root + ": " + ex.Message;
+            return [];
+        }
+    }
+
+    private void OpenRuns_Click(object sender, RoutedEventArgs e)
+    {
+        if (_runsWindow is null)
+        {
+            _runsWindow = new RunsWindow(_runStore.Root)
+            {
+                Owner = this,
+                Rows = () => [.. _paneRuns.Select(r => new RunsWindow.Row(r.Value.Recorder.Record, $"Terminal {r.Key.PaneIndex}")).OrderBy(r => r.LivePane),
+                              .. SavedRuns().Select(r => new RunsWindow.Row(r, null))],
+                ResumeTargets = ResumeTargets,
+                OpenTree = record => _ = OpenAdvancedTemplatesAsync(record.Project, record.TemplateId),
+                Delete = record => _runStore.Delete(record.Id),
+            };
+            _runsWindow.Closed += (_, _) => _runsWindow = null;
+            _runsWindow.Show();
+        }
+        if (_runsWindow.WindowState == WindowState.Minimized) _runsWindow.WindowState = WindowState.Normal;
+        _runsWindow.Activate();
+    }
+
+    /// <summary>
+    /// Where a paused run can be picked up: the running sessions in its project that have no orchestrator yet. A run is
+    /// never put on a session by itself: the owner picks one.
+    /// </summary>
+    private IReadOnlyList<RunsWindow.Target> ResumeTargets(RunRecord record) =>
+        _panes.Where(p => p.IsRunning && !_paneOrchestrators.ContainsKey(p) && IsInside(p.ContextFolder, record.Project))
+              .Select(p => new RunsWindow.Target($"On Terminal {p.PaneIndex} · {p.ContextFolder}", () => ResumeRun(record, p)))
+              .ToList();
+
+    private static bool IsInside(string? folder, string project)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return false;
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(project));
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+        return full.Equals(root, StringComparison.OrdinalIgnoreCase) || full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Puts a paused run on a running session: an orchestrator that has the run where it stood, and Go.</summary>
+    private void ResumeRun(RunRecord record, TerminalPaneControl pane)
+    {
+        if (_paneRuns.Values.Any(r => r.Recorder.Record.Id == record.Id))
+        {
+            StatusText.Text = $"Runs: {record.TemplateName} is already being followed on a pane.";
+            return;
+        }
+        AdvancedTemplate template;
+        try { template = record.ReadTemplate(); }
+        catch (FormatException ex)
+        {
+            StatusText.Text = "Runs: this run's saved template cannot be read: " + ex.Message;
+            return;
+        }
+        if (!AttachPaneOrchestrator(pane, null, template, record.Project, record)) return;
+        _ = _paneOrchestrators[pane].GoAsync();
+    }
 
     /// <summary>
     /// The project a folder belongs to: the checkout it is in (its own worktree, since templates are files of the branch),
@@ -368,19 +458,22 @@ public partial class MainWindow : Window
     }
 
     /// <param name="advanced">An advanced template of <paramref name="project"/> for the orchestrator to follow; its tree opens with the run waiting for Go.</param>
-    private void AttachPaneOrchestrator(TerminalPaneControl pane, OrchestratorWorkflow? workflow, AdvancedTemplate? advanced = null, string? project = null)
+    /// <param name="resume">A paused run of <paramref name="advanced"/> to pick up where it stood; its record carries on.</param>
+    /// <returns>True when the orchestrator is on the pane.</returns>
+    private bool AttachPaneOrchestrator(TerminalPaneControl pane, OrchestratorWorkflow? workflow, AdvancedTemplate? advanced = null, string? project = null, RunRecord? resume = null)
     {
-        if (!pane.IsRunning || _paneOrchestrators.ContainsKey(pane)) return;
+        if (!pane.IsRunning || _paneOrchestrators.ContainsKey(pane)) return false;
         PaneOrchestrator orchestrator;
         try
         {
             orchestrator = PaneOrchestrator.ForPane(new PaneBuildWorker(pane), _runner, PaneOrchestrator.DefaultCommand, "sonnet",
-                pane.ContextFolder, $"Terminal {pane.PaneIndex}", workflow, assumedWindowTokens: _settings.ClaudeContextWindowTokens, advanced: advanced);
+                pane.ContextFolder, $"Terminal {pane.PaneIndex}", workflow, assumedWindowTokens: _settings.ClaudeContextWindowTokens, advanced: advanced,
+                resume: resume?.Resume());
         }
         catch (InvalidOperationException ex) // the template stopped being sound between the menu and the click
         {
             StatusText.Text = "Orchestrate: " + ex.Message;
-            return;
+            return false;
         }
         // No workflow limit: the limit last set in a box (settings), so a chosen value carries over to the next orchestrator.
         if (workflow?.ContextThreshold is null && _settings.PaneOrchestratorContextThreshold > 0)
@@ -390,9 +483,21 @@ public partial class MainWindow : Window
         RefreshOrchestratorBoxes();
         if (advanced is not null && project is not null)
         {
-            _paneRuns[pane] = (project, advanced.Id);
+            // On disk from now on, so the run outlives its orchestrator and AgentHub.
+            var now = DateTimeOffset.Now;
+            var record = resume ?? new RunRecord
+            {
+                Id = _runStore.NewId(advanced.Name, now), Project = project, TemplateId = advanced.Id, TemplateName = advanced.Name,
+                Template = advanced.Serialize(), StartedAt = now,
+            };
+            record.Pane = $"Terminal {pane.PaneIndex}";
+            var recorder = new RunRecorder(_runStore, orchestrator, record);
+            if (recorder.Error is { } error) StatusText.Text = "Runs: this run could not be saved: " + error;
+            _paneRuns[pane] = new PaneRun(project, advanced.Id, recorder);
             _ = OpenAdvancedTemplatesAsync(project, advanced.Id);
+            _runsWindow?.Refresh();
         }
+        return true;
     }
 
     /// <summary>The handoff limit typed into a pane's box: applied to that orchestrator at once, and kept as the default for the next one.</summary>
@@ -408,10 +513,15 @@ public partial class MainWindow : Window
     private void DetachPaneOrchestrator(TerminalPaneControl pane)
     {
         if (!_paneOrchestrators.Remove(pane, out var orchestrator)) return;
-        if (_paneRuns.Remove(pane, out var run) && _advancedTemplateWindows.TryGetValue(run.Project, out var tree)) tree.UnbindRun(orchestrator);
+        if (_paneRuns.Remove(pane, out var run))
+        {
+            run.Recorder.Dispose(); // the run stays on disk, paused, to resume from ⏯ Runs
+            if (_advancedTemplateWindows.TryGetValue(run.Project, out var tree)) tree.UnbindRun(orchestrator);
+        }
         orchestrator.Changed -= RefreshOrchestratorBoxes;
         orchestrator.Dispose();
         RefreshOrchestratorBoxes();
+        _runsWindow?.Refresh();
     }
 
     /// <summary>
@@ -2277,6 +2387,9 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _usageRefreshTimer.Stop();
+        // Runs under way are kept as paused: their sessions live on without AgentHub, their orchestrators do not.
+        foreach (var run in _paneRuns.Values) run.Recorder.Close("AgentHub was closed while this run was under way.");
+        _paneRuns.Clear();
         foreach (var o in _paneOrchestrators.Values) o.Dispose();
         _paneOrchestrators.Clear();
         _historyArchive?.Dispose();

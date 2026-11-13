@@ -15,7 +15,7 @@ public class TemplateRunTests
 {
     // ---- The owner's example (2026-11-13): branch, read, build, watch, hand off, commit, close; then stage 2 in a fresh session ----
 
-    private static AdvancedTemplate StagedBuild() => new()
+    internal static AdvancedTemplate StagedBuild() => new()
     {
         Name = "Staged build",
         Stages =
@@ -47,12 +47,12 @@ public class TemplateRunTests
         ],
     };
 
-    private sealed class ScriptedWorker : IBuildWorker
+    internal sealed class ScriptedWorker : IBuildWorker
     {
         public string Label => "Terminal 1";
         public bool IsRunning { get; set; } = true;
         public bool IsAwaitingInput { get; set; } = true;
-        public TimeSpan OutputSilentFor => TimeSpan.FromMinutes(1);
+        public TimeSpan OutputSilentFor { get; set; } = TimeSpan.FromMinutes(1);
         public string? TranscriptPath => null;
         public string? LastReply { get; set; }
         public List<string> Submitted { get; } = [];
@@ -82,7 +82,7 @@ public class TemplateRunTests
         public void EndTurn(string reply) { LastReply = reply; TurnEnded?.Invoke(); }
     }
 
-    private sealed class ScriptedBrain : IPaneBrain
+    internal sealed class ScriptedBrain : IPaneBrain
     {
         private readonly object _lock = new();
         private readonly List<string> _messages = [];
@@ -109,7 +109,7 @@ public class TemplateRunTests
     private static PaneOrchestrator Attach(ScriptedWorker worker, ScriptedBrain brain, AdvancedTemplate? template = null) =>
         new(worker, brain, "Staged build", advanced: template ?? StagedBuild()) { TurnSettle = TimeSpan.Zero, StopDelay = TimeSpan.Zero, StartupDelay = TimeSpan.Zero, LoopInterval = TimeSpan.FromMilliseconds(20) };
 
-    private static async Task Until(Func<bool> done, int ms = 5000)
+    internal static async Task Until(Func<bool> done, int ms = 5000)
     {
         var until = DateTime.UtcNow.AddMilliseconds(ms);
         while (!done() && DateTime.UtcNow < until) await Task.Delay(10);
@@ -405,7 +405,7 @@ public class TemplateRunTests
     [Fact]
     public async Task Without_a_worker_session_the_run_stops_and_says_so_and_the_orchestrator_stays_on()
     {
-        var worker = new ScriptedWorker { Obeys = true };
+        var worker = new ScriptedWorker(); // it does not answer yet: an obeying worker raced the run past this step before it "died" (flaky, 2026-11-13)
         var brain = new ScriptedBrain();
         using var o = Attach(worker, brain);
         await o.GoAsync("s1-build");
@@ -423,6 +423,7 @@ public class TemplateRunTests
         Assert.Contains("No worker session is running", o.Run.PauseReason);
         Assert.Equal(asked, brain.Messages.Count);
 
+        worker.Obeys = true;
         await o.GoAsync("s2-session"); // a new-session step brings one back
         await Until(() => o.Run.Cause == PauseCause.Question);
         Assert.Single(worker.Started);

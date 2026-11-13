@@ -31,6 +31,11 @@ public enum PauseCause
 /// <summary>What the orchestrator says about the current step in its reply (<c>step_outcome</c>).</summary>
 public enum StepOutcome { Done, Continuing, Escalate }
 
+/// <summary>Where a run stands, as plain values: what is saved, and what a saved run is restored from.</summary>
+/// <param name="CurrentStepId">The step the run is at; null before the first Go and once finished.</param>
+/// <param name="Steps">Each step's state by its id.</param>
+public sealed record RunSnapshot(RunState State, PauseCause? Cause, string? Reason, string? CurrentStepId, IReadOnlyDictionary<string, StepState> Steps);
+
 /// <summary>A step with the stage it belongs to.</summary>
 public sealed record RunStep(TemplateStage Stage, TemplateStep Step);
 
@@ -163,6 +168,53 @@ public sealed class TemplateRun
             _states[_index] = StepState.Running;
             return Steps[_index];
         }
+    }
+
+    // ---- Kept on disk ----
+
+    /// <summary>Where the run stands, as plain values to save (<see cref="RunStore"/>).</summary>
+    public RunSnapshot Snapshot()
+    {
+        lock (_lock)
+        {
+            var steps = new Dictionary<string, StepState>(Steps.Count);
+            for (var i = 0; i < Steps.Count; i++) steps[Steps[i].Step.Id] = _states[i];
+            return new RunSnapshot(_state, _cause, _reason, _index >= 0 && _index < Steps.Count ? Steps[_index].Step.Id : null, steps);
+        }
+    }
+
+    /// <summary>
+    /// A saved run picked up again. It never comes back running: a run that was under way is paused at its step (the owner
+    /// presses Go), and a pause it was saved with (a question, an escalation) is kept. Steps are matched by id, so a
+    /// template changed in between keeps what was done: steps it no longer has are forgotten, new ones are to do.
+    /// </summary>
+    /// <param name="interrupted">The pause reason for a run that was running when it was saved.</param>
+    /// <exception cref="InvalidOperationException">The template has problems: it cannot be run.</exception>
+    public static TemplateRun Restore(AdvancedTemplate template, RunSnapshot snapshot, string interrupted)
+    {
+        var run = new TemplateRun(template);
+        if (snapshot.State == RunState.Ready) return run;
+        for (var i = 0; i < run.Steps.Count; i++)
+        {
+            var saved = snapshot.Steps.TryGetValue(run.Steps[i].Step.Id, out var s) ? s : StepState.Pending;
+            run._states[i] = saved == StepState.Running ? StepState.Pending : saved;
+        }
+        // The step it was at; when the template no longer has it, or it was finished and has steps since: the first one still to do.
+        var at = snapshot.CurrentStepId is { } id ? run.IndexOf(id) : -1;
+        if (at < 0) at = Array.FindIndex(run._states, s => s == StepState.Pending);
+        if (at < 0)
+        {
+            run._index = run.Steps.Count;
+            run._state = RunState.Finished;
+            return run;
+        }
+        run._index = at;
+        run._states[at] = StepState.Running;
+        run._state = RunState.Paused;
+        var wasPaused = snapshot.State == RunState.Paused && snapshot.Cause is not null;
+        run._cause = wasPaused ? snapshot.Cause : PauseCause.Owner;
+        run._reason = wasPaused ? snapshot.Reason : interrupted;
+        return run;
     }
 
     /// <summary>"step 3 of 15 · Stage 1 · Build stage 1", or where the run stands when it is at no step.</summary>
