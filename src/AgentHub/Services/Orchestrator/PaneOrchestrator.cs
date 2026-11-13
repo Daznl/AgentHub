@@ -62,11 +62,19 @@ public interface IPaneBrain
 
     /// <summary>The brain's own context window use after its last decision; null when unknown (scripted brains).</summary>
     ContextReading? ReadContext() => null;
+
+    /// <summary>The brain's own session, so a saved run can pick the same one up again; null when it has none (scripted brains).</summary>
+    string? SessionId => null;
+    /// <summary>The folder that session runs in.</summary>
+    string? SessionFolder => null;
 }
 
 /// <summary>The real brain: a <see cref="ClaudeJsonSession"/> answering with <see cref="PaneDecision"/>s.</summary>
 public sealed class ClaudePaneBrain(ClaudeJsonSession session, long assumedWindowTokens = 200_000) : IPaneBrain
 {
+    public string? SessionId => session.SessionId;
+    public string? SessionFolder => session.WorkingDirectory;
+
     public async Task<PaneDecision> DecideAsync(string message, CancellationToken cancellationToken) =>
         (await session.AskAsync(message, PaneDecision.Parse, cancellationToken)).Value;
 
@@ -177,15 +185,23 @@ public sealed partial class PaneOrchestrator : IDisposable
 
     /// <param name="advanced">An advanced template to follow step by step (<see cref="Run"/>); the run waits for <see cref="GoAsync"/>.</param>
     /// <exception cref="InvalidOperationException"><paramref name="advanced"/> has problems and cannot be run.</exception>
+    /// <param name="resume">A saved run of <paramref name="advanced"/> to pick up where it stood (<see cref="TemplateRun.Restore"/>); it comes back paused.</param>
+    /// <param name="brainRemembers">The brain is the session that followed the run before, so it is not shown the worker's history again.</param>
     public PaneOrchestrator(IBuildWorker worker, IPaneBrain brain, string title, OrchestratorWorkflow? workflow = null, string? projectDirectory = null,
-        AdvancedTemplate? advanced = null)
+        AdvancedTemplate? advanced = null, RunSnapshot? resume = null, bool brainRemembers = false)
     {
         _worker = worker;
         _brain = brain;
         Title = title;
         Workflow = workflow;
         _projectDirectory = projectDirectory;
-        if (advanced is not null) Run = new TemplateRun(advanced);
+        if (advanced is not null)
+        {
+            Run = resume is null ? new TemplateRun(advanced) : TemplateRun.Restore(advanced, resume, "Picked up from a saved run. Press Go to carry on.");
+            // A step that was under way is picked up, not started again: Go shows the orchestrator the worker's latest reply.
+            if (resume is { State: not RunState.Ready }) _stepBegun = Run.Current?.Step.Id;
+            _introduced = resume is not null && brainRemembers;
+        }
         _launch = worker.SessionLaunch;
         if (workflow?.ContextThreshold is { } t) ContextThreshold = t;
         _constructed = true;
@@ -206,14 +222,28 @@ public sealed partial class PaneOrchestrator : IDisposable
     /// <summary>The real thing for a Cockpit pane: a Claude Code session on the owner's login reading the pane's folder.</summary>
     /// <param name="assumedWindowTokens">The orchestrator's own context window, for its bar (Claude Code does not record it).</param>
     public static PaneOrchestrator ForPane(IBuildWorker worker, ProcessRunner runner, string command, string model, string projectDirectory,
-        string paneLabel, OrchestratorWorkflow? workflow, string? sessionsRoot = null, long assumedWindowTokens = 200_000, AdvancedTemplate? advanced = null)
+        string paneLabel, OrchestratorWorkflow? workflow, string? sessionsRoot = null, long assumedWindowTokens = 200_000, AdvancedTemplate? advanced = null,
+        RunResume? resume = null)
     {
         var folder = Path.Combine(sessionsRoot ?? DefaultSessionsRoot, $"{DateTimeOffset.Now:yyyyMMdd-HHmmss}-{OrchestratorMessages.Slug(Path.GetFileName(projectDirectory.TrimEnd('\\', '/')))}");
         // Its own session loads no CLAUDE.md, so the worker's instruction files are copied into its prompt.
         var rules = OrchestratorRules.Gather(projectDirectory, Instructions.InstructionFiles.DetectCli(worker.SessionLaunch?.CommandLine));
-        var session = new ClaudeJsonSession(runner, command, advanced?.Model ?? workflow?.Model ?? model, folder, projectDirectory,
-            SystemPrompt(projectDirectory, paneLabel, workflow, rules, advanced), advanced is null ? PaneDecision.Schema : PaneDecision.RunSchema);
-        return new PaneOrchestrator(worker, new ClaudePaneBrain(session, assumedWindowTokens), advanced?.Name ?? workflow?.Name ?? "Orchestrator", workflow, projectDirectory, advanced);
+        var prompt = SystemPrompt(projectDirectory, paneLabel, workflow, rules, advanced);
+        var schema = advanced is null ? PaneDecision.Schema : PaneDecision.RunSchema;
+        var brainModel = advanced?.Model ?? workflow?.Model ?? model;
+
+        // A saved run goes on with the orchestrator session that followed it, which remembers the job and the owner's
+        // instructions, as long as Claude Code still has its transcript; else with a new one, shown the worker's history.
+        ClaudeJsonSession? session = null;
+        if (resume is { BrainSessionId: { Length: > 0 } id, BrainFolder: { Length: > 0 } was })
+        {
+            var same = new ClaudeJsonSession(runner, command, brainModel, was, projectDirectory, prompt, schema, id, alreadyStarted: true);
+            if (File.Exists(same.TranscriptPath)) session = same;
+        }
+        var remembers = session is not null;
+        session ??= new ClaudeJsonSession(runner, command, brainModel, folder, projectDirectory, prompt, schema);
+        return new PaneOrchestrator(worker, new ClaudePaneBrain(session, assumedWindowTokens), advanced?.Name ?? workflow?.Name ?? "Orchestrator", workflow, projectDirectory,
+            advanced, resume?.Snapshot, remembers);
     }
 
     /// <summary>The orchestrator's own context window use, read from its transcript after each decision; null until it has decided once.</summary>
@@ -368,6 +398,7 @@ public sealed partial class PaneOrchestrator : IDisposable
                 if (_restarting) continue;
                 if (_worker.IsAtSecurityCheck) { NoteWaitingForOwner(); continue; }
                 if (_held != null) { await DeliverHeldAsync(); continue; }
+                if (_awaitingQuiet && !_thinking) await FollowWhenQuietAsync();
                 // The terminal can miss a turn end (a message queued during a busy turn runs as the next one without the CLI
                 // ever going quiet in between). The transcript records every turn end.
                 if (!_thinking && (_sentSinceLastTurn || _handoffRequested) && _worker.IsRunning && _worker.ReadTurnEndedAt() is { } ended
@@ -555,6 +586,7 @@ public sealed partial class PaneOrchestrator : IDisposable
                 return false;
             }
             var stepAtAsk = Run?.Current?.Step.Id;
+            _awaitingQuiet = false; // the orchestrator is being brought in now, whatever the run was waiting for
 
             // The first message carries the whole session so far, so the orchestrator knows the job (a transcript can be tens of MB: read off this thread).
             string? history = null;

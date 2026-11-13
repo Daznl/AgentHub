@@ -2,7 +2,7 @@
 
 An **orchestration template** (📚 Templates, `workflows/*.md`) gives an orchestrator instructions and leaves the sequence to it. An **advanced template** is the sequence itself: stages and steps the orchestrator follows one by one, ticking each off, pausing when something needs the owner.
 
-Status (2026-11-13): the file format, its checks and the project store are built (`AdvancedTemplate`, `AdvancedTemplateStore`), a window shows a project's templates as trees (`AdvancedTemplatesWindow`, `AdvancedTemplateTree`), and an orchestrator on a pane can follow one step by step, started, paused and sent on from that window (`TemplateRun`, `PaneOrchestrator.Run.cs`). A run is lost when its orchestrator is detached or AgentHub closes: keeping runs, editing and the helper crab are not built; see "Build order" below. Tested with a scripted orchestrator only, not yet with a real Claude session end to end.
+Status (2026-11-13): the file format, its checks and the project store are built (`AdvancedTemplate`, `AdvancedTemplateStore`), a window shows a project's templates as trees (`AdvancedTemplatesWindow`, `AdvancedTemplateTree`), and an orchestrator on a pane can follow one step by step, started, paused and sent on from that window (`TemplateRun`, `PaneOrchestrator.Run.cs`). Every run is kept on disk and can be picked up again after a detach or a restart, from **⏯ Runs** (`RunStore`, `RunRecorder`, `RunsWindow`). Editing and the helper crab are not built; see "Build order" below. Tested with a scripted orchestrator only, not yet with a real Claude session end to end.
 
 ## Following one
 
@@ -12,9 +12,27 @@ Status (2026-11-13): the file format, its checks and the project store are built
 4. **⏸ Pause** stops the run at its step (**⏸ PAUSED HERE**); **▶ Go** carries it on.
 5. **▶ from here** on a step (shown under the pointer, or with the keyboard on it) sends the run on from that step after a confirmation: steps before it that are not done become **SKIPPED**.
 6. When the run needs you (an ask-owner step, or an escalation) the bar says **RUN WAITING FOR YOU** with the question, the step says **🙋 WAITING FOR YOU**, and the pane pulses as for any orchestrator message. Answer in the orchestrator's box on the pane.
-7. **🗺 Run** in the orchestrator's box brings the window back. **✕ Detach** ends the run.
+7. **🗺 Run** in the orchestrator's box brings the window back. **✕ Detach** takes the orchestrator off; the run stays, paused, in **⏯ Runs**.
 
 The run follows the template as it was when the orchestrator was attached; the window says so when the file has changed since.
+
+## Paused runs: ⏯ Runs
+
+A run is written to `C:\data\agenthub\runs\<started>-<template>\run.json` (`AGENTHUB_RUNS_DIR` replaces the folder) from the moment its orchestrator is attached, and again each time it moves: the template as the run follows it, each step's state, the step it is at, why it is paused, how the worker session was started, and the orchestrator's own Claude session. Outside any project: a run is your work in progress, not part of the repository.
+
+**A run that no pane follows is paused**, whatever it was doing: its orchestrator was detached (**✕ Detach**), or AgentHub was closed. Closing AgentHub in the middle of a run is therefore safe: the worker session lives on in its host and finishes its turn; nothing is sent to it until the run is resumed.
+
+**⏯ Runs** in the header lists them in three groups:
+
+- **Followed on a pane now**: state, pane and place, with **🗺 Open tree**.
+- **Paused**: place, why it stopped, done steps as a bar, with **▶ Resume…** and **🗑 Delete**.
+- **Finished**: kept until deleted.
+
+**▶ Resume…** offers the running sessions of the run's project that have no orchestrator; pick one and the run carries on there at once. A run is never put on a session by itself. With no such session, it says to start one in the project first. The paused runs of a pane's project are also in its **🧭 Orchestrate** menu (**▶ Resume run: …**, the five latest).
+
+On resume the orchestrator is shown the worker's latest reply and judges whether the step it stood at is done already, so a step that finished while AgentHub was closed is not sent again. It goes on with the same orchestrator session as before, which remembers the job and your instructions, as long as Claude Code still has that session's transcript; otherwise a new one, which is shown the worker's conversation from its start. A run paused on a question or an escalation asks again. Resumed on a session started a moment ago, the run waits until that session has gone quiet.
+
+**🗑 Delete** forgets the run after a confirmation. The project, its template and its sessions are not touched.
 
 ## Seeing them
 
@@ -140,7 +158,7 @@ The orchestrator's fixed rules still hold in a run. A step of the template is th
 1. [x] File format, checks, project store (`AdvancedTemplate.cs`, `AdvancedTemplateTests.cs`)
 2. [x] Window: the tree, read-only, opened from 🧭 Orchestrate (`AdvancedTemplatesWindow`, `AdvancedTemplateTree`, `tests/ui/advanced-templates.ps1`)
 3. [x] Run engine on `PaneOrchestrator`: step by step, live ticks, pause on escalation, Go / Pause / go on from a step. Remaining: a live run with a real Claude session
-4. [ ] Runs kept on disk, a Paused runs panel, resume after AgentHub restarts
+4. [x] Runs kept on disk, the ⏯ Runs panel, resume after a detach or an AgentHub restart (`RunStore`, `RunRecorder`, `RunsWindow`, `RunStoreTests`, `tests/ui/saved-runs.ps1`). Remaining: resume into a session AgentHub starts itself
 5. [ ] Editing by hand through drafts, also while a run is paused
 6. [ ] The helper crab: builds a template from a plan, changes one from a request
 7. [ ] Parallel stages across panes

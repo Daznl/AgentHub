@@ -1,0 +1,40 @@
+<Window x:Class="AgentHub.RunsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AgentHub - Runs" Height="640" Width="920" MinHeight="360" MinWidth="680"
+        Icon="Assets/AppIcon.png" WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBackgroundBrush}" Foreground="{StaticResource TextBrush}" FontFamily="Segoe UI">
+    <Grid Margin="16,14,16,16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" Margin="0,0,0,12" LastChildFill="True">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                <Button x:Name="RefreshBtn" Click="Refresh_Click" Content="↻ Refresh" ToolTip="Read the runs again now (they are re-read every few seconds while this window is open)"
+                        Padding="10,5" Margin="0,0,8,0" FontSize="12" />
+                <Button Click="Close_Click" Content="✕ Close" ToolTip="Close this window (Esc does too)" Padding="10,5" Margin="0" FontSize="12" />
+            </StackPanel>
+            <StackPanel Margin="0,0,12,0">
+                <TextBlock Text="⏯ Runs" FontSize="18" FontWeight="SemiBold" />
+                <TextBlock Margin="0,3,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap"
+                           Text="Runs of advanced templates. A run stays here when its orchestrator is detached or AgentHub closes: paused, until you resume it on a session." />
+            </StackPanel>
+        </DockPanel>
+
+        <Border Grid.Row="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,10,4,10">
+            <Grid>
+                <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                    <StackPanel x:Name="RowsPanel" />
+                </ScrollViewer>
+                <TextBlock x:Name="EmptyText" Visibility="Collapsed" Foreground="{StaticResource MutedBrush}" FontSize="13" MaxWidth="520"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
+                           Text="No runs yet.&#x0a;&#x0a;Start one on a pane with a running session: 🧭 Orchestrate → 🗺 Follow: a template of the project. It is kept here from then on." />
+            </Grid>
+        </Border>
+
+        <TextBlock x:Name="StatusText" Grid.Row="2" Margin="2,10,0,0" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
+    </Grid>
+</Window>

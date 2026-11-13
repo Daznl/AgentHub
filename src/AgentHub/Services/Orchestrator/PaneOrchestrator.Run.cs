@@ -14,6 +14,12 @@ public sealed partial class PaneOrchestrator
     /// <summary>The run of the advanced template this orchestrator follows; null for an orchestrator without one.</summary>
     public TemplateRun? Run { get; }
 
+    /// <summary>How the pane's session was last started, as far as known: kept with a saved run.</summary>
+    public SessionLaunch? Launch => _worker.SessionLaunch ?? _launch;
+    /// <summary>The orchestrator's own Claude session and the folder it runs in; null for a scripted one. Kept with a saved run, to pick the same session up.</summary>
+    public string? BrainSessionId => _brain.SessionId;
+    public string? BrainFolder => _brain.SessionFolder;
+
     /// <summary>
     /// The pane's session has ended and the orchestrator stays on all the same: it is restarting the session itself, or it
     /// follows a run that is not finished (a close-session step ended it, or it ended by itself and the run paused).
@@ -93,9 +99,17 @@ public sealed partial class PaneOrchestrator
                     return;
                 }
                 var waits = step.Kind == StepKind.WaitForWorker;
-                var busy = !_worker.IsAwaitingInput;
-                // A step the worker is still on (a wait, or a step picked up again): its turn end brings the orchestrator in.
-                if (busy && (waits || resumed)) return;
+                // Mid-turn: not at its prompt, and printing. A session that has been quiet as long as a turn end takes to settle
+                // is idle even when it was never seen to finish a turn (one just started, or a run picked up on it): waiting for
+                // its turn end would wait for ever (UI test 2026-11-13: a run resumed on a fresh session never went on).
+                var busy = !_worker.IsAwaitingInput && _worker.OutputSilentFor < TurnSettle;
+                // A step the worker is still on (a wait, or a step picked up again): its turn end brings the orchestrator in, or,
+                // when it was only starting up and no turn end follows, the loop does once it has gone quiet.
+                if (busy && (waits || resumed))
+                {
+                    _awaitingQuiet = true;
+                    return;
+                }
 
                 var reply = waits || resumed ? _worker.ReadLastReply() ?? "" : null;
                 var eventText = resumed
@@ -109,6 +123,22 @@ public sealed partial class PaneOrchestrator
             }
         }
         finally { _runGate.Release(); }
+    }
+
+    /// <summary>The run left a step to the worker's turn end; set until the orchestrator is next brought in.</summary>
+    private volatile bool _awaitingQuiet;
+
+    /// <summary>
+    /// The run is waiting for a turn end of a session that was printing when it looked (it was starting up, say) and may
+    /// never end a turn: once the session has gone quiet, the run goes on without one. Called from the loop.
+    /// </summary>
+    private async Task FollowWhenQuietAsync()
+    {
+        if (Run is not { State: RunState.Running }) { _awaitingQuiet = false; return; }
+        if (!_worker.IsRunning || _worker.IsAtSecurityCheck) return;
+        if (!_worker.IsAwaitingInput && _worker.OutputSilentFor < TurnSettle) return;
+        _awaitingQuiet = false;
+        await FollowRunAsync();
     }
 
     /// <summary>
