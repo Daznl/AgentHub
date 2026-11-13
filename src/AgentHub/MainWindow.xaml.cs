@@ -152,6 +152,9 @@ public partial class MainWindow : Window
         var args = Environment.GetCommandLineArgs();
         var timelineArg = Array.FindIndex(args, a => string.Equals(a, "--timeline", StringComparison.OrdinalIgnoreCase));
         if (timelineArg >= 0 && timelineArg + 1 < args.Length && Directory.Exists(args[timelineArg + 1])) ShowTimeline(args[timelineArg + 1]);
+        // "AgentHub.exe --advanced-templates <folder>" opens that project's advanced templates the same way.
+        var advancedArg = Array.FindIndex(args, a => string.Equals(a, "--advanced-templates", StringComparison.OrdinalIgnoreCase));
+        if (advancedArg >= 0 && advancedArg + 1 < args.Length) ShowAdvancedTemplates(args[advancedArg + 1]);
         _ = LoadGitHubReposAsync();
     }
 
@@ -281,7 +284,48 @@ public partial class MainWindow : Window
             item.Click += (_, _) => AttachPaneOrchestrator(pane, picked);
             menu.Items.Add(item);
         }
+        menu.Items.Add(new Separator());
+        var advanced = new MenuItem
+        {
+            Header = "🗺 Advanced templates of this project…",
+            ToolTip = "The sequences of stages and steps kept in this project's orchestration folder, each shown as a tree. Viewing only so far: an orchestrator cannot follow one yet.",
+        };
+        advanced.Click += (_, _) => ShowAdvancedTemplates(pane.ContextFolder);
+        menu.Items.Add(advanced);
         menu.IsOpen = true;
+    }
+
+    private readonly Dictionary<string, AdvancedTemplatesWindow> _advancedTemplateWindows = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 🗺 Advanced templates: one window per project, reused; not modal, so it sits beside the Cockpit. The project is the
+    /// checkout <paramref name="folder"/> is in (its own worktree, since templates are files of the branch), or the folder
+    /// itself outside a repository.
+    /// </summary>
+    private async void ShowAdvancedTemplates(string? folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+        {
+            StatusText.Text = "Advanced templates: this pane has no folder.";
+            return;
+        }
+        var project = folder;
+        try
+        {
+            var top = await _runner.RunAsync("git", ["rev-parse", "--show-toplevel"], folder);
+            if (top.ExitCode == 0 && top.StdOut.Trim() is { Length: > 0 } path && Directory.Exists(path)) project = Path.GetFullPath(path);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or OperationCanceledException) { /* no git: the folder itself */ }
+
+        if (!_advancedTemplateWindows.TryGetValue(project, out var window))
+        {
+            window = new AdvancedTemplatesWindow(project) { Owner = this };
+            window.Closed += (_, _) => _advancedTemplateWindows.Remove(project);
+            _advancedTemplateWindows[project] = window;
+            window.Show();
+        }
+        if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
+        window.Activate();
     }
 
     private void AttachPaneOrchestrator(TerminalPaneControl pane, OrchestratorWorkflow? workflow)
