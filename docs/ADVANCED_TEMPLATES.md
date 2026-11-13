@@ -86,6 +86,37 @@ The worker carries out every step, the git ones included. The orchestrator judge
 
 Two stages that do not depend on each other may run side by side on separate workers (`HasParallelStages`). A single worker follows `ExecutionOrder()`: every `after` respected, the stage earlier in the file first among those free to start. Stages cannot loop; a file whose stages wait for each other is refused.
 
+## How a run works
+
+Built 2026-11-13 as the engine only (`TemplateRun`, `PaneOrchestrator.Run.cs`, `TemplateRunTests`): nothing in the app starts a run yet; the buttons and the live tree come next.
+
+A run is a pane orchestrator (🧭) given an advanced template. It is attached to a running session, like any orchestrator, and waits for **Go**; until then it is an orchestrator like any other, so the owner can tell it the job first.
+
+**AgentHub keeps the place, never the orchestrator.** Every message to the orchestrator has a `[RUN]` section: the current step, what it means, and the step after it. Its reply has a fourth field, `step_outcome`:
+
+| `step_outcome` | Meaning | What AgentHub does |
+| --- | --- | --- |
+| `done` | the step is complete, judged from the worker's reply | ticks it off, moves to the next step and asks again; a `to_worker` sent with it is dropped |
+| `continuing` | under way | types `to_worker` into the worker, if any, and waits for its turn to end |
+| `escalate` | the owner must settle something | pauses the run and shows `to_owner`; nothing goes to the worker |
+| `null` | no step is concerned | nothing |
+
+Step by step:
+
+- **Steps for the worker** (`instruct`, the git kinds, `handoff`): the orchestrator words the instruction; when the worker's turn ends it judges the reply. If it words nothing, AgentHub sends the step's own instruction (`TemplateRun.WorkerInstruction`).
+- **`wait-for-worker`**: nothing is sent. The orchestrator judges the worker's latest reply at once; when the worker is still busy, at its turn end.
+- **`ask-owner`**: AgentHub puts the question in the orchestrator box and pauses. The owner's answer goes to the orchestrator, and `done` carries the run on.
+- **`new-session`**, **`close-session`**: AgentHub starts a fresh session in the pane, the way the last one was started, or ends the session. The orchestrator stays on the pane while the run is unfinished, session or no session.
+
+Pausing and going on:
+
+- **Pause** stops the run at its current step. The worker's own turn runs on, but it is sent nothing more and its turn ends are not acted on; the orchestrator still answers the owner.
+- **Go** carries a paused run on: the orchestrator is shown the worker's latest reply and decides whether the step is done already. Go with a step named goes on from that step, whatever the run was doing: steps before it that were not done count as skipped, it and everything after it are to do.
+- An **escalation** is answered in the orchestrator box; the run carries on by itself once the orchestrator has what it needs (`continuing` or `done`), or on Go.
+- The run also pauses, saying why, when there is no worker session for a step that needs one, when the session ends by itself, and when the orchestrator fails or reaches a usage limit.
+
+The orchestrator's fixed rules still hold in a run. A step of the template is the owner asking for exactly that action (a `merge-branch` step needs no further approval), but never a force push, a rewrite of pushed history or anything destructive: such a step is escalated.
+
 ## Build order
 
 1. [x] File format, checks, project store (`AdvancedTemplate.cs`, `AdvancedTemplateTests.cs`)
