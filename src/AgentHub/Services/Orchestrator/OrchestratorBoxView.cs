@@ -62,16 +62,32 @@ public sealed record OrchestratorBoxView(string Title, string State, string Note
     /// <summary>The box for an attached pane orchestrator.</summary>
     public static OrchestratorBoxView For(PaneOrchestrator o)
     {
-        var state = o.IsWaitingForOwner ? "WAITING FOR YOU" : o.IsHandingOff ? "HANDING OFF" : o.IsThinking ? "THINKING…" : o.Conversation.Count == 0 ? "LISTENING" : "ATTACHED";
+        var state = o.IsWaitingForOwner ? "WAITING FOR YOU" : o.IsHandingOff ? "HANDING OFF" : o.IsThinking ? "THINKING…" : o.Run is { } run ? RunWord(run) : o.Conversation.Count == 0 ? "LISTENING" : "ATTACHED";
         var title = "🧭 " + o.Title + (o.Session > 1 ? $" · session #{o.Session}" : "");
         var used = o.LatestContext is { } c ? $"{c.UsedFraction:P0} of {c.WindowTokens / 1000:N0}k" : null;
-        return new OrchestratorBoxView(title, state, OneLine(o.Note), o.Conversation)
+        // A run's place comes first: it is what the owner looks for; the orchestrator's own line follows it.
+        var note = o.Run is { } r ? r.Progress + (o.Note.Length > 0 ? " · " + o.Note : "") : o.Note;
+        return new OrchestratorBoxView(title, state, OneLine(note), o.Conversation)
         {
             HandoffThreshold = o.ContextThreshold,
             ContextUsed = used,
             OrchestratorContext = o.OrchestratorContext
         };
     }
+
+    /// <summary>Where a run stands, as the box's state word.</summary>
+    private static string RunWord(TemplateRun run) => run.State switch
+    {
+        RunState.Ready => "RUN READY",
+        RunState.Running => "RUNNING",
+        RunState.Finished => "RUN FINISHED",
+        _ => run.Cause switch
+        {
+            PauseCause.Owner => "RUN PAUSED",
+            PauseCause.Problem => "RUN STOPPED",
+            _ => "RUN WAITING FOR YOU",
+        },
+    };
 
     /// <summary>
     /// Brings a shown list up to the orchestrator's conversation. The orchestrator replaces its list on every change, so only the

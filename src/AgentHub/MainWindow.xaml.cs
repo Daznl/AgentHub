@@ -255,8 +255,8 @@ public partial class MainWindow : Window
         pane.OrchestratorDetachRequested += DetachPaneOrchestrator;
         pane.OrchestratorMessageSent += (p, text) => { if (_paneOrchestrators.TryGetValue(p, out var o)) _ = o.SendAsync(text); };
         pane.OrchestratorThresholdChanged += SetPaneOrchestratorThreshold;
-        // The session ended: the orchestrator goes with it, unless it ended the session itself for a handoff and is starting the next.
-        pane.SessionStateChanged += () => { if (!pane.IsRunning && _paneOrchestrators.TryGetValue(pane, out var o) && !o.IsRestarting) DetachPaneOrchestrator(pane); };
+        // The session ended: the orchestrator goes with it, unless it ended the session itself for a handoff and is starting the next, or follows a run that is not finished.
+        pane.SessionStateChanged += () => { if (!pane.IsRunning && _paneOrchestrators.TryGetValue(pane, out var o) && !o.KeepsEndedSession) DetachPaneOrchestrator(pane); };
         return pane;
     }
 
