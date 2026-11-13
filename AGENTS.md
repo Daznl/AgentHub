@@ -2,6 +2,8 @@
 
 Read `README.md`, `docs/ARCHITECTURE.md`, and `docs/ROADMAP.md` before making architectural changes. Read `docs/GITHUB_INTEGRATION.md` before touching sign-in, accounts or the repository browser.
 
+Picking up work in progress: read `docs/HANDOFF.md` first (where the current piece of work stands, what was decided, what is next), and rewrite it at the end of the session. It is committed so that a session on another computer can carry on from a clone; `.agenthub/handoff.md` is git-ignored here and stays on one computer.
+
 ## Product intent
 
 AgentHub is a Windows-first personal control centre for GitHub repositories and interchangeable coding CLIs. The repository/task is the durable workspace; Codex, Claude Code, Antigravity, and future agents are executors that can be swapped.
