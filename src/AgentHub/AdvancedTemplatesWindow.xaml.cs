@@ -58,6 +58,7 @@ public partial class AdvancedTemplatesWindow : Window
         _store = new AdvancedTemplateStore(projectFolder);
         HeadingText.Text = "🗺 Advanced templates · " + Path.GetFileName(projectFolder.TrimEnd('\\', '/'));
         SubheadingText.Text = "The sequence an orchestrator follows, step by step. Kept with the project in " + _store.Folder;
+        InitHelper();
         Loaded += (_, _) => Reload(_selectOnLoad, force: true);
         Activated += (_, _) => Reload(SelectedId, force: false);
         Closed += (_, _) =>
@@ -82,10 +83,10 @@ public partial class AdvancedTemplatesWindow : Window
     /// <summary>One line of the list on the left.</summary>
     private sealed record ListItem(AdvancedTemplateFile File, string? RunOn)
     {
-        public string Title => File.Template?.Name is { Length: > 0 } name ? name : File.Id;
-        public string Subtitle => (File.Template is { } t ? AdvancedTemplateTree.Summary(t) + (t.Validate().Count > 0 ? " · has problems" : "") : "Cannot be read")
+        public string Title => (File.Template ?? File.NewDraft)?.Name is { Length: > 0 } name ? name : File.Id;
+        public string Subtitle => ((File.Template ?? File.NewDraft) is { } t ? (File.IsNew ? "New, not saved yet · " : "") + AdvancedTemplateTree.Summary(t) + (t.Validate().Count > 0 ? " · has problems" : "") : "Cannot be read")
                                   + (RunOn is null ? "" : $" · followed on {RunOn}");
-        public Brush SubtitleBrush => File.Template is { } t && t.Validate().Count == 0 ? RunOn is null ? Muted : Purple : Amber;
+        public Brush SubtitleBrush => (File.Template ?? File.NewDraft) is { } t && t.Validate().Count == 0 ? RunOn is not null ? Purple : File.IsNew ? Cyan : Muted : Amber;
         public override string ToString() => Title; // what a screen reader and UI Automation call the item
     }
 
@@ -293,6 +294,7 @@ public partial class AdvancedTemplatesWindow : Window
         _stages.Clear();
         _scrolledTo = null;
         _shownFile = file;
+        UpdateHelperTarget();
         _shownRun = file is not null && _runs.TryGetValue(file.Id, out var bound) ? bound : null;
         ProblemsBox.Visibility = Visibility.Collapsed;
         NoteText.Visibility = Visibility.Collapsed;
@@ -304,7 +306,7 @@ public partial class AdvancedTemplatesWindow : Window
             TreePanel.Visibility = Visibility.Collapsed;
             EmptyPanel.Visibility = Visibility.Visible;
             EmptyText.Text = "This project has no advanced templates yet.\n\nAn advanced template is a file in " + _store.Folder +
-                             " that lists the stages and steps an orchestrator follows one by one.";
+                             " that lists the stages and steps an orchestrator follows one by one. The Template helper (the crab at the top right) builds one from your written plan.";
             return;
         }
         EmptyPanel.Visibility = Visibility.Collapsed;
@@ -313,7 +315,7 @@ public partial class AdvancedTemplatesWindow : Window
         // A run follows the template as it was when the orchestrator was attached (or last given a change), whatever the
         // file says now. Editing shows the draft instead.
         var run = _shownRun?.Orchestrator.Run;
-        if ((editing ? _draft : run?.Template ?? file.Template) is not { } template)
+        if ((editing ? _draft : run?.Template ?? file.Template ?? file.NewDraft) is not { } template)
         {
             TemplateName.Text = file.Id;
             TemplateSummary.Text = "";
@@ -326,7 +328,7 @@ public partial class AdvancedTemplatesWindow : Window
         TemplateSummary.Text = AdvancedTemplateTree.Summary(template);
         TemplateDescription.Text = template.Description ?? "";
         TemplateDescription.Visibility = editing || string.IsNullOrWhiteSpace(template.Description) ? Visibility.Collapsed : Visibility.Visible;
-        if (file.Template is not null && !editing)
+        if ((file.Template ?? file.NewDraft) is not null && !editing)
         {
             EditBtn.Visibility = Visibility.Visible;
             EditBtn.Content = file.HasDraft ? "✏ Open the draft" : "✏ Edit";
@@ -347,7 +349,8 @@ public partial class AdvancedTemplatesWindow : Window
         var notes = new List<string>();
         if (problems.Count == 0 && template.HasParallelStages)
             notes.Add(editing ? "Some stages do not depend on each other. Shown in the order of the file." : "Some stages do not depend on each other and could run side by side. This is the order a single worker follows.");
-        if (!editing && file.HasDraft) notes.Add($"A change is waiting as a draft ({Path.GetFileName(_store.DraftPathFor(file.Id))}): ✏ Open the draft to see it, then save or discard it.");
+        if (!editing && file.IsNew) notes.Add($"A new template, not saved yet: only its draft exists ({Path.GetFileName(_store.DraftPathFor(file.Id))}). ✏ Open the draft to look it over and 💾 Save it as {Path.GetFileName(_store.PathFor(file.Id))}, or discard it.");
+        else if (!editing && file.HasDraft) notes.Add($"A change is waiting as a draft ({Path.GetFileName(_store.DraftPathFor(file.Id))}): ✏ Open the draft to see it, then save or discard it.");
         if (!editing && run is not null && file.Template is { } onDisk && onDisk.Serialize() != template.Serialize())
             notes.Add("The file has changed since this run was given its template. The run follows the version shown here until you ⤵ Apply the saved one to it.");
         if (editing && run is not null) notes.AddRange(RunNotes(run, template));

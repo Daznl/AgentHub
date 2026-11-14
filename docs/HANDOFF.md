@@ -1,6 +1,6 @@
 # Handoff: advanced templates
 
-Written 2026-11-13 at the end of the session that built stage 5 (editing), for the next session, on this computer or another (a fresh clone). Stages 1 to 5 are on `main` (stage 5 merged as `13be3ea`); no work is left on a branch.
+Written 2026-11-14 at the end of the session that built stage 6 (the Template helper), for the next session, on this computer or another (a fresh clone). Stages 1 to 6 are on `main` (stage 6 from `feature/template-helper`); no work is left on a branch.
 
 Read first: `AGENTS.md`, then `docs/ADVANCED_TEMPLATES.md` (what the feature is, how it is used, the file format, how a run works, editing, the build order). This file only adds what that one does not say: where things stand, what was decided, what to do next and what to watch for.
 
@@ -19,14 +19,14 @@ Called **advanced templates**. The earlier, looser orchestration templates (📚
 | 3 | Run engine (`TemplateRun`, `PaneOrchestrator.Run.cs`) and its controls: Follow, Go, Pause, from here, live tree | merged, 12 and 13 |
 | 4 | Runs kept on disk and resumed (`RunStore`, `RunRecorder`, `RunsWindow`) | merged, 14 |
 | 5 | Editing through drafts (`TemplateEditing`, `AdvancedTemplatesWindow.Editing.cs`); a saved change applied to a run that stands still (`TemplateRun.ProblemsWith` / `Rebase`, `PaneOrchestrator.ApplyTemplate`) | merged, 16 |
-| 6 | Helper crab: builds a template from a plan, changes one from a request | **next** |
-| 7 | Parallel stages across panes | not started |
+| 6 | Template helper: the crab of the window builds a template from a plan and changes the one on screen, into a draft (`TemplateHelper`, `AdvancedTemplatesWindow.Helper.cs`) | merged |
+| 7 | Parallel stages across panes | **next**, not started; needs the owner's decisions (below) |
 
-Tests on `main`: 341 unit tests pass, 4 live ones skipped. One live test fails on this computer, `LiveUsageServiceTests.Live_AntigravityUsage_ReturnsAvailableSnapshots` (the Antigravity CLI timed out); it has nothing to do with this work. Four interface tests pass: `tests/ui/advanced-templates.ps1`, `advanced-template-run.ps1`, `saved-runs.ps1` and the new `template-editing.ps1`.
+Tests on `main`: 363 unit tests pass, 5 live ones skipped unless `AGENTHUB_LIVE_REVIEW=1`. With it, `TemplateHelperTests.Live_it_builds_a_sound_template_from_a_plan_and_changes_it` passes against the real Claude Code (2026-11-14, about a minute). The interface tests pass: `tests/ui/advanced-templates.ps1`, `advanced-template-run.ps1`, `saved-runs.ps1`, `template-editing.ps1`, the new `template-helper.ps1`, and `crab-helper.ps1` (the helper pane changed). `template-helper.ps1 -Live` drives the real helper through the window (build from a plan, then a change) and passed.
 
-**Still not done: a run with a real Claude session, end to end.** Every run so far used a scripted orchestrator. The prompt the real orchestrator gets (`RunPrompt` in `PaneOrchestrator.Run.cs`, the `[RUN]` section from `TemplateRun.Describe`, and now the changed-template notice from `DescribeRun`) has never been read by a model. Expect to tune it. This is the biggest unknown; do it before or alongside stage 6.
+**Still not done: a run with a real Claude session, end to end.** Every run so far used a scripted orchestrator. The prompt the real orchestrator gets (`RunPrompt` in `PaneOrchestrator.Run.cs`, the `[RUN]` section from `TemplateRun.Describe`, and the changed-template notice from `DescribeRun`) has never been read by a model. Expect to tune it. This is the biggest unknown; do it before or alongside stage 7. The Template helper's prompt, by contrast, has been tried live and gave sound templates (a branch per stage, a context read, a build with "don't start stage N", an escalating watch, handoff, commit, pull requests as the plan said).
 
-**The taskbar install** is on `f847e17` (stage 4): it does not have stage 5. The owner was asked whether AgentHub may be closed to install it and has not answered yet. Update it only with `scripts\Deploy-Taskbar.ps1 -CloseRunning` (see `AGENTS.md`), after asking, and confirm with `-Check`.
+**The taskbar install** is on `f847e17` (stage 4): it has neither stage 5 nor 6. Update it only with `scripts\Deploy-Taskbar.ps1 -CloseRunning` (see `AGENTS.md`), after asking whether AgentHub may be closed, and confirm with `-Check`.
 
 ## Decisions the owner made
 
@@ -53,11 +53,30 @@ From earlier sessions, still unconfirmed:
 - A paused run is never put on a session by itself. **▶ Resume…** offers the running sessions of the run's project that have no orchestrator. Resuming into a session AgentHub starts itself is not built.
 - Runs live outside any repository: `C:\data\agenthub\runs` (`AGENTHUB_RUNS_DIR`).
 
-## Stage 6: what to build
+Taken in stage 6 without an answer (the owner said "build the rest"):
 
-The helper crab in the Advanced templates window: given a written plan (a file such as `docs/PLAN.md`, or text), it writes a template; given a request ("add a review step after each build"), it changes one. It writes the **draft** only (`AdvancedTemplateStore.SaveDraftAsync`); the owner sees it with ✏ Open the draft and saves or discards it, so stage 5's editor is how its work is checked. Look at how the Timeline helper uses `AppHelperPane` first. The helper must know the format (the "Format" section of `docs/ADVANCED_TEMPLATES.md` is the reference), the step kinds and the rule that step ids are never reused. Validate what it writes; a draft with problems is fine to show, not to save.
+- **The helper may change a template a run follows**, as a draft. It is told the steps the run has reached and to keep them; ⤵ Apply still refuses a change to them. This was the open stage 6 question.
+- **What the helper makes opens in the editor at once**, unless the owner is editing another template; then it waits in the list.
+- **The helper reads the project itself** (Read, Grep, Glob on the project, read-only) rather than AgentHub pasting the plan in. It writes nothing; AgentHub writes the draft.
 
-Open question for the owner: should the helper also be able to change a template a run follows, as a draft the owner then applies? Stage 5 already makes that safe (Apply refuses changes to reached steps).
+## Stage 6: how it was built
+
+- `TemplateHelper` (service): the system prompt (the step kinds generated from `StepKind`, the id rules, a default stage shape), the reply schema (`answer`, `suggestions`, `action` none / create / change, the whole `template`), the request (the project's templates, the one on screen as JSON, a run's reached steps, the step ids taken, the plan files found, the conversation), `RunAsync` (print mode, prompt in a file, `--add-dir` the project), `Read`, `Prepare` (ids made valid; an id used twice or that a removed step had gets a new one; fields a kind does not use dropped), `NewTemplateId`, `FindPlans`.
+- `AppHelperPane` gained `Answerer` (answers in place of `AppHelp`), `WorkingText`, `AskToolTip`, `Ask`, `Stop`, `BusyChanged`. The main window's and the Timeline's helpers are unchanged.
+- `AdvancedTemplateStore.List` lists a draft with no template beside it as a new template (`AdvancedTemplateFile.NewDraft`, `IsNew`); the window shows it, opens it in the editor and saves it like any draft.
+- `AdvancedTemplatesWindow.Helper.cs`: the crab, the pane, the plan buttons, and `AnswerAsync`: flushes the draft being edited, asks, refuses to write over a template changed meanwhile, prepares and writes the draft, opens it, and adds to the crab's answer where the draft is, its problems, the ids AgentHub corrected and whether the run could take it.
+- Fixed on the way: `AdvancedTemplate.HasParallelStages` was written into every template file (`"hasParallelStages": false`), and threw while writing a template whose stages loop. It is `[JsonIgnore]` now. Files saved before carry the property; it is ignored when read and dropped when written again.
+
+## Stage 7: what to decide and build
+
+Parallel stages across panes: two stages that do not wait for each other (`after`) run at once on separate workers. The format, `Predecessors`, `ExecutionOrder` and `HasParallelStages` exist; the engine runs one worker in `ExecutionOrder()`. Questions for the owner before building:
+
+1. **Where the second worker works.** `AGENTS.md` says two autonomous agents must not edit the same working tree by default: parallel work belongs in git worktrees. Should AgentHub create a worktree per parallel stage (where, named how, removed when?), or should the template's steps do it (a new step kind)?
+2. **Which panes.** A run attached to one pane needs more: take idle panes, start new ones, or ask each time?
+3. **One orchestrator or one per pane.** One orchestrator watching several workers keeps one conversation with the owner; one per pane is simpler for the engine but splits the conversation.
+4. **Merging back.** When parallel stages finish, who merges their branches: a `merge-branch` step in a later stage that waits for both (`after`), as the format already allows?
+
+Likely shape: `TemplateRun` keeps a place per lane instead of one index; the run bar and the tree show a lane per pane; `RunStore` records each lane's place.
 
 ## Things to watch for
 
@@ -72,6 +91,8 @@ Open question for the owner: should the helper also be able to change a template
 - **A WPF message box reached through its owner window lists its buttons as bare panes** in UI Automation. The tests find them by name and press them with `BM_CLICK` (`Named`, `Press`).
 - **An owned window's elements are also descendants of the main window** in UI Automation: a text shown in the tree window and in the pane's box counts twice from the main window.
 - **Scripted tests can race the run.** New tests should wait on a state, not on an exact count of messages.
+- **The scripted Template helper** is a `.cmd` that hands stdin to `tests/ui/fake-template-helper.ps1` (`AGENTHUB_TEMPLATE_HELPER_COMMAND`); it answers by words in the `<request>` (build … PLAN.md, review step, broken, escalation, fail, slow) and logs every request, so tests check what the helper was told. Wait for the pane's **Ask** button to come back, not for a time.
+- **The helper's answer has AgentHub's own lines added** (where the draft is, its problems, ids corrected). The model is told not to say where the draft is; if both say it, look at the prompt's `answer` rule.
 - On the IGO computer the active `gh` account is the IGO one and the repository belongs to `Daznl`; commands there pass that account's token for the one call. At home, with `Daznl` as the active account, plain `git` and `gh` work.
 
 ## Working rules that held
@@ -84,5 +105,5 @@ Open question for the owner: should the helper also be able to change a template
 
 1. `git pull` (or clone), then `dotnet build AgentHub.sln` and `dotnet test tests\AgentHub.Tests`.
 2. Ask whether to put the latest `main` on the taskbar (`scripts\Deploy-Taskbar.ps1`); it closes the running app.
-3. Confirm the stage 5 defaults above with the owner, ask whether to do the live run with a real Claude session first, and ask the stage 6 question.
+3. Confirm the stage 5 and 6 defaults above, ask whether to do the live run with a real Claude session first, and put the stage 7 questions to the owner.
 4. Rewrite this file at the end of the session.

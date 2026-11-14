@@ -444,7 +444,7 @@ public partial class MainWindow : Window
         }
         if (!_advancedTemplateWindows.TryGetValue(project, out var window))
         {
-            window = new AdvancedTemplatesWindow(project) { Owner = this };
+            window = new AdvancedTemplatesWindow(project) { Owner = this, HelperCommand = ClaudeCommand, CrabAnimated = _settings.AnimatedBackground && _settings.CrabMascot };
             window.Closed += (_, _) => _advancedTemplateWindows.Remove(project);
             _advancedTemplateWindows[project] = window;
             window.Show();
