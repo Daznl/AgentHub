@@ -265,6 +265,8 @@ public sealed partial class AdvancedTemplate
         Order() ?? throw new InvalidOperationException("The template's stages cannot be put in order; see Validate().");
 
     /// <summary>Some stages do not depend on each other, so they could run side by side on separate workers.</summary>
+    /// <remarks>Not part of the file: it is worked out, and it throws for stages that cannot be put in order.</remarks>
+    [JsonIgnore]
     public bool HasParallelStages
     {
         get
@@ -294,8 +296,16 @@ public sealed partial class AdvancedTemplate
     }
 }
 
-/// <summary>One file in a project's template folder: the template, or why it could not be read.</summary>
-public sealed record AdvancedTemplateFile(string Id, string Path, AdvancedTemplate? Template, string? Error, bool HasDraft);
+/// <summary>
+/// One file in a project's template folder: the template, or why it could not be read. A new template that is only a
+/// draft so far (the helper built it, the owner has not saved it) has no <see cref="Template"/> and its draft as
+/// <see cref="NewDraft"/>; <see cref="Path"/> is where it will be saved.
+/// </summary>
+public sealed record AdvancedTemplateFile(string Id, string Path, AdvancedTemplate? Template, string? Error, bool HasDraft, AdvancedTemplate? NewDraft = null)
+{
+    /// <summary>A new template not saved yet: only its draft exists.</summary>
+    public bool IsNew => NewDraft is not null;
+}
 
 /// <summary>
 /// A project's advanced templates: <c>orchestration/&lt;id&gt;.json</c> in its repository, committed with it (not under
@@ -315,7 +325,10 @@ public sealed class AdvancedTemplateStore(string repositoryDirectory)
     public string DraftPathFor(string id) => Path.Combine(Folder, id + DraftExtension);
     public bool HasDraft(string id) => File.Exists(DraftPathFor(id));
 
-    /// <summary>Every template in the folder by name; a file that cannot be read is listed with its error, never left out.</summary>
+    /// <summary>
+    /// Every template in the folder by name; a file that cannot be read is listed with its error, never left out. A draft
+    /// with no template beside it is a new template not saved yet, listed with <see cref="AdvancedTemplateFile.NewDraft"/>.
+    /// </summary>
     public IReadOnlyList<AdvancedTemplateFile> List()
     {
         if (!Directory.Exists(Folder)) return [];
@@ -327,7 +340,14 @@ public sealed class AdvancedTemplateStore(string repositoryDirectory)
             try { list.Add(new(id, path, AdvancedTemplate.Parse(File.ReadAllText(path), id), null, HasDraft(id))); }
             catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException) { list.Add(new(id, path, null, ex.Message, HasDraft(id))); }
         }
-        return list.OrderBy(f => f.Template?.Name ?? f.Id, StringComparer.OrdinalIgnoreCase).ThenBy(f => f.Id, StringComparer.OrdinalIgnoreCase).ToList();
+        foreach (var draftPath in Directory.EnumerateFiles(Folder, "*" + DraftExtension))
+        {
+            var id = Path.GetFileName(draftPath)[..^DraftExtension.Length];
+            if (id.Length == 0 || File.Exists(PathFor(id))) continue;
+            try { list.Add(new(id, PathFor(id), null, null, true, AdvancedTemplate.Parse(File.ReadAllText(draftPath), id))); }
+            catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException) { list.Add(new(id, PathFor(id), null, "The new template's draft cannot be read: " + ex.Message, true)); }
+        }
+        return list.OrderBy(f => (f.Template ?? f.NewDraft)?.Name ?? f.Id, StringComparer.OrdinalIgnoreCase).ThenBy(f => f.Id, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     public AdvancedTemplate Read(string id) => AdvancedTemplate.Parse(File.ReadAllText(PathFor(id)), id);

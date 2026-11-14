@@ -40,16 +40,19 @@ public partial class AdvancedTemplatesWindow
 
     // ---- Starting and stopping ----
 
-    private void Edit_Click(object sender, RoutedEventArgs e)
+    private void Edit_Click(object sender, RoutedEventArgs e) => StartEditing();
+
+    /// <summary>Opens the shown template's draft in the editor (a copy of the template when there is none). A new template is its draft.</summary>
+    private void StartEditing()
     {
-        if (_shownFile is not { Template: { } template } file) return;
+        if (_shownFile is not { } file || (file.Template ?? file.NewDraft) is not { } template) return;
         AdvancedTemplate draft;
         try { draft = _store.ReadDraft(file.Id) ?? template.Clone(); }
         catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException)
         {
             var answer = MessageBox.Show(this, $"The draft of this template cannot be read:\n\n{ex.Message}\n\nDiscard it and start again from the saved template?",
                 "The draft cannot be read", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
-            if (answer != MessageBoxResult.OK) return;
+            if (answer != MessageBoxResult.OK || file.IsNew) return;
             try { _store.DiscardDraft(file.Id); }
             catch (Exception io) when (io is IOException or UnauthorizedAccessException) { StatusText.Text = "Could not remove the draft: " + io.Message; return; }
             draft = template.Clone();

@@ -1,6 +1,7 @@
 <Window x:Class="AgentHub.AdvancedTemplatesWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:AgentHub.Controls"
         Title="AgentHub - Advanced Templates" Height="800" Width="1120" MinHeight="460" MinWidth="820"
         Icon="Assets/AppIcon.png" WindowStartupLocation="CenterOwner"
         Background="{StaticResource WindowBackgroundBrush}" Foreground="{StaticResource TextBrush}" FontFamily="Segoe UI">
@@ -19,6 +20,10 @@
                         Padding="10,5" Margin="0,0,8,0" FontSize="12" />
                 <Button Click="Close_Click" Content="✕ Close" ToolTip="Close this window (Esc does too)" Padding="10,5" Margin="0" FontSize="12" />
             </StackPanel>
+            <!-- The crab, and the button that opens the Template helper: builds a template from a plan, changes the one on screen -->
+            <controls:CrabMascot x:Name="Crab" DockPanel.Dock="Right" Width="150" Height="56" VerticalAlignment="Top" Margin="12,0,12,0"
+                                 HelperName="Template helper"
+                                 ToolTip="Template helper: have Claude Code build a template from your written plan, or change the one on screen. What it makes opens as a draft for you to check and save." />
             <StackPanel Margin="0,0,12,0">
                 <TextBlock x:Name="HeadingText" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                 <TextBlock x:Name="SubheadingText" Margin="0,3,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
@@ -30,7 +35,15 @@
                 <ColumnDefinition Width="280" />
                 <ColumnDefinition Width="12" />
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
+
+            <!-- The Template helper, right of the tree: builds a template from a plan, changes the one on screen, into its draft -->
+            <controls:AppHelperPane x:Name="Helper" Grid.Column="3" Width="400" Margin="12,0,0,0" Visibility="Collapsed"
+                                    AutomationProperties.AutomationId="TemplateHelper"
+                                    Title="Template helper" Subtitle="Builds templates from your plan, and changes them"
+                                    Placeholder="Build a template from a plan, or say what to change…"
+                                    Intro="I build advanced templates from your written plan, and change the one on screen when you ask: add a review after each build, a pull request per stage, an extra stage. I can read the project but change nothing in it: what I make goes to a draft that opens in the editor, for you to check and save." />
 
             <!-- The project's templates -->
             <Border Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
@@ -90,9 +103,9 @@
                                             <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
                                         <TextBlock Text="Name" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,0" />
-                                        <TextBox x:Name="DraftNameBox" Grid.Column="1" TextChanged="DraftNameBox_TextChanged" FontSize="12" Padding="4,2" />
+                                        <TextBox x:Name="DraftNameBox" AutomationProperties.Name="Template name" Grid.Column="1" TextChanged="DraftNameBox_TextChanged" FontSize="12" Padding="4,2" />
                                         <TextBlock Grid.Row="1" Text="Description" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Top" Margin="0,8,10,0" />
-                                        <TextBox x:Name="DraftDescriptionBox" Grid.Row="1" Grid.Column="1" TextChanged="DraftDescriptionBox_TextChanged" FontSize="12" Padding="4,2" Margin="0,5,0,0"
+                                        <TextBox x:Name="DraftDescriptionBox" AutomationProperties.Name="Template description" Grid.Row="1" Grid.Column="1" TextChanged="DraftDescriptionBox_TextChanged" FontSize="12" Padding="4,2" Margin="0,5,0,0"
                                                  TextWrapping="Wrap" AcceptsReturn="True" MaxHeight="70" VerticalScrollBarVisibility="Auto" />
                                     </Grid>
                                 </StackPanel>

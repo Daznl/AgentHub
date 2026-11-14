@@ -2,7 +2,7 @@
 
 An **orchestration template** (📚 Templates, `workflows/*.md`) gives an orchestrator instructions and leaves the sequence to it. An **advanced template** is the sequence itself: stages and steps the orchestrator follows one by one, ticking each off, pausing when something needs the owner.
 
-Status (2026-11-13): the file format, its checks and the project store are built (`AdvancedTemplate`, `AdvancedTemplateStore`), a window shows a project's templates as trees (`AdvancedTemplatesWindow`, `AdvancedTemplateTree`), and an orchestrator on a pane can follow one step by step, started, paused and sent on from that window (`TemplateRun`, `PaneOrchestrator.Run.cs`). Every run is kept on disk and can be picked up again after a detach or a restart, from **⏯ Runs** (`RunStore`, `RunRecorder`, `RunsWindow`). Templates are edited in the window through drafts, and a saved change can be given to a run that stands still (`TemplateEditing`, `TemplateRun.Rebase`). The helper crab is not built; see "Build order" below. Tested with a scripted orchestrator only, not yet with a real Claude session end to end.
+Status (2026-11-13): the file format, its checks and the project store are built (`AdvancedTemplate`, `AdvancedTemplateStore`), a window shows a project's templates as trees (`AdvancedTemplatesWindow`, `AdvancedTemplateTree`), and an orchestrator on a pane can follow one step by step, started, paused and sent on from that window (`TemplateRun`, `PaneOrchestrator.Run.cs`). Every run is kept on disk and can be picked up again after a detach or a restart, from **⏯ Runs** (`RunStore`, `RunRecorder`, `RunsWindow`). Templates are edited in the window through drafts, and a saved change can be given to a run that stands still (`TemplateEditing`, `TemplateRun.Rebase`). Since 2026-11-14 the crab at the top right of the window, the Template helper, builds a template from a written plan and changes the one on screen (`TemplateHelper`); tested live with Claude Code. Runs are tested with a scripted orchestrator only, not yet with a real Claude session end to end.
 
 ## Following one
 
@@ -58,6 +58,21 @@ A run keeps the template it was given until the owner gives it another:
 - **Only steps the run has not reached can change.** The steps it has done or skipped and the one it is at stay as they are, in their place; new steps go after the step it is at. The editor shows those steps with 🔒 and without tools, and says when the draft could not be given to the run and why. Apply checks again (`TemplateRun.ProblemsWith`) and says what stops it.
 - Applied, the run is rebuilt on the new template (`TemplateRun.Rebase`): steps keep their state by id, new ones are to do, a paused run stays paused as it was (an escalation or a question too), and a finished run that was given new steps is paused at the first of them. The saved run (`run.json`) holds the new template from then on.
 - The orchestrator is told with its next message: its `[RUN]` section carries the new outline once, with the steps done, skipped and current marked. Its system prompt keeps the outline it was attached with and says `[RUN]` wins.
+
+## The Template helper
+
+The crab at the top right of the window opens the **Template helper** beside the tree. Tell it what you want in your own words:
+
+- **Build from a plan.** It lists the plan files it finds (Markdown at the top of the project or in `docs/` whose name says plan, roadmap, spec, stage, milestone or design) as **📄 Build a template from …** buttons; or name any file, or paste the plan. It reads the plan itself and writes a stage per stage of it: by default a branch, a "read the context" instruction, the build (that stage only, with tests), a watch that pauses for you, a handoff and a commit, a fresh session for the next stage, and a pull request at the end. Where the plan or your request states a workflow (a pull request per stage, say), it follows that.
+- **Change the template on screen.** "Add a code review step after each build", "open a pull request after every stage", "split stage 2 in two". It is given the template as you see it (the draft when one is waiting or being edited) and replies with the whole changed template.
+- **Ask about templates.** What a step kind does, what an escalation point is. Nothing is written.
+
+What it builds or changes is never saved by it. AgentHub writes it as the template's draft (`orchestration/<id>.draft.json`; a new template is only a draft until saved, listed on the left as **New, not saved yet**) and opens it in the editor: check it, change what you like, then **💾 Save** or **🗑 Discard**. A draft with problems is shown with them and cannot be saved. Before writing, AgentHub makes its ids safe (`TemplateHelper.Prepare`): an invalid id is made valid, and a step id used twice, or that a step removed earlier had, gets a new one, as a run's progress is recorded against ids; the crab says when it did. If you change the template while the helper works, its version is not written over yours: it says so, and you can ask again.
+
+It runs Claude Code in print mode on your own login (the command in Settings → Agents) with read-only tools (Read, Grep, Glob) on the project, no settings or MCP servers of yours and no saved session, from `C:\data\agenthub\template-helper`. `AGENTHUB_TEMPLATE_HELPER_COMMAND` replaces the command, for UI tests with a scripted helper.
+
+**A template a run follows** can be changed too, as a draft: the helper is told which steps the run has reached and to keep them as they are. Saved, the change reaches the run only on **⤵ Apply to this run**, which refuses changes to reached steps (see "Changing a template while it is run" above).
+
 ## Where they live
 
 `orchestration/<id>.json` in the project's own repository, committed with it, so the template travels with the project. Not under `.agenthub/`, which holds the owner's own notes and is often git-ignored.
@@ -178,5 +193,5 @@ The orchestrator's fixed rules still hold in a run. A step of the template is th
 3. [x] Run engine on `PaneOrchestrator`: step by step, live ticks, pause on escalation, Go / Pause / go on from a step. Remaining: a live run with a real Claude session
 4. [x] Runs kept on disk, the ⏯ Runs panel, resume after a detach or an AgentHub restart (`RunStore`, `RunRecorder`, `RunsWindow`, `RunStoreTests`, `tests/ui/saved-runs.ps1`). Remaining: resume into a session AgentHub starts itself
 5. [x] Editing by hand through drafts, also while a run is paused (`TemplateEditing`, `AdvancedTemplatesWindow.Editing.cs`, `TemplateRun.Rebase`, `PaneOrchestrator.ApplyTemplate`, `TemplateEditingTests`, `tests/ui/template-editing.ps1`)
-6. [ ] The helper crab: builds a template from a plan, changes one from a request
+6. [x] The helper crab: builds a template from a plan, changes one from a request (`TemplateHelper`, `AdvancedTemplatesWindow.Helper.cs`, `TemplateHelperTests`, `tests/ui/template-helper.ps1`, which with `-Live` runs the real helper)
 7. [ ] Parallel stages across panes
