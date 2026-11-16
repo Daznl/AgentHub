@@ -105,25 +105,25 @@ public class TemplateEditingTests : IDisposable
     }
 
     [Fact]
-    public void A_draft_may_be_unfinished_but_the_store_will_not_save_it()
+    public async Task A_draft_may_be_unfinished_but_the_store_will_not_save_it()
     {
         var store = new AdvancedTemplateStore(_root);
         var template = StagedBuild();
         template.Id = "staged-build";
-        store.SaveAsync(template).GetAwaiter().GetResult();
+        await store.SaveAsync(template);
 
         var draft = store.Read("staged-build");
         TemplateEditing.AddStep(draft, draft.Stages[0], -1, StepKind.Instruct); // no text yet
-        store.SaveDraftAsync("staged-build", draft).GetAwaiter().GetResult();
+        await store.SaveDraftAsync("staged-build", draft);
 
-        var refused = Assert.Throws<InvalidOperationException>(() => store.AcceptDraftAsync("staged-build").GetAwaiter().GetResult());
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => store.AcceptDraftAsync("staged-build"));
         Assert.Contains("needs text", refused.Message);
         Assert.Equal(10, store.Read("staged-build").AllSteps.Count()); // untouched
         Assert.True(store.HasDraft("staged-build"));
 
         draft.Stages[0].Steps[^1].Text = "Tidy up.";
-        store.SaveDraftAsync("staged-build", draft).GetAwaiter().GetResult();
-        store.AcceptDraftAsync("staged-build").GetAwaiter().GetResult();
+        await store.SaveDraftAsync("staged-build", draft);
+        await store.AcceptDraftAsync("staged-build");
         Assert.Equal(11, store.Read("staged-build").AllSteps.Count());
         Assert.False(store.HasDraft("staged-build"));
     }

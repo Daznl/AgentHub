@@ -4,6 +4,12 @@ Written 2026-11-14 at the end of the session that built stage 6 (the Template he
 
 Read first: `AGENTS.md`, then `docs/ADVANCED_TEMPLATES.md` (what the feature is, how it is used, the file format, how a run works, editing, the build order). This file only adds what that one does not say: where things stand, what was decided, what to do next and what to watch for.
 
+## Side piece, 2026-11-16: past sessions on a fresh install
+
+Separate from advanced templates, on branch `feature/discover-session-folders`. The owner noticed that a new user's earlier Claude sessions did not show. Cause: History and the pane launcher only looked in Home, registered repositories and browsed folders. Claude Code keeps sessions on the computer, not in the Claude account, so nothing can be fetched from an account. Now `SessionFolderDiscovery` lists every folder with sessions (from each transcript's recorded `cwd`). Those folders appear in launcher step ① and in History under "Past sessions on this computer", and History offers ➕ Add to repositories for a Git folder. Tests: `SessionFolderDiscoveryTests`, plus `tests/ui/found-folders.ps1` (passes on this computer against the real transcripts; screenshots in `C:\data\agenthub\uitest`).
+
+Defaults taken without an answer: found folders show by themselves (no scan button); Git folders are offered for adding, never added by themselves; scratch folders under AppData/temp and everything under `C:\data\agenthub` except `worktrees` are left out.
+
 ## What the owner asked for
 
 An orchestrator that follows a planned sequence instead of improvising one: a tree of stages and steps (instruct the worker, wait for it, ask the owner, new session, close session, handoff, create branch, commit, merge, move work to a branch, open a pull request), shown like the Timeline tree but forward-looking; ticked off live; pausable at any time and resumable later; editable, also for later steps while a run is under way; and a helper crab that builds the sequence from a written plan.

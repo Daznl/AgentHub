@@ -80,6 +80,7 @@ public partial class MainWindow : Window
         _discovery = new RepoDiscoveryService(_git);
         _usageService = new UsageService(_runner);
         _usageRefreshTimer.Tick += async (_, _) => await RefreshUsageAsync();
+        _foundFoldersTimer.Tick += async (_, _) => await RefreshFoundFoldersAsync();
         Loaded += MainWindow_Loaded;
         Controls.DarkTitleBar.Apply(this);
         Controls.WindowPlacement.KeepOnScreen(this);
@@ -140,6 +141,8 @@ public partial class MainWindow : Window
         ViewCockpitBtn_Click(this, new RoutedEventArgs());
         StatusText.Text = $"Settings: {_settingsService.SettingsPath}";
         StartHistoryArchive();
+        _ = RefreshFoundFoldersAsync();
+        _foundFoldersTimer.Start();
 
         UsageIntervalBox.Text = _settings.UsageRefreshMinutes.ToString("0.##", CultureInfo.InvariantCulture);
         UpdateUsagePollingInterval();
@@ -245,6 +248,7 @@ public partial class MainWindow : Window
         pane.ConfigureHistory(HistoryArchiveRoot);
         pane.ConfigureHost(_sessionHosts);
         pane.UpdateRepositories(_settings.Repositories);
+        pane.UpdateFoundFolders(_foundFolders);
         pane.UpdateSshConnections(_settings.SshConnections);
         pane.SshManageRequested += () => ManageSsh_Click(pane, new RoutedEventArgs());
         pane.HistoryRequested += p => ShowHistory(p.HistoryFolder, p.TranscriptPath);
@@ -648,6 +652,56 @@ public partial class MainWindow : Window
     private HistoryWindow? _historyWindow;
     private HistoryArchiveService? _historyArchive;
 
+    // Folders with past sessions on this computer, for every pane's launcher and the History window. Read at start and
+    // every few minutes; transcripts already summarised are not re-read unless they changed.
+    private IReadOnlyList<SessionFolder> _foundFolders = [];
+    private readonly DispatcherTimer _foundFoldersTimer = new() { Interval = TimeSpan.FromMinutes(5) };
+    private bool _foundFoldersRefreshing;
+
+    private async Task RefreshFoundFoldersAsync()
+    {
+        if (_foundFoldersRefreshing) return;
+        _foundFoldersRefreshing = true;
+        try
+        {
+            var archiveRoot = HistoryArchiveRoot;
+            var home = TerminalPaneControl.BaseDirectory;
+            _foundFolders = await Task.Run(() => SessionFolderDiscovery.Discover(archiveRoot: archiveRoot)
+                .Where(f => !SessionFolderDiscovery.IsTemporary(f.Path) && !SessionFolderDiscovery.IsAgentHubOwn(f.Path) &&
+                            !string.Equals(f.Path.TrimEnd('\\'), home.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+                .ToList());
+            foreach (var pane in _panes) pane.UpdateFoundFolders(_foundFolders);
+            _historyWindow?.UpdateFoundFolders(_foundFolders);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Transcripts unreadable this time; the next tick tries again.
+        }
+        finally
+        {
+            _foundFoldersRefreshing = false;
+        }
+    }
+
+    // ➕ Add to repositories in the History window, for a found folder that is a Git repository.
+    private async void RegisterFoundFolder(string folder)
+    {
+        try
+        {
+            if (!await _git.IsRepositoryAsync(folder))
+            {
+                MessageBox.Show(this, $"{folder}\nis not a Git repository.", "AgentHub", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            await EnsureRepositoryAsync(folder);
+        }
+        finally
+        {
+            // Moves the folder up to the repositories, or puts the button back if it could not be added.
+            _historyWindow?.UpdateRepositories(_settings.Repositories);
+        }
+    }
+
     private string? HistoryArchiveRoot => _settings.HistoryArchiveEnabled && !string.IsNullOrWhiteSpace(_settings.HistoryArchiveDirectory)
         ? _settings.HistoryArchiveDirectory
         : null;
@@ -677,8 +731,11 @@ public partial class MainWindow : Window
         if (_historyWindow is null)
         {
             _historyWindow = new HistoryWindow(_settings.Repositories, HistoryArchiveRoot) { Owner = this };
+            _historyWindow.UpdateFoundFolders(_foundFolders);
+            _historyWindow.RegisterRequested += RegisterFoundFolder;
             _historyWindow.Closed += (_, _) => _historyWindow = null;
             _historyWindow.Show();
+            _ = RefreshFoundFoldersAsync();
         }
         else
         {
