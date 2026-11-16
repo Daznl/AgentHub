@@ -1303,10 +1303,7 @@ public partial class MainWindow : Window
         RepoViewGrid.Visibility = Visibility.Visible;
         GitHubViewGrid.Visibility = Visibility.Collapsed;
         CockpitViewGrid.Visibility = Visibility.Collapsed;
-        CockpitHeaderActions.Visibility = Visibility.Collapsed;
-        ManageBar.Visibility = Visibility.Visible;
-        ManageReposBtn.Background = NavActiveBrush;
-        ViewCockpitBtn.Background = NavInactiveBrush;
+        ShowHeaderFor(cockpit: false);
         ViewReposBtn.Background = NavActiveBrush;
         ViewGitHubBtn.Background = NavInactiveBrush;
     }
@@ -1316,10 +1313,7 @@ public partial class MainWindow : Window
         RepoViewGrid.Visibility = Visibility.Collapsed;
         GitHubViewGrid.Visibility = Visibility.Visible;
         CockpitViewGrid.Visibility = Visibility.Collapsed;
-        CockpitHeaderActions.Visibility = Visibility.Collapsed;
-        ManageBar.Visibility = Visibility.Visible;
-        ManageReposBtn.Background = NavActiveBrush;
-        ViewCockpitBtn.Background = NavInactiveBrush;
+        ShowHeaderFor(cockpit: false);
         ViewGitHubBtn.Background = NavActiveBrush;
         ViewReposBtn.Background = NavInactiveBrush;
 
@@ -1338,6 +1332,18 @@ public partial class MainWindow : Window
         }
     }
 
+    // Header shows only what the view needs, and never a button to the view already on screen:
+    // the Cockpit gets its actions and the other tools; Manage GitHub Repos gets its actions, the way back to the Cockpit and Settings.
+    private void ShowHeaderFor(bool cockpit)
+    {
+        var inCockpit = cockpit ? Visibility.Visible : Visibility.Collapsed;
+        var inManage = cockpit ? Visibility.Collapsed : Visibility.Visible;
+        CockpitHeaderActions.Visibility = inCockpit;
+        CockpitNavButtons.Visibility = inCockpit;
+        ManageBar.Visibility = inManage;
+        ViewCockpitBtn.Visibility = inManage;
+    }
+
     // The separator only divides the groups while they share a row; once the actions wrap below, it would dangle.
     // The crab roams only the header strip the buttons leave free.
     private void HeaderButtons_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -1351,10 +1357,7 @@ public partial class MainWindow : Window
         RepoViewGrid.Visibility = Visibility.Collapsed;
         GitHubViewGrid.Visibility = Visibility.Collapsed;
         CockpitViewGrid.Visibility = Visibility.Visible;
-        CockpitHeaderActions.Visibility = Visibility.Visible;
-        ManageBar.Visibility = Visibility.Collapsed;
-        ViewCockpitBtn.Background = NavActiveBrush;
-        ManageReposBtn.Background = NavInactiveBrush;
+        ShowHeaderFor(cockpit: true);
 
         if (_lastUsageRefresh is null || DateTimeOffset.Now - _lastUsageRefresh > _usageRefreshTimer.Interval)
             _ = RefreshUsageAsync();
