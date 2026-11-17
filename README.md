@@ -135,7 +135,7 @@ It never stores API keys or provider credentials. Authentication stays with the 
 
 | Requirement | Notes |
 |---|---|
-| **.NET 8 SDK** | [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/8.0). Check with `dotnet --version`. |
+| **.NET 8 SDK** | `winget install --id Microsoft.DotNet.SDK.8 -e`, or download it from [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/8.0). Check with `dotnet --list-sdks`: you need a line starting with `8.`. A newer SDK on its own (9 or 10) is not enough, because AgentHub targets .NET 8. Open a new terminal after installing so `dotnet` is on `PATH`. |
 
 No IDE is required. Visual Studio 2022 or Rider open `AgentHub.sln` if you prefer one.
 
@@ -154,6 +154,26 @@ Every CLI must be on `PATH` and already signed in through its own login flow. Ag
 The bootstrap script reports which of these it found before it builds.
 
 ## Getting started
+
+### Install with Claude Code
+
+If you have [Claude Code](https://docs.anthropic.com/en/docs/claude-code), let it do the whole install. Clone `main`, open Claude Code in the clone and ask for it:
+
+```powershell
+git clone <the AgentHub repository URL>
+cd AgentHub
+claude "Install AgentHub on this computer"
+```
+
+[`CLAUDE.md`](CLAUDE.md) gives Claude the steps:
+
+1. Check for Windows 10 1809 or later, the .NET 8 SDK, Git and the WebView2 runtime. It installs any that are missing with `winget`, after asking you.
+2. Build the solution and run the tests.
+3. Publish `AgentHub.exe` into an install folder outside the clone (`C:\Apps\AgentHub` unless you name another), using `scripts\Deploy-Taskbar.ps1`.
+4. Put a desktop shortcut on your desktop. Right-click it and choose **Pin to taskbar**. Windows does not let a program pin itself.
+5. Report the installed commit and which optional tools are missing.
+
+To update later, ask Claude to update AgentHub, or follow [Updating a pinned install](#updating-a-pinned-install).
 
 ### Fastest path
 
@@ -330,6 +350,8 @@ Before switching agents, record the current task, completed work, next steps and
 ```text
 AgentHub.sln
 bootstrap.cmd / bootstrap.ps1     prerequisite check, build and launch
+AGENTS.md / CLAUDE.md             rules for coding agents; CLAUDE.md also tells Claude Code how to install AgentHub
+scripts/Deploy-Taskbar.ps1        publish into the install folder and prove the installed commit
 src/AgentHub/                     WPF application
   Models/                         settings, repository, account and usage models
   Services/                       Git, GitHub CLI, discovery, settings and agent launching
@@ -361,7 +383,7 @@ Notes for contributors:
 - The project enables both WPF and Windows Forms, the latter for the native folder picker. Files that touch UI types alias them explicitly, for example `using MessageBox = System.Windows.MessageBox;`.
 - Close any running `AgentHub.exe` before building, or the build fails on a locked file.
 - Exercise Git command paths with spaces in repository paths before finishing a change.
-- Engineering rules for both people and coding agents working on this repo live in [`AGENTS.md`](AGENTS.md).
+- Engineering rules for both people and coding agents working on this repo live in [`AGENTS.md`](AGENTS.md). [`CLAUDE.md`](CLAUDE.md) loads it for Claude Code and adds the install steps.
 
 Further reading:
 
