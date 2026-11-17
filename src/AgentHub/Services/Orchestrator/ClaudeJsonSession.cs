@@ -38,6 +38,9 @@ public sealed class ClaudeJsonSession
 
     public string SessionId { get; }
 
+    /// <summary>Where the CLI runs: with <see cref="SessionId"/>, what it takes to pick this session up again later.</summary>
+    public string WorkingDirectory => _workingDirectory;
+
     /// <summary>Where Claude Code writes this session's transcript (it exists once the first call has run).</summary>
     public string TranscriptPath => Path.Combine(Context.SessionContextReader.ClaudeProjectsDir,
         Context.SessionContextReader.EncodeClaudeProjectName(_workingDirectory), SessionId + ".jsonl");

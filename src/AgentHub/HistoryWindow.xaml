@@ -114,11 +114,33 @@
                 </StackPanel>
                 <ListBox x:Name="LocationList" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource PickRow}"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled" SelectionChanged="LocationList_SelectionChanged">
+                    <!-- Folders found from past sessions get their own heading; the first section needs none under "Repositories" -->
+                    <ListBox.GroupStyle>
+                        <GroupStyle>
+                            <GroupStyle.HeaderTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="PAST SESSIONS ON THIS COMPUTER" Foreground="#5A6B85" FontSize="10" FontWeight="Bold" Margin="4,12,4,6"
+                                               ToolTip="Other folders where Claude Code or Codex sessions ran, newest first, read from their transcripts on this computer">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Name}" Value="Found on this computer">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </GroupStyle.HeaderTemplate>
+                        </GroupStyle>
+                    </ListBox.GroupStyle>
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <StackPanel ToolTip="{Binding Path}">
                                 <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
-                                <TextBlock Text="{Binding Path}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding Detail}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
@@ -131,6 +153,9 @@
             <DockPanel>
                 <DockPanel DockPanel.Dock="Top" Margin="4,2,0,10">
                     <Button DockPanel.Dock="Right" Click="RefreshSessions_Click" Content="↻" ToolTip="Re-scan for sessions" Background="#16202F" Foreground="#7E8CA6" Padding="8,3" Margin="0" FontSize="12" FontWeight="Bold" VerticalAlignment="Top" />
+                    <Button x:Name="RegisterBtn" DockPanel.Dock="Right" Click="Register_Click" Content="➕ Add to repositories" Visibility="Collapsed"
+                            ToolTip="This folder is a Git repository: add it to AgentHub's repositories" Background="#16202F" Foreground="#7E8CA6"
+                            Padding="8,3" Margin="0,0,6,0" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Top" />
                     <StackPanel>
                         <TextBlock Text="Sessions" FontWeight="SemiBold" />
                         <TextBlock x:Name="SessionCountText" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,3,0,0" TextTrimming="CharacterEllipsis" />

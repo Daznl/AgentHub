@@ -1,0 +1,159 @@
+<Window x:Class="AgentHub.AdvancedTemplatesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:AgentHub.Controls"
+        Title="AgentHub - Advanced Templates" Height="800" Width="1120" MinHeight="460" MinWidth="820"
+        Icon="Assets/AppIcon.png" WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBackgroundBrush}" Foreground="{StaticResource TextBrush}" FontFamily="Segoe UI">
+    <Grid Margin="16,14,16,16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" Margin="0,0,0,12" LastChildFill="True">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                <Button x:Name="OpenFolderBtn" Click="OpenFolder_Click" Content="📂 Open folder" ToolTip="Open the project's orchestration folder in Explorer"
+                        Padding="10,5" Margin="0,0,8,0" FontSize="12" />
+                <Button x:Name="RefreshBtn" Click="Refresh_Click" Content="↻ Refresh" ToolTip="Read the template files again now (they are also re-read when you come back to this window)"
+                        Padding="10,5" Margin="0,0,8,0" FontSize="12" />
+                <Button Click="Close_Click" Content="✕ Close" ToolTip="Close this window (Esc does too)" Padding="10,5" Margin="0" FontSize="12" />
+            </StackPanel>
+            <!-- The crab, and the button that opens the Template helper: builds a template from a plan, changes the one on screen -->
+            <controls:CrabMascot x:Name="Crab" DockPanel.Dock="Right" Width="150" Height="56" VerticalAlignment="Top" Margin="12,0,12,0"
+                                 HelperName="Template helper"
+                                 ToolTip="Template helper: have Claude Code build a template from your written plan, or change the one on screen. What it makes opens as a draft for you to check and save." />
+            <StackPanel Margin="0,0,12,0">
+                <TextBlock x:Name="HeadingText" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="SubheadingText" Margin="0,3,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+        </DockPanel>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="280" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- The Template helper, right of the tree: builds a template from a plan, changes the one on screen, into its draft -->
+            <controls:AppHelperPane x:Name="Helper" Grid.Column="3" Width="400" Margin="12,0,0,0" Visibility="Collapsed"
+                                    AutomationProperties.AutomationId="TemplateHelper"
+                                    Title="Template helper" Subtitle="Builds templates from your plan, and changes them"
+                                    Placeholder="Build a template from a plan, or say what to change…"
+                                    Intro="I build advanced templates from your written plan, and change the one on screen when you ask: add a review after each build, a pull request per stage, an extra stage. I can read the project but change nothing in it: what I make goes to a draft that opens in the editor, for you to check and save." />
+
+            <!-- The project's templates -->
+            <Border Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="TEMPLATES IN THIS PROJECT" Foreground="#5A6B85" FontSize="10" FontWeight="Bold" Margin="2,0,0,8" />
+                    <ListBox x:Name="TemplateList" SelectionChanged="TemplateList_SelectionChanged" Background="#0A111B" BorderBrush="{StaticResource BorderBrush}"
+                             Foreground="{StaticResource TextBrush}" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="2,4">
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Subtitle}" Foreground="{Binding SubtitleBrush}" FontSize="11" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <!-- The picked template as a tree -->
+            <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="14,12,6,8">
+                <Grid>
+                    <DockPanel x:Name="TreePanel">
+                        <StackPanel DockPanel.Dock="Top" Margin="0,0,8,10">
+                            <DockPanel LastChildFill="True">
+                                <Button x:Name="EditBtn" DockPanel.Dock="Right" Click="Edit_Click" Content="✏ Edit" Padding="10,4" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"
+                                        ToolTip="Change this template: add, remove, move and change its stages and steps. Every change goes to a draft beside the file; the template itself changes only when you save." />
+                                <TextBlock x:Name="TemplateSummary" DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Bottom" Margin="12,0,0,2" />
+                                <TextBlock x:Name="TemplateName" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            </DockPanel>
+                            <TextBlock x:Name="TemplateDescription" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,3,0,0" />
+                            <!-- Editing: the draft's name and description, where it stands, Save, Discard and Done. -->
+                            <Border x:Name="EditBar" Visibility="Collapsed" Margin="0,10,0,0" Background="#0E1A2B" BorderBrush="#1D4ED8" BorderThickness="1" CornerRadius="8" Padding="10,8">
+                                <StackPanel>
+                                    <DockPanel LastChildFill="True">
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Button x:Name="SaveDraftBtn" Click="SaveDraft_Click" Content="💾 Save" Background="#2563EB" FontWeight="SemiBold" Padding="14,4" FontSize="12" Margin="10,0,0,0" />
+                                            <Button x:Name="DiscardDraftBtn" Click="DiscardDraft_Click" Content="🗑 Discard" Padding="10,4" FontSize="12" Margin="8,0,0,0"
+                                                    ToolTip="Drop the draft: the template stays as it was saved." />
+                                            <Button x:Name="DoneEditingBtn" Click="DoneEditing_Click" Content="✓ Done" Padding="10,4" FontSize="12" Margin="8,0,0,0"
+                                                    ToolTip="Stop editing and keep the draft beside the template, to save or discard later. ✏ Edit picks it up again." />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Border Background="#1E3A8A" CornerRadius="4" Padding="6,1" Margin="0,0,8,0" VerticalAlignment="Center">
+                                                <TextBlock Text="✏ EDITING" Foreground="#DBEAFE" FontSize="10" FontWeight="Bold" />
+                                            </Border>
+                                            <TextBlock x:Name="EditStateText" Foreground="{StaticResource MutedBrush}" FontSize="11.5" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                    <Grid Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="Name" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                        <TextBox x:Name="DraftNameBox" AutomationProperties.Name="Template name" Grid.Column="1" TextChanged="DraftNameBox_TextChanged" FontSize="12" Padding="4,2" />
+                                        <TextBlock Grid.Row="1" Text="Description" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Top" Margin="0,8,10,0" />
+                                        <TextBox x:Name="DraftDescriptionBox" AutomationProperties.Name="Template description" Grid.Row="1" Grid.Column="1" TextChanged="DraftDescriptionBox_TextChanged" FontSize="12" Padding="4,2" Margin="0,5,0,0"
+                                                 TextWrapping="Wrap" AcceptsReturn="True" MaxHeight="70" VerticalScrollBarVisibility="Auto" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                            <Border x:Name="ProblemsBox" Visibility="Collapsed" Margin="0,10,0,0" Background="#2B2110" BorderBrush="#7A5A12" BorderThickness="1" CornerRadius="6" Padding="10,8">
+                                <StackPanel>
+                                    <TextBlock x:Name="ProblemsTitle" Foreground="#FBBF24" FontSize="12" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="ProblemsText" Foreground="#E8D9B0" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                </StackPanel>
+                            </Border>
+                            <TextBlock x:Name="NoteText" Visibility="Collapsed" Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0" />
+                            <!-- The run of this template on a pane: where it stands, Go and Pause. In the orchestrator's purple, like its box on the pane. -->
+                            <Border x:Name="RunBar" Visibility="Collapsed" Margin="0,10,0,0" Background="#151129" BorderBrush="#4C3A8C" BorderThickness="1" CornerRadius="8" Padding="10,7">
+                                <DockPanel LastChildFill="True">
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button x:Name="ApplyBtn" Click="Apply_Click" Content="⤵ Apply to this run" Visibility="Collapsed" Background="#221A3D" Foreground="#C4B5FD" FontWeight="SemiBold" Padding="12,4" FontSize="12" Margin="10,0,0,0" />
+                                        <Button x:Name="GoBtn" Click="Go_Click" Content="▶ Go" Background="#2563EB" FontWeight="SemiBold" Padding="14,4" FontSize="12" Margin="10,0,0,0" />
+                                        <Button x:Name="PauseBtn" Click="Pause_Click" Content="⏸ Pause" Background="#221A3D" Foreground="#C4B5FD" FontWeight="SemiBold" Padding="12,4" FontSize="12" Margin="10,0,0,0"
+                                                ToolTip="Stop the run at its current step. The worker finishes what it is doing but is sent nothing more until Go." />
+                                    </StackPanel>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <DockPanel LastChildFill="True">
+                                            <TextBlock DockPanel.Dock="Left" Text="🧠 RUN" Foreground="#A78BFA" FontSize="10" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                            <Border DockPanel.Dock="Left" Background="#2E2357" CornerRadius="4" Padding="6,1" Margin="0,0,8,0" VerticalAlignment="Center">
+                                                <TextBlock x:Name="RunStateText" Foreground="#DDD6FE" FontSize="10" FontWeight="Bold" />
+                                            </Border>
+                                            <TextBlock x:Name="RunWhere" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                        </DockPanel>
+                                        <TextBlock x:Name="RunReason" Visibility="Collapsed" Foreground="#FBBF24" FontSize="11.5" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </StackPanel>
+                        <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                            <StackPanel x:Name="RowsPanel" Margin="0,0,0,8" />
+                        </ScrollViewer>
+                    </DockPanel>
+
+                    <StackPanel x:Name="EmptyPanel" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="560">
+                        <TextBlock x:Name="EmptyText" Foreground="{StaticResource MutedBrush}" FontSize="13" TextAlignment="Center" TextWrapping="Wrap" />
+                        <Button x:Name="AddExampleBtn" Click="AddExample_Click" Content="➕ Add the staged build example" HorizontalAlignment="Center" Margin="0,14,0,0"
+                                Background="#2563EB" FontWeight="SemiBold" Padding="14,6" FontSize="12"
+                                ToolTip="Writes orchestration\staged-build.json into this project: two stages, each with a branch, a build, a handoff and a commit. A file to look at and change." />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <TextBlock x:Name="StatusText" Grid.Row="2" Margin="2,10,0,0" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
+    </Grid>
+</Window>

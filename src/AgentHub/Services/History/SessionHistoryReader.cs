@@ -33,6 +33,8 @@ public sealed record HistoryEntry(
     bool IsSubAgent = false);
 
 /// <summary>One coding CLI session that ran in a folder, as found on disk.</summary>
+/// <param name="Folder">The folder the session started in, as the CLI recorded it (Claude Code's <c>cwd</c>, Codex's
+/// <c>session_meta</c> cwd). Null when the transcript does not say.</param>
 public sealed record SessionSummary(
     string FilePath,
     ContextSource Agent,
@@ -41,7 +43,8 @@ public sealed record SessionSummary(
     DateTimeOffset StartedAt,
     DateTimeOffset LastActivity,
     long SizeBytes,
-    bool ArchivedOnly = false);
+    bool ArchivedOnly = false,
+    string? Folder = null);
 
 /// <summary>
 /// Reads the complete history of coding sessions from the transcripts the CLIs already write (the same files
@@ -113,7 +116,7 @@ public static class SessionHistoryReader
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return 0; }
     }
 
-    private static SessionSummary? CachedSummary(string path, ContextSource agent)
+    internal static SessionSummary? CachedSummary(string path, ContextSource agent)
     {
         try
         {
@@ -188,29 +191,35 @@ public static class SessionHistoryReader
         var head = ReadProbe(path, fromEnd: false);
         DateTimeOffset? started = null;
         string? firstPrompt = null;
+        string? folder = null;
         foreach (var line in head)
         {
             if (!TryParse(line, out var root)) continue;
             started ??= ReadTimestamp(root);
+            folder ??= ReadFolder(root, agent);
             if (firstPrompt is null)
             {
                 var entries = agent == ContextSource.ClaudeCode ? ParseClaudeLine(root) : ParseCodexLine(root);
                 firstPrompt = entries.FirstOrDefault(e => e.Kind == HistoryKind.Prompt)?.Text;
             }
-            if (started is not null && firstPrompt is not null) break;
+            if (started is not null && firstPrompt is not null && folder is not null) break;
         }
 
         string? title = null;
         if (agent == ContextSource.ClaudeCode)
         {
-            // Claude Code re-writes its generated title throughout the session; the newest one wins.
+            // Claude Code re-writes its generated title throughout the session; the newest one wins. The folder is on
+            // every conversation line, so a session whose first lines are too long for the head probe finds it here.
             foreach (var line in ReadProbe(path, fromEnd: true).AsEnumerable().Reverse())
             {
-                if (!line.Contains("\"ai-title\"", StringComparison.Ordinal) &&
-                    !line.Contains("\"type\":\"summary\"", StringComparison.Ordinal)) continue;
+                var isTitle = line.Contains("\"ai-title\"", StringComparison.Ordinal) ||
+                              line.Contains("\"type\":\"summary\"", StringComparison.Ordinal);
+                var needsFolder = folder is null && line.Contains("\"cwd\"", StringComparison.Ordinal);
+                if (!isTitle && !needsFolder) continue;
                 if (!TryParse(line, out var root)) continue;
-                title = GetString(root, "aiTitle") ?? GetString(root, "summary");
-                if (title is not null) break;
+                if (needsFolder) folder = ReadFolder(root, agent);
+                if (isTitle) title ??= GetString(root, "aiTitle") ?? GetString(root, "summary");
+                if (title is not null && folder is not null) break;
             }
         }
 
@@ -218,7 +227,18 @@ public static class SessionHistoryReader
 
         var last = new DateTimeOffset(info.LastWriteTimeUtc);
         return new SessionSummary(path, agent, title, firstPrompt is null ? null : Truncate(firstPrompt, 500),
-            started ?? last, last, info.Length);
+            started ?? last, last, info.Length, Folder: folder);
+    }
+
+    // Claude Code puts the folder on each conversation line; Codex in its first line's session_meta payload.
+    private static string? ReadFolder(JsonElement root, ContextSource agent)
+    {
+        var cwd = agent == ContextSource.ClaudeCode
+            ? GetString(root, "cwd")
+            : GetString(root, "type") == "session_meta" && root.TryGetProperty("payload", out var payload) ? GetString(payload, "cwd") : null;
+        if (string.IsNullOrWhiteSpace(cwd)) return null;
+        try { return NormaliseDir(cwd); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return null; }
     }
 
     /// <summary>

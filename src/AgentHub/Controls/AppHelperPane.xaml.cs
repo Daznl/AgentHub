@@ -49,6 +49,34 @@ public partial class AppHelperPane : UserControl
     /// <summary>Raised by the pane's ✕.</summary>
     public event Action? CloseRequested;
 
+    /// <summary>Raised with true when a question is sent and false when its answer is in (or it stopped or failed).</summary>
+    public event Action<bool>? BusyChanged;
+
+    /// <summary>
+    /// Answers a question in place of <see cref="AppHelp"/>: the conversation so far, the question, the app state, a
+    /// token. The Advanced templates window's Template helper builds and changes templates through it. Throws
+    /// <see cref="OperationCanceledException"/> when stopped, <see cref="InvalidOperationException"/> with a message for the owner on failure.
+    /// </summary>
+    public Func<IReadOnlyList<HelpTurn>, string, string?, CancellationToken, Task<HelpAnswer>>? Answerer { get; set; }
+
+    /// <summary>The crab's line while it works, before the seconds ("Looking that up…").</summary>
+    public string WorkingText { get; set; } = "Looking that up…";
+
+    /// <summary>The Ask button's tooltip: what asking does and what it can change.</summary>
+    public string AskToolTip { get => AskBtn.ToolTip as string ?? ""; set => AskBtn.ToolTip = value; }
+
+    /// <summary>A question is being answered.</summary>
+    public bool IsAsking => _running is not null;
+
+    /// <summary>Stops the question being answered, if any (the owner window is closing).</summary>
+    public void Stop() => _running?.Cancel();
+
+    /// <summary>Asks <paramref name="question"/> as if typed and sent (an action button's request). Ignored while another is being answered.</summary>
+    public void Ask(string question)
+    {
+        if (_running is null) _ = AskAsync(question);
+    }
+
     /// <summary>The pane's name in its header ("AgentHub helper", "Timeline helper").</summary>
     public string Title { get => TitleText.Text; set => TitleText.Text = value; }
 
@@ -150,13 +178,16 @@ public partial class AppHelperPane : UserControl
         UpdateAsk();
         var started = DateTime.Now;
         var ticker = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        void Tick() => reply.Text = $"Looking that up… {(int)(DateTime.Now - started).TotalSeconds} s";
+        void Tick() => reply.Text = $"{WorkingText} {(int)(DateTime.Now - started).TotalSeconds} s";
         ticker.Tick += (_, _) => Tick();
         Tick();
         ticker.Start();
+        BusyChanged?.Invoke(true);
         try
         {
-            var answer = await AppHelp.RunAsync(new ProcessRunner(), ClaudeCommand(), history, question, state, cts.Token);
+            var answer = Answerer is { } answerer
+                ? await answerer(history, question, state, cts.Token)
+                : await AppHelp.RunAsync(new ProcessRunner(), ClaudeCommand(), history, question, state, cts.Token);
             reply.Text = answer.Answer.Length > 0 ? answer.Answer : "I have no answer for that. Try asking it another way.";
             _history.Add(new HelpTurn(true, question));
             _history.Add(new HelpTurn(false, reply.Text));
@@ -178,6 +209,7 @@ public partial class AppHelperPane : UserControl
             cts.Dispose();
             UpdateAsk();
             ScrollToEnd();
+            BusyChanged?.Invoke(false);
         }
     }
 
