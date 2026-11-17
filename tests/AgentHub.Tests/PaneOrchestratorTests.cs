@@ -40,6 +40,11 @@ public class PaneOrchestratorTests
         }
         public Task SubmitAsync(string prompt) { Submitted.Add(prompt); return Task.CompletedTask; }
         public string? ReadLastReply() => LastReply;
+        /// <summary>The transcript's latest turn end with no prompt after it; null while a turn runs or with no transcript.</summary>
+        public DateTimeOffset? TurnEndedAt { get; set; }
+        public DateTimeOffset? ReadTurnEndedAt() => TurnEndedAt;
+        /// <summary>A turn the worker started by itself and finished: only the transcript shows it, the terminal stays silent.</summary>
+        public void EndTurnInTranscriptOnly(string reply) { LastReply = reply; TurnEndedAt = DateTimeOffset.Now; }
         public IReadOnlyList<HistoryEntry> ReadHistory() => History;
         public void EndTurn(string reply) { LastReply = reply; TurnEnded?.Invoke(); }
     }
@@ -50,10 +55,13 @@ public class PaneOrchestratorTests
         public Func<string, PaneDecision> Answer { get; set; } = _ => new PaneDecision(null, null, "");
         /// <summary>What the brain's own transcript says it used; null for a brain without one.</summary>
         public ContextReading? Context { get; set; }
-        public Task<PaneDecision> DecideAsync(string message, CancellationToken cancellationToken)
+        /// <summary>How long each decision takes; zero answers at once.</summary>
+        public TimeSpan Delay { get; set; }
+        public async Task<PaneDecision> DecideAsync(string message, CancellationToken cancellationToken)
         {
             Messages.Add(message);
-            return Task.FromResult(Answer(message));
+            if (Delay > TimeSpan.Zero) await Task.Delay(Delay, cancellationToken);
+            return Answer(message);
         }
         public ContextReading? ReadContext() => Context;
     }
@@ -344,5 +352,105 @@ public class PaneOrchestratorTests
         Assert.Equal("🧭 Reviewer", view.Title);
         Assert.Equal(0.75, view.HandoffThreshold);
         Assert.Null(view.ContextUsed);
+    }
+
+    [Fact]
+    public async Task A_turn_the_worker_starts_by_itself_after_a_wait_reaches_the_orchestrator()
+    {
+        // Live run 2026-11-13: the worker said "waiting on the deploy", the orchestrator waited, the deploy's notification woke
+        // the worker, it finished the part and stopped, and nothing told the orchestrator for 21 minutes.
+        var worker = new ScriptedWorker();
+        var brain = new ScriptedBrain { Answer = m => m.Contains("[FROM OWNER]") ? new PaneDecision(null, "build part d", "") : new PaneDecision(null, null, "waiting") };
+        using var o = new PaneOrchestrator(worker, brain, "Orchestrator") { TurnSettle = TimeSpan.Zero, LoopInterval = TimeSpan.FromMilliseconds(20) };
+        await o.SendAsync("build parts a to e");
+
+        worker.TurnEndedAt = DateTimeOffset.Now;
+        worker.EndTurn("Deploy running; I will finish once it reports.");
+        await Until(() => brain.Messages.Count == 2);
+        await Task.Delay(100);
+        Assert.Equal(2, brain.Messages.Count); // the terminal and the transcript both saw that turn: asked once
+        Assert.Equal(["build part d"], worker.Submitted); // a wait: nothing typed, so the terminal is not re-armed
+
+        await Task.Delay(20);
+        worker.EndTurnInTranscriptOnly("Part d is built and deployed. Stopped for a fresh session.");
+        await Until(() => brain.Messages.Count == 3);
+        Assert.Contains("worker_turn_ended", brain.Messages[2]);
+        Assert.Contains("Part d is built and deployed.", brain.Messages[2]);
+        Assert.Contains("worker idle", brain.Messages[2]);
+    }
+
+    [Fact]
+    public async Task Turns_that_ended_before_the_orchestrator_was_attached_are_not_reported()
+    {
+        var worker = new ScriptedWorker { LastReply = "Old work done.", TurnEndedAt = DateTimeOffset.Now.AddMinutes(-5) };
+        var brain = new ScriptedBrain();
+        using var o = new PaneOrchestrator(worker, brain, "Orchestrator") { TurnSettle = TimeSpan.Zero, LoopInterval = TimeSpan.FromMilliseconds(20) };
+        await Task.Delay(150);
+        Assert.Empty(brain.Messages);
+    }
+
+    [Fact]
+    public async Task One_turn_end_signalled_twice_while_the_first_is_decided_is_asked_once()
+    {
+        // Live run 2026-11-13: one turn end reached the orchestrator twice, 12 s apart.
+        var worker = new ScriptedWorker();
+        var brain = new ScriptedBrain { Delay = TimeSpan.FromMilliseconds(100) };
+        using var o = new PaneOrchestrator(worker, brain, "Orchestrator") { TurnSettle = TimeSpan.Zero };
+        worker.EndTurn("Deploy running.");
+        worker.EndTurn("Deploy running.");
+        await Until(() => o.Decisions == 1);
+        await Task.Delay(250);
+        Assert.Single(brain.Messages);
+    }
+
+    [Fact]
+    public async Task A_worker_idle_long_after_a_wait_is_put_to_the_orchestrator_a_few_times_then_left()
+    {
+        var worker = new ScriptedWorker { OutputSilentFor = TimeSpan.FromMinutes(30) };
+        var brain = new ScriptedBrain { Answer = m => m.Contains("[FROM OWNER]") ? new PaneDecision(null, "deploy it", "") : new PaneDecision(null, null, "waiting") };
+        using var o = new PaneOrchestrator(worker, brain, "Orchestrator")
+        { TurnSettle = TimeSpan.Zero, LoopInterval = TimeSpan.FromMilliseconds(10), IdleNudge = TimeSpan.FromMilliseconds(30), MaxIdleNudges = 2 };
+        await o.SendAsync("deploy");
+        worker.EndTurn("Waiting on the deploy.");
+        await Until(() => brain.Messages.Count == 4);
+        Assert.Contains("worker_idle", brain.Messages[2]);
+        Assert.Contains("worker_idle", brain.Messages[3]);
+        Assert.DoesNotContain("[WORKER FINAL REPLY]", brain.Messages[2]);
+        await Task.Delay(300);
+        Assert.Equal(4, brain.Messages.Count); // at most MaxIdleNudges for one silence
+
+        await o.SendAsync("status?"); // anything new starts the count again
+        await Until(() => brain.Messages.Count == 6);
+        Assert.Contains("worker_idle", brain.Messages[5]);
+    }
+
+    [Fact]
+    public async Task A_missed_turn_end_without_a_transcript_signal_is_found_by_the_idle_check()
+    {
+        // A worker whose turn end no signal records (a CLI without a transcript turn marker): its new reply is still read.
+        var worker = new ScriptedWorker { OutputSilentFor = TimeSpan.FromMinutes(30) };
+        var brain = new ScriptedBrain { Answer = m => m.Contains("[FROM OWNER]") ? new PaneDecision(null, "go", "") : new PaneDecision(null, null, "waiting") };
+        using var o = new PaneOrchestrator(worker, brain, "Orchestrator")
+        { TurnSettle = TimeSpan.Zero, LoopInterval = TimeSpan.FromMilliseconds(10), IdleNudge = TimeSpan.FromMilliseconds(200) };
+        await o.SendAsync("build it");
+        worker.EndTurn("Deploying.");
+        await Until(() => brain.Messages.Count == 2);
+        worker.LastReply = "Built and deployed.";
+        await Until(() => brain.Messages.Count == 3);
+        Assert.Contains("worker_turn_ended", brain.Messages[2]);
+        Assert.Contains("Built and deployed.", brain.Messages[2]);
+        Assert.Contains(o.Conversation, x => x.Kind == ExchangeKind.Note && x.Text.StartsWith("A worker turn end was missed"));
+    }
+
+    [Fact]
+    public async Task The_transcript_decides_idle_when_the_terminal_still_reads_busy()
+    {
+        // The terminal's flag is cleared by any keystroke (a click in the pane) and only set again by a quiet spell after typing.
+        var worker = new ScriptedWorker { IsAwaitingInput = false, TurnEndedAt = DateTimeOffset.Now };
+        var brain = new ScriptedBrain();
+        using var o = new PaneOrchestrator(worker, brain, "Orchestrator") { TurnSettle = TimeSpan.Zero };
+        await o.SendAsync("why did you stop?");
+        Assert.Contains("The worker is idle at its prompt.", brain.Messages[0]);
+        Assert.Contains("worker idle", brain.Messages[0]);
     }
 }

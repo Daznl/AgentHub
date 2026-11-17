@@ -104,10 +104,12 @@ public sealed partial class PaneOrchestrator : IDisposable
     private bool _introduced;
     private bool _thinking;
     private bool _turnEndedWhileThinking;
-    private bool _sentSinceLastTurn;
     private string? _lastReplyHandled;
     private DateTimeOffset _lastSubmitAt = DateTimeOffset.MinValue;
     private DateTimeOffset? _transcriptTurnHandled;
+    private readonly DateTimeOffset _attachedAt = DateTimeOffset.Now;
+    private DateTimeOffset _lastDecisionAt = DateTimeOffset.Now;
+    private int _idleNudges;
     private int _decisions;
 
     // ---- Handoff: a fresh session when the context window fills ----
@@ -149,6 +151,13 @@ public sealed partial class PaneOrchestrator : IDisposable
     /// <summary>A turn end counts once the worker has been quiet this long (it may print a little after its prompt returns).</summary>
     public TimeSpan TurnSettle { get; set; } = TimeSpan.FromSeconds(15);
     public TimeSpan LoopInterval { get; set; } = TimeSpan.FromSeconds(3);
+    /// <summary>
+    /// A backstop for a turn end that no signal caught: when the worker has written nothing and the orchestrator has not been
+    /// asked for this long, its last reply is read again, and if nothing new came the orchestrator is told the worker is idle.
+    /// Each further nudge waits twice as long, at most <see cref="MaxIdleNudges"/> times until something happens.
+    /// </summary>
+    public TimeSpan IdleNudge { get; set; } = TimeSpan.FromMinutes(10);
+    public int MaxIdleNudges { get; set; } = 3;
     /// <summary>Upper bound on decisions, so a loop between the two sessions cannot run away.</summary>
     public int MaxDecisions { get; set; } = 300;
     /// <summary>
@@ -283,6 +292,9 @@ public sealed partial class PaneOrchestrator : IDisposable
             - Both at once is normal: pass the owner's wish to the worker and tell the owner what you did.
             - When the worker finishes a turn: judge its reply, tell the owner what matters in a line or two, and either give the worker
               its next step or leave it idle and ask the owner, whichever the standing instructions call for.
+            - worker_idle means the worker has been quiet at its prompt for a while and no turn end came since your last decision.
+              If it is waiting on something it started (a deploy, a test run), leave it; if it has stopped and the owner's standing
+              instructions call for a next step, give it; if it is the owner's call, ask them.
             - If the worker asks a question that the owner's instructions already answer, answer it yourself; otherwise put it to the owner.
             - Handoffs: when the worker's context window fills, AgentHub has it write .agenthub/handoff.md, ends that session and starts a
               fresh one with an empty memory in the same pane. You are then asked for the fresh session's first instruction: it must start
@@ -332,7 +344,7 @@ public sealed partial class PaneOrchestrator : IDisposable
     {
         if (string.IsNullOrWhiteSpace(text)) return;
         AddExchange(ExchangeKind.Steer, text.Trim());
-        var busy = _worker.IsRunning && !_worker.IsAwaitingInput;
+        var busy = _worker.IsRunning && !WorkerAtPrompt();
         var eventText = IsHandingOff
             ? "owner_message: the owner wrote to you. The worker is handing off (writing its notes before a fresh session starts): hold any instruction for the fresh session; answer the owner."
             : Run is { State: RunState.Paused, Cause: PauseCause.Question }
@@ -370,8 +382,45 @@ public sealed partial class PaneOrchestrator : IDisposable
         // The reply the orchestrator already read: the terminal went quiet (a long tool run, a dialog) before the worker's next
         // reply exists. Not a new turn end (live run 2026-11-07: "a duplicate step 2 report arrived").
         if (reply != null && reply == _lastReplyHandled) return;
-        await AskAndFollowAsync("worker_turn_ended: the worker finished a turn and is waiting at its prompt.", fromOwner: null, workerReply: reply ?? "");
+        await AskAndFollowAsync(TurnEndedEvent, fromOwner: null, workerReply: reply ?? "");
     }
+
+    private const string TurnEndedEvent = "worker_turn_ended: the worker finished a turn and is waiting at its prompt.";
+
+    /// <summary>
+    /// The worker is at its prompt. The terminal's flag stays set from one wait until someone types, so it misses a turn the
+    /// worker started by itself (a background job finishing) and still reads "waiting" during that turn; the transcript
+    /// records every turn end and every prompt (live run 2026-11-13: the box said "worker busy" for a worker idle 20 minutes).
+    /// </summary>
+    private bool WorkerAtPrompt()
+    {
+        if (_worker.ReadTurnEndedAt() is { } ended && ended > _sessionStartedAt) return _worker.OutputSilentFor >= TurnSettle;
+        return _worker.IsAwaitingInput;
+    }
+
+    /// <summary>
+    /// The worker has been silent and the orchestrator unasked for a while. A reply it has not read means a turn end was
+    /// missed; otherwise it is told the worker is idle, so a run never just sits there until the owner writes.
+    /// </summary>
+    private async Task NudgeIfIdleAsync()
+    {
+        if (_thinking || _handoffRequested || !_introduced || !_worker.IsRunning || _idleNudges >= MaxIdleNudges) return;
+        var wait = IdleNudge * (1 << _idleNudges);
+        if (_worker.OutputSilentFor < wait || DateTimeOffset.Now - _lastDecisionAt < wait) return;
+        var reply = _worker.ReadLastReply();
+        if (reply != null && reply != _lastReplyHandled)
+        {
+            AddExchange(ExchangeKind.Note, "A worker turn end was missed; reading its reply now.");
+            _transcriptTurnHandled = _worker.ReadTurnEndedAt();
+            await AskAndFollowAsync(TurnEndedEvent, fromOwner: null, workerReply: reply);
+            return;
+        }
+        _idleNudges++;
+        await AskAndFollowAsync($"worker_idle: the worker has written nothing for {Minutes(_worker.OutputSilentFor)} and no turn end has come since your last decision; its last reply is the one you already read.",
+            fromOwner: null, workerReply: null, nudge: true);
+    }
+
+    private static string Minutes(TimeSpan t) => t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes} min" : $"{(int)t.TotalSeconds} s";
 
     private async Task<bool> SettleAsync()
     {
@@ -394,20 +443,25 @@ public sealed partial class PaneOrchestrator : IDisposable
         {
             while (!_disposeCts.IsCancellationRequested)
             {
-                await Task.Delay(LoopInterval, _disposeCts.Token);
+                await WaitLoopIntervalAsync();
                 if (_restarting) continue;
                 if (_worker.IsAtSecurityCheck) { NoteWaitingForOwner(); continue; }
                 if (_held != null) { await DeliverHeldAsync(); continue; }
                 if (_awaitingQuiet && !_thinking) await FollowWhenQuietAsync();
-                // The terminal can miss a turn end (a message queued during a busy turn runs as the next one without the CLI
-                // ever going quiet in between). The transcript records every turn end.
-                if (!_thinking && (_sentSinceLastTurn || _handoffRequested) && _worker.IsRunning && _worker.ReadTurnEndedAt() is { } ended
-                    && ended > _lastSubmitAt && DateTimeOffset.Now - ended >= TurnSettle && ended != _transcriptTurnHandled)
+                // The terminal can miss a turn end: a message queued during a busy turn runs as the next one without the CLI ever
+                // going quiet in between, and a turn the worker starts by itself (a background job finishing) comes after a wait
+                // no one typed into, so the terminal never re-arms (live run 2026-11-13: two finished parts sat unseen for 2 and
+                // 21 minutes). The transcript records every turn end, whoever started the turn. Turns that ended before the
+                // orchestrator was attached are the session's history, not news.
+                if (!_thinking && _worker.IsRunning && _worker.ReadTurnEndedAt() is { } ended
+                    && ended > _lastSubmitAt && ended > _attachedAt && ended > _sessionStartedAt
+                    && DateTimeOffset.Now - ended >= TurnSettle && ended != _transcriptTurnHandled)
                 {
                     _transcriptTurnHandled = ended;
                     await HandleTurnEndAsync(seenInTranscript: true);
                     continue;
                 }
+                await NudgeIfIdleAsync();
                 if (_handoffRequested && DateTimeOffset.Now - _handoffRequestedAt > HandoffTimeout)
                 {
                     AddExchange(ExchangeKind.Note, "The handoff turn took too long; starting the fresh session anyway.");
@@ -418,6 +472,22 @@ public sealed partial class PaneOrchestrator : IDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex) { AddExchange(ExchangeKind.Note, $"The orchestrator loop stopped: {ex.Message}"); }
     }
+
+    /// <summary>
+    /// Waits <see cref="LoopInterval"/>, read again every slice: the loop starts in the constructor, before an object initialiser
+    /// sets the interval, so a single delay would always wait the default first.
+    /// </summary>
+    private async Task WaitLoopIntervalAsync()
+    {
+        var started = DateTimeOffset.Now;
+        while (DateTimeOffset.Now - started < LoopInterval)
+        {
+            var left = LoopInterval - (DateTimeOffset.Now - started);
+            await Task.Delay(left < LoopSlice ? (left > TimeSpan.Zero ? left : TimeSpan.FromMilliseconds(1)) : LoopSlice, _disposeCts.Token);
+        }
+    }
+
+    private static readonly TimeSpan LoopSlice = TimeSpan.FromMilliseconds(250);
 
     // ---- Security checks are the owner's ----
 
@@ -443,7 +513,7 @@ public sealed partial class PaneOrchestrator : IDisposable
             if (!_worker.IsRunning) { AddExchange(ExchangeKind.Note, "The session is not running, so the held message was not delivered."); return; }
             _lastSubmitAt = DateTimeOffset.Now;
             await _worker.SubmitAsync(text);
-            _sentSinceLastTurn = true; _freshSession = false;
+            _freshSession = false;
             _turnEndedWhileThinking = false;
             AddExchange(ExchangeKind.Sent, text);
         }
@@ -534,7 +604,6 @@ public sealed partial class PaneOrchestrator : IDisposable
         _sessionStartedAt = DateTimeOffset.Now;
         _contextBaseline = null;
         _lastReplyHandled = null;
-        _sentSinceLastTurn = false;
         _turnEndedWhileThinking = false;
         _transcriptTurnHandled = null;
         _expectExit = false;
@@ -565,20 +634,25 @@ public sealed partial class PaneOrchestrator : IDisposable
     // ---- One orchestrator turn ----
 
     /// <summary>One orchestrator turn, then on with the run when that turn finished its current step.</summary>
-    private async Task AskAndFollowAsync(string eventText, string? fromOwner, string? workerReply, string? handoff = null)
+    private async Task AskAndFollowAsync(string eventText, string? fromOwner, string? workerReply, string? handoff = null, bool nudge = false)
     {
-        if (await AskAsync(eventText, fromOwner, workerReply, handoff)) await FollowRunAsync();
+        if (await AskAsync(eventText, fromOwner, workerReply, handoff, nudge: nudge)) await FollowRunAsync();
     }
 
     /// <summary>Returns true when the decision finished the run's current step, so the caller moves on to the next one.</summary>
     /// <param name="fallbackToWorker">Typed into the worker when the orchestrator writes it nothing for a step that must tell it something.</param>
-    private async Task<bool> AskAsync(string eventText, string? fromOwner, string? workerReply, string? handoff = null, string? fallbackToWorker = null)
+    /// <param name="nudge">An idle nudge: it does not reset the nudge count, so silence is not nudged about without end.</param>
+    private async Task<bool> AskAsync(string eventText, string? fromOwner, string? workerReply, string? handoff = null, string? fallbackToWorker = null, bool nudge = false)
     {
         var advance = false;
         await _gate.WaitAsync();
         try
         {
             if (_disposeCts.IsCancellationRequested) return false;
+            // The terminal and the transcript can both report one turn end; the second waits here while the first is decided
+            // (live run 2026-11-13: one turn end reached the orchestrator twice, 12 s apart).
+            if (eventText == TurnEndedEvent && workerReply is not null && workerReply == _lastReplyHandled) return false;
+            if (!nudge) _idleNudges = 0;
             if (_decisions >= MaxDecisions)
             {
                 AddExchange(ExchangeKind.Note, $"The orchestrator reached its limit of {MaxDecisions} decisions. Detach and attach it again to carry on.");
@@ -594,7 +668,7 @@ public sealed partial class PaneOrchestrator : IDisposable
             {
                 var entries = await Task.Run(_worker.ReadHistory);
                 history = ConversationHistory.Format(entries, lastReplyFollows: workerReply is not null,
-                    lastTurnRunning: _worker.IsRunning && !_worker.IsAwaitingInput);
+                    lastTurnRunning: _worker.IsRunning && !WorkerAtPrompt());
             }
             var planChanged = _planChanged;
             var message = Compose(eventText, fromOwner, workerReply, history, Status(), handoff, DescribeRun(planChanged));
@@ -614,13 +688,13 @@ public sealed partial class PaneOrchestrator : IDisposable
                 return false;
             }
             catch (OperationCanceledException) { return false; }
-            finally { SetThinking(false); }
+            finally { SetThinking(false); _lastDecisionAt = DateTimeOffset.Now; }
 
             _introduced = true;
             if (planChanged) _planChanged = false; // it has seen the new outline
             _decisions++;
             _orchestratorContext = _brain.ReadContext() ?? _orchestratorContext; // its transcript has this decision's usage
-            if (workerReply is not null) { _lastReplyHandled = workerReply; _sentSinceLastTurn = false; _turnEndedWhileThinking = false; }
+            if (workerReply is not null) { _lastReplyHandled = workerReply; _turnEndedWhileThinking = false; }
             if (d.Note.Length > 0) { Note = d.Note; Changed?.Invoke(); }
 
             if (d.ToOwner != null) AddExchange(ExchangeKind.Reply, d.ToOwner);
@@ -643,7 +717,7 @@ public sealed partial class PaneOrchestrator : IDisposable
                 {
                     _lastSubmitAt = DateTimeOffset.Now;
                     await _worker.SubmitAsync(toWorker);
-                    _sentSinceLastTurn = true; _freshSession = false;
+                    _freshSession = false;
                     _turnEndedWhileThinking = false;
                     AddExchange(ExchangeKind.Sent, toWorker);
                 }
@@ -663,7 +737,7 @@ public sealed partial class PaneOrchestrator : IDisposable
 
     private string Status()
     {
-        var parts = new List<string> { $"session {_session}", $"decision {_decisions + 1}", _worker.IsRunning ? (_worker.IsAwaitingInput ? "worker idle" : "worker busy") : "worker not running" };
+        var parts = new List<string> { $"session {_session}", $"decision {_decisions + 1}", _worker.IsRunning ? (WorkerAtPrompt() ? "worker idle" : "worker busy") : "worker not running" };
         if (_worker.IsRunning && _freshSession) parts.Add("the worker session is fresh: empty memory, sent nothing yet");
         if (_worker.LatestContextReading is { } c) parts.Add($"worker context {c.UsedFraction:P0} of {c.WindowTokens / 1000:N0}k, handoff at {ContextThreshold:P0}");
         return string.Join(" · ", parts);
