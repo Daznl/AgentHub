@@ -14,7 +14,8 @@ Run these in PowerShell:
 
 ```powershell
 [Environment]::OSVersion.Version          # 10.0.17763 (Windows 10 version 1809) or later
-dotnet --list-sdks                        # needs a line starting with 8.
+dotnet --list-sdks                        # any SDK 8.x or later builds it
+dotnet --list-runtimes                    # running needs a line "Microsoft.WindowsDesktop.App 8."
 git --version
 Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'HKCU:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue | Select-Object -First 1 pv   # WebView2 runtime version
 ```
@@ -23,11 +24,12 @@ Required. If one is missing, tell the user and install it with `winget` once the
 
 | Missing | Install |
 |---|---|
-| .NET 8 SDK (no `8.x` in `dotnet --list-sdks`) | `winget install --id Microsoft.DotNet.SDK.8 -e` |
+| No .NET SDK, or none at 8 or later (`dotnet` missing, or `dotnet --list-sdks` empty or only older versions) | `winget install --id Microsoft.DotNet.SDK.8 -e`. This also brings the .NET 8 Desktop Runtime. |
+| A newer SDK (9, 10…) but no `Microsoft.WindowsDesktop.App 8.` runtime | `winget install --id Microsoft.DotNet.DesktopRuntime.8 -e` |
 | Git | `winget install --id Git.Git -e` |
 | WebView2 runtime (no version shown) | `winget install --id Microsoft.EdgeWebView2Runtime -e` |
 
-A newer SDK alone (9 or 10) is not enough. AgentHub targets `net8.0-windows`, so it needs the .NET 8 SDK or at least the .NET 8 runtime. A new install is not on `PATH` in the current shell. Open a new terminal, or call `"$env:ProgramFiles\dotnet\dotnet.exe"` directly. If `winget` is missing, send the user to https://dotnet.microsoft.com/download/dotnet/8.0.
+AgentHub targets `net8.0-windows`. A newer SDK builds it, but the app and the tests run only on the .NET 8 Desktop Runtime, because .NET does not move to a newer major version by itself. A new install is not on `PATH` in the current shell. Open a new terminal, or call `"$env:ProgramFiles\dotnet\dotnet.exe"` directly. If `winget` is missing or cannot reach its source (some company networks block it), send the user to the download pages instead: https://dotnet.microsoft.com/download/dotnet/8.0, https://git-scm.com/download/win, https://developer.microsoft.com/microsoft-edge/webview2/.
 
 Optional. Report which of these are on `PATH`, but do not install them unless the user asks: `gh` (GitHub CLI, for sign-in and the repository browser), `wt.exe` (Windows Terminal), `claude`, `codex`, `agy`.
 
@@ -70,7 +72,7 @@ Tell the user to right-click `AgentHub.exe` or the shortcut and choose **Pin to 
 ### 5. Report
 
 Give the user:
-- the .NET SDK version used
+- the .NET SDK and Desktop Runtime versions used
 - the install folder
 - the installed commit (from the `DEPLOYED:` line)
 - which optional tools are missing

@@ -135,7 +135,7 @@ It never stores API keys or provider credentials. Authentication stays with the 
 
 | Requirement | Notes |
 |---|---|
-| **.NET 8 SDK** | `winget install --id Microsoft.DotNet.SDK.8 -e`, or download it from [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/8.0). Check with `dotnet --list-sdks`: you need a line starting with `8.`. A newer SDK on its own (9 or 10) is not enough, because AgentHub targets .NET 8. Open a new terminal after installing so `dotnet` is on `PATH`. |
+| **.NET 8 SDK** (or later) | `winget install --id Microsoft.DotNet.SDK.8 -e`, or download it from [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/8.0). Check with `dotnet --list-sdks`. A newer SDK (9, 10…) also builds AgentHub, but the app and the tests still need the .NET 8 Desktop Runtime. Check `dotnet --list-runtimes` for `Microsoft.WindowsDesktop.App 8.`. If it is missing, run `winget install --id Microsoft.DotNet.DesktopRuntime.8 -e`. Open a new terminal after installing so `dotnet` is on `PATH`. |
 
 No IDE is required. Visual Studio 2022 or Rider open `AgentHub.sln` if you prefer one.
 
@@ -167,7 +167,7 @@ claude "Install AgentHub on this computer"
 
 [`CLAUDE.md`](CLAUDE.md) gives Claude the steps:
 
-1. Check for Windows 10 1809 or later, the .NET 8 SDK, Git and the WebView2 runtime. It installs any that are missing with `winget`, after asking you.
+1. Check for Windows 10 1809 or later, a .NET SDK (8 or later) with the .NET 8 Desktop Runtime, Git and the WebView2 runtime. It installs any that are missing with `winget`, after asking you.
 2. Build the solution and run the tests.
 3. Publish `AgentHub.exe` into an install folder outside the clone (`C:\Apps\AgentHub` unless you name another), using `scripts\Deploy-Taskbar.ps1`.
 4. Put a desktop shortcut on your desktop. Right-click it and choose **Pin to taskbar**. Windows does not let a program pin itself.
