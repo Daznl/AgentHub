@@ -346,6 +346,22 @@ public class TemplateRunTests
     }
 
     [Fact]
+    public async Task The_orchestrator_cannot_start_a_fresh_session_of_its_own_during_a_run()
+    {
+        var worker = new ScriptedWorker();
+        var brain = new ScriptedBrain { Answer = _ => new PaneDecision(null, "Build stage 1 of docs/PLAN.md.", "", StepOutcome.Continuing, NewSession: "new work") };
+        using var o = Attach(worker, brain);
+
+        await o.GoAsync("s1-build");
+
+        Assert.Equal(["Build stage 1 of docs/PLAN.md."], worker.Submitted); // the step's instruction still goes in
+        Assert.Equal(0, worker.Stops);
+        Assert.False(o.IsHandingOff);
+        Assert.Contains(o.Conversation, x => x.Kind == ExchangeKind.Note && x.Text.Contains("an advanced-template run is in progress"));
+        Assert.Contains("new_session", PaneDecision.RunSchema);
+    }
+
+    [Fact]
     public async Task Pause_stops_the_run_where_it_is_and_go_picks_it_up_from_the_workers_latest_reply()
     {
         var worker = new ScriptedWorker();
