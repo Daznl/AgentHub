@@ -109,6 +109,9 @@
                              AutomationProperties.Name="Handoff limit, per cent of the context window" />
                     <TextBlock Text="%" Foreground="#C4B5FD" FontSize="10" VerticalAlignment="Center" Margin="2,0,0,0" />
                 </StackPanel>
+                <Button x:Name="OrchestratorRunBtn" Click="OrchestratorRun_Click" Content="🗺 Run" Visibility="Collapsed"
+                        ToolTip="Open the tree of the advanced template this orchestrator follows: where the run stands, ▶ Go, ⏸ Pause, and going on from any step"
+                        Background="#221A3D" Foreground="#C4B5FD" Padding="8,2" FontSize="11" FontWeight="SemiBold" Margin="0,0,6,0" />
                 <Button x:Name="OrchestratorDetachBtn" Click="OrchestratorDetach_Click" Content="✕ Detach"
                         ToolTip="Take the orchestrator off this session: the session carries on as your own, and your typing goes straight to it again"
                         Background="#221A3D" Foreground="#C4B5FD" Padding="8,2" FontSize="11" FontWeight="SemiBold" />
@@ -250,9 +253,18 @@
                                 </DockPanel>
                                 <StackPanel x:Name="Step1Body" Margin="0,10,0,0">
                                     <TextBox x:Name="LocationFilter" TextChanged="LocationFilter_TextChanged" Margin="0,0,0,6" FontSize="12" Padding="8,4"
-                                             ToolTip="Type to filter repositories" AutomationProperties.Name="Filter repositories" />
+                                             ToolTip="Type to filter repositories and folders" AutomationProperties.Name="Filter repositories and folders" />
                                     <ItemsControl x:Name="LocationList" ItemTemplate="{StaticResource PickRowTemplate}" />
-                                    <TextBlock x:Name="LocationEmpty" Text="No repository matches." Foreground="#7E8CA6" FontSize="11" Margin="10,4,0,4" Visibility="Collapsed" />
+                                    <TextBlock x:Name="LocationEmpty" Text="No repository or folder matches." Foreground="#7E8CA6" FontSize="11" Margin="10,4,0,4" Visibility="Collapsed" />
+                                    <!-- Folders with past Claude Code or Codex sessions on this computer, so they work without registering first -->
+                                    <StackPanel x:Name="FoundSection" Visibility="Collapsed" Margin="0,8,0,0">
+                                        <TextBlock Text="PAST SESSIONS ON THIS COMPUTER" Foreground="#5A6B85" FontSize="9" FontWeight="Bold" Margin="2,0,0,4"
+                                                   ToolTip="Folders where Claude Code or Codex sessions ran, newest first, read from their transcripts on this computer" />
+                                        <ItemsControl x:Name="FoundList" ItemTemplate="{StaticResource PickRowTemplate}" AutomationProperties.Name="Folders with past sessions" />
+                                        <Button x:Name="FoundMoreBtn" Click="FoundMore_Click" Style="{StaticResource PickButton}" Visibility="Collapsed">
+                                            <TextBlock x:Name="FoundMoreText" FontSize="12" Foreground="#7E8CA6" />
+                                        </Button>
+                                    </StackPanel>
                                     <Button Click="BrowseFolder_Click" Style="{StaticResource PickButton}" Margin="0,4,0,0">
                                         <TextBlock Text="📂 Browse for another folder…" FontSize="12" Foreground="#7E8CA6" />
                                     </Button>

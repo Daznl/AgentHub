@@ -720,6 +720,18 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
                     }
                     break;
 
+                case "copy":
+                    // The page's own selection (Ctrl+C / Ctrl+Shift+C with text selected, right-click Copy).
+                    if (root.TryGetProperty("text", out var copyText) && copyText.GetString() is { Length: > 0 and <= TerminalClipboard.MaxChars } selected)
+                        _ = CopyAsync(selected, confirm: true);
+                    break;
+
+                case "osc52":
+                    // A program in the terminal asked for a copy (Claude Code does, for the selection it draws itself).
+                    if (root.TryGetProperty("data", out var oscData) && TerminalClipboard.ParseOsc52(oscData.GetString()) is { } requested)
+                        _ = CopyAsync(requested, confirm: false); // the program says so itself
+                    break;
+
                 case "screen":
                     // The page's answer to a capture: the terminal as escape sequences that rebuild it.
                     if (root.TryGetProperty("token", out var tokenProp) && _captures.TryGetValue(tokenProp.GetInt32(), out var capture))
@@ -732,6 +744,16 @@ public partial class EmbeddedTerminalControl : UserControl, IDisposable
                     break;
             }
         }
+        catch { }
+    }
+
+    /// <summary>Copies, and says so in a short note over the terminal (always when it fails: a copy never fails silently).</summary>
+    private async Task CopyAsync(string text, bool confirm)
+    {
+        var ok = await TerminalClipboard.SetTextAsync(text);
+        if (ok && !confirm) return;
+        var note = ok ? "Copied" : "Copy failed: another program kept the clipboard open. Try again.";
+        try { WebView.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(new { type = "toast", text = note, error = !ok })); }
         catch { }
     }
 

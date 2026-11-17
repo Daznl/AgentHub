@@ -64,6 +64,9 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     private List<SshConnection> _sshConnections = [];
     private List<RepositoryDefinition> _repositories = [];
     private LaunchLocation? _customLocation;
+    private IReadOnlyList<SessionFolder> _foundFolders = [];
+    private bool _showAllFound;
+    private const int FoundShownByDefault = 8;
     /// <summary>Raised once when the coding CLI in this pane stops working and waits for the user.</summary>
     public event Action<TerminalPaneControl>? AttentionRequested;
     private int _paneIndex = 1;
@@ -170,6 +173,10 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     public event Action<TerminalPaneControl, string>? OrchestratorMessageSent;
     /// <summary>The owner set the attached orchestrator's handoff limit (a fraction of the context window) in its box.</summary>
     public event Action<TerminalPaneControl, double>? OrchestratorThresholdChanged;
+    /// <summary>🗺 Run pressed in the box of an orchestrator that follows an advanced template: the owner wants its tree.</summary>
+    public event Action<TerminalPaneControl>? OrchestratorRunRequested;
+
+    private void OrchestratorRun_Click(object sender, RoutedEventArgs e) => OrchestratorRunRequested?.Invoke(this);
 
     public void ShowOrchestrator(OrchestratorBoxView? view)
     {
@@ -183,6 +190,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         }
         OrchestratorStateText.Text = view.State;
         OrchestratorTitle.Text = view.Title;
+        OrchestratorRunBtn.Visibility = view.HasRun ? Visibility.Visible : Visibility.Collapsed;
         OrchestratorProgress.Text = view.Note;
         OrchestratorProgress.ToolTip = string.IsNullOrEmpty(view.Note) ? null : view.Note;
         OrchestratorProgress.Visibility = string.IsNullOrEmpty(view.Note) ? Visibility.Collapsed : Visibility.Visible;
@@ -531,6 +539,23 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         return items;
     }
 
+    /// <summary>
+    /// Folders with past Claude Code or Codex sessions on this computer (see <see cref="SessionFolderDiscovery"/>), newest
+    /// first, offered under the repositories so their sessions can be continued without registering the folder first.
+    /// </summary>
+    public void UpdateFoundFolders(IReadOnlyList<SessionFolder> folders)
+    {
+        _foundFolders = folders;
+        if (_launcherOpen && _step == 1) RefreshLauncher();
+    }
+
+    // Found folders not already listed above, that still exist (a session cannot start in a deleted folder).
+    private List<LaunchLocation> FoundLocations(List<LaunchLocation> listed) =>
+        _foundFolders
+            .Where(f => f.Exists && !listed.Any(l => SamePath(l.Path, f.Path)))
+            .Select(LaunchLocation.FromFound)
+            .ToList();
+
     private static bool SamePath(string? a, string? b) =>
         a is not null && b is not null &&
         string.Equals(a.TrimEnd('\\', '/'), b.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
@@ -628,13 +653,23 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         BackToOutputBtn.Visibility = _hadSession ? Visibility.Visible : Visibility.Collapsed;
 
         var all = Locations();
+        var found = FoundLocations(all);
         var filter = LocationFilter.Text.Trim();
-        var shown = filter.Length == 0
-            ? all
-            : all.Where(l => l.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) || l.Path.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
-        LocationFilter.Visibility = all.Count > LocationFilterThreshold ? Visibility.Visible : Visibility.Collapsed;
+        bool Matches(LaunchLocation l) => filter.Length == 0 ||
+            l.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) || l.Path.Contains(filter, StringComparison.OrdinalIgnoreCase);
+        var shown = all.Where(Matches).ToList();
+        var foundShown = found.Where(Matches).ToList();
+        LocationFilter.Visibility = all.Count + found.Count > LocationFilterThreshold ? Visibility.Visible : Visibility.Collapsed;
         LocationList.ItemsSource = shown.Select(l => new PickRow(l, l.Name, l.Path, SamePath(l.Path, _location?.Path))).ToList();
-        LocationEmpty.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        LocationEmpty.Visibility = shown.Count + foundShown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        // Past-session folders: the newest few unless asked for all; a filter searches them all.
+        var foundLimited = filter.Length == 0 && !_showAllFound && foundShown.Count > FoundShownByDefault;
+        FoundSection.Visibility = foundShown.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        FoundList.ItemsSource = (foundLimited ? foundShown.Take(FoundShownByDefault) : foundShown)
+            .Select(l => new PickRow(l, l.Name, l.Detail, SamePath(l.Path, _location?.Path))).ToList();
+        FoundMoreBtn.Visibility = foundLimited ? Visibility.Visible : Visibility.Collapsed;
+        FoundMoreText.Text = $"Show all {foundShown.Count} folders…";
         var functions = _shells.Select(s => new PickRow(s, s.DisplayName, s.Command, s.DisplayName == _shell?.DisplayName)).ToList();
         // SSH runs from the home folder, so it is offered only there.
         if (IsHome(_location))
@@ -700,6 +735,10 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     {
         switch ((sender as FrameworkElement)?.Tag)
         {
+            // A found folder becomes this pane's browsed folder, so it stays chosen and the saved layout brings it back.
+            case PickRow { Item: LaunchLocation { Found: not null } found }:
+                SetCustomFolder(found.Path);
+                break;
             case PickRow { Item: LaunchLocation location }:
                 ChooseLocation(location);
                 break;
@@ -716,6 +755,12 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     }
 
     private void LocationFilter_TextChanged(object sender, TextChangedEventArgs e) => RefreshLauncher();
+
+    private void FoundMore_Click(object sender, RoutedEventArgs e)
+    {
+        _showAllFound = true;
+        RefreshLauncher();
+    }
 
     private void Step1Change_Click(object sender, RoutedEventArgs e)
     {
@@ -1046,12 +1091,43 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     }
 }
 
-/// <summary>An entry in a pane's location dropdown: the home folder, a browsed folder, or a registered repository.</summary>
+/// <summary>
+/// An entry in a pane's location list or the History window: the home folder, a browsed folder, a registered repository,
+/// or a folder found from its past sessions (<see cref="Found"/>).
+/// </summary>
 public sealed class LaunchLocation
 {
     public required string Name { get; init; }
     public required string Path { get; init; }
     public RepositoryDefinition? Repository { get; init; }
+
+    /// <summary>Set for a folder found from the sessions recorded on this computer rather than registered or browsed.</summary>
+    public SessionFolder? Found { get; init; }
+
+    /// <summary>The line under the name: the path, after the session count and last activity for a found folder.</summary>
+    public string Detail => Found is null ? Path : $"{Describe(Found)} · {Path}";
+
+    /// <summary>The History window's section for this entry.</summary>
+    public string Group => Found is null ? "Repositories and folders" : "Found on this computer";
+
+    public static LaunchLocation FromFound(SessionFolder folder)
+    {
+        var name = System.IO.Path.GetFileName(folder.Path.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar));
+        return new LaunchLocation { Name = "📁 " + (string.IsNullOrWhiteSpace(name) ? folder.Path : name), Path = folder.Path, Found = folder };
+    }
+
+    /// <summary>"12 sessions · today", "1 session · 3 Nov", plus "folder deleted" when it is gone.</summary>
+    public static string Describe(SessionFolder folder)
+    {
+        var count = folder.Sessions == 1 ? "1 session" : $"{folder.Sessions} sessions";
+        var local = folder.LastActivity.ToLocalTime();
+        var today = DateTime.Today;
+        var when = local.Date == today ? "today"
+            : local.Date == today.AddDays(-1) ? "yesterday"
+            : local.Year == today.Year ? local.ToString("d MMM", System.Globalization.CultureInfo.CurrentCulture)
+            : local.ToString("d MMM yyyy", System.Globalization.CultureInfo.CurrentCulture);
+        return folder.Exists ? $"{count} · {when}" : $"{count} · {when} · folder deleted";
+    }
 
     // Screen readers and UI Automation name combo items by ToString, not DisplayMemberPath.
     public override string ToString() => Name;

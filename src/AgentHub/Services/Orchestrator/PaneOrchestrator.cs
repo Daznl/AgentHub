@@ -9,8 +9,25 @@ namespace AgentHub.Services.Orchestrator;
 /// The pane orchestrator's one output per message: a word for the owner, a message for the worker, or both; rarely, a
 /// request to hand the worker off to a fresh session now (<paramref name="NewSession"/>, the reason), before its context fills.
 /// </summary>
-public sealed record PaneDecision(string? ToOwner, string? ToWorker, string Note, string? NewSession = null)
+/// <param name="Outcome">What it says about the current step of a run (<see cref="TemplateRun"/>); null without a run or when no step is concerned.</param>
+public sealed record PaneDecision(string? ToOwner, string? ToWorker, string Note, StepOutcome? Outcome = null, string? NewSession = null)
 {
+    /// <summary>The reply of an orchestrator that follows an advanced template: <see cref="Schema"/> plus <c>step_outcome</c>.</summary>
+    public const string RunSchema = """
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "to_owner": { "type": ["string", "null"], "description": "Your reply to the owner, shown in AgentHub. Null when there is nothing to tell them now." },
+            "to_worker": { "type": ["string", "null"], "description": "The exact message to type into the worker session. Null to send it nothing now." },
+            "note": { "type": "string", "description": "One line on where things stand, shown under the box title." },
+            "step_outcome": { "type": ["string", "null"], "enum": ["done", "continuing", "escalate", null], "description": "The current step of the run: done, continuing or escalate. Null when no step is concerned." },
+            "new_session": { "type": ["string", "null"], "description": "Null unless a fresh session is due under your rules (the owner asked, or new work on a context over the fresh-session mark): the reason to hand the worker off to a fresh session now." }
+          },
+          "required": ["to_owner", "to_worker", "note", "step_outcome", "new_session"]
+        }
+        """;
+
     public const string Schema = """
         {
           "type": "object",
@@ -30,7 +47,15 @@ public sealed record PaneDecision(string? ToOwner, string? ToWorker, string Note
         if (root.ValueKind != JsonValueKind.Object) throw new FormatException("The reply must be a JSON object.");
         string? Str(string name) => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()?.Trim() : null;
         string? NonBlank(string name) => Str(name) is { Length: > 0 } s ? s : null;
-        return new PaneDecision(NonBlank("to_owner"), NonBlank("to_worker"), Str("note") ?? "", NonBlank("new_session"));
+        StepOutcome? outcome = Str("step_outcome")?.ToLowerInvariant() switch
+        {
+            null or "" => null,
+            "done" => StepOutcome.Done,
+            "continuing" => StepOutcome.Continuing,
+            "escalate" => StepOutcome.Escalate,
+            var other => throw new FormatException($"step_outcome \"{other}\" is not one of done, continuing, escalate or null."),
+        };
+        return new PaneDecision(NonBlank("to_owner"), NonBlank("to_worker"), Str("note") ?? "", outcome, NonBlank("new_session"));
     }
 }
 
@@ -41,11 +66,19 @@ public interface IPaneBrain
 
     /// <summary>The brain's own context window use after its last decision; null when unknown (scripted brains).</summary>
     ContextReading? ReadContext() => null;
+
+    /// <summary>The brain's own session, so a saved run can pick the same one up again; null when it has none (scripted brains).</summary>
+    string? SessionId => null;
+    /// <summary>The folder that session runs in.</summary>
+    string? SessionFolder => null;
 }
 
 /// <summary>The real brain: a <see cref="ClaudeJsonSession"/> answering with <see cref="PaneDecision"/>s.</summary>
 public sealed class ClaudePaneBrain(ClaudeJsonSession session, long assumedWindowTokens = 200_000) : IPaneBrain
 {
+    public string? SessionId => session.SessionId;
+    public string? SessionFolder => session.WorkingDirectory;
+
     public async Task<PaneDecision> DecideAsync(string message, CancellationToken cancellationToken) =>
         (await session.AskAsync(message, PaneDecision.Parse, cancellationToken)).Value;
 
@@ -64,9 +97,9 @@ public sealed class ClaudePaneBrain(ClaudeJsonSession session, long assumedWindo
 /// briefs from the handoff. The orchestrator can start the same handoff early (<see cref="PaneDecision.NewSession"/>), which
 /// its prompt calls for when the owner asked for it, or on its own when new work comes to a session whose context is over
 /// <see cref="FreshSessionMark"/> (owner 2026-11-13: a review pass went into a session already at 187k tokens and hit the hard
-/// limit mid-deploy; "it should typically choose to handoff and create a new session"). No usage checks, stages or run archive: a thin loop on purpose.
+/// limit mid-deploy; "it should typically choose to handoff and create a new session").
 /// </summary>
-public sealed class PaneOrchestrator : IDisposable
+public sealed partial class PaneOrchestrator : IDisposable
 {
     private readonly IBuildWorker _worker;
     private readonly IPaneBrain _brain;
@@ -78,10 +111,12 @@ public sealed class PaneOrchestrator : IDisposable
     private bool _introduced;
     private bool _thinking;
     private bool _turnEndedWhileThinking;
-    private bool _sentSinceLastTurn;
     private string? _lastReplyHandled;
     private DateTimeOffset _lastSubmitAt = DateTimeOffset.MinValue;
     private DateTimeOffset? _transcriptTurnHandled;
+    private readonly DateTimeOffset _attachedAt = DateTimeOffset.Now;
+    private DateTimeOffset _lastDecisionAt = DateTimeOffset.Now;
+    private int _idleNudges;
     private int _decisions;
 
     // ---- Handoff: a fresh session when the context window fills ----
@@ -127,6 +162,13 @@ public sealed class PaneOrchestrator : IDisposable
     /// <summary>A turn end counts once the worker has been quiet this long (it may print a little after its prompt returns).</summary>
     public TimeSpan TurnSettle { get; set; } = TimeSpan.FromSeconds(15);
     public TimeSpan LoopInterval { get; set; } = TimeSpan.FromSeconds(3);
+    /// <summary>
+    /// A backstop for a turn end that no signal caught: when the worker has written nothing and the orchestrator has not been
+    /// asked for this long, its last reply is read again, and if nothing new came the orchestrator is told the worker is idle.
+    /// Each further nudge waits twice as long, at most <see cref="MaxIdleNudges"/> times until something happens.
+    /// </summary>
+    public TimeSpan IdleNudge { get; set; } = TimeSpan.FromMinutes(10);
+    public int MaxIdleNudges { get; set; } = 3;
     /// <summary>Upper bound on decisions, so a loop between the two sessions cannot run away.</summary>
     public int MaxDecisions { get; set; } = 300;
     /// <summary>
@@ -149,8 +191,6 @@ public sealed class PaneOrchestrator : IDisposable
     }
     private double _contextThreshold = 0.75;
     private bool _constructed;
-    public const double MinContextThreshold = 0.40;
-    public const double MaxContextThreshold = 0.95;
 
     /// <summary>Context size (tokens) from which new work goes to a fresh session: this, or half the handoff limit if lower.</summary>
     public const long FreshSessionTokens = 150_000;
@@ -169,6 +209,8 @@ public sealed class PaneOrchestrator : IDisposable
         return $" The worker's context holds {c.UsedTokens:N0} tokens, over the {FreshSessionMark(c):N0}-token fresh-session mark: " +
             "if what comes next is new work rather than the task in progress, set new_session and put that work in to_worker.";
     }
+    public const double MinContextThreshold = 0.40;
+    public const double MaxContextThreshold = 0.95;
 
     /// <summary>The worker's latest context reading, for the box (null until the first one).</summary>
     public ContextReading? LatestContext => _worker.LatestContextReading;
@@ -179,13 +221,26 @@ public sealed class PaneOrchestrator : IDisposable
     /// <summary>Time for the old CLI to go after it was stopped.</summary>
     public TimeSpan StopDelay { get; set; } = TimeSpan.FromMilliseconds(2500);
 
-    public PaneOrchestrator(IBuildWorker worker, IPaneBrain brain, string title, OrchestratorWorkflow? workflow = null, string? projectDirectory = null)
+    /// <param name="advanced">An advanced template to follow step by step (<see cref="Run"/>); the run waits for <see cref="GoAsync"/>.</param>
+    /// <exception cref="InvalidOperationException"><paramref name="advanced"/> has problems and cannot be run.</exception>
+    /// <param name="resume">A saved run of <paramref name="advanced"/> to pick up where it stood (<see cref="TemplateRun.Restore"/>); it comes back paused.</param>
+    /// <param name="brainRemembers">The brain is the session that followed the run before, so it is not shown the worker's history again.</param>
+    public PaneOrchestrator(IBuildWorker worker, IPaneBrain brain, string title, OrchestratorWorkflow? workflow = null, string? projectDirectory = null,
+        AdvancedTemplate? advanced = null, RunSnapshot? resume = null, bool brainRemembers = false)
     {
         _worker = worker;
         _brain = brain;
         Title = title;
         Workflow = workflow;
         _projectDirectory = projectDirectory;
+        if (advanced is not null)
+        {
+            Run = resume is null ? new TemplateRun(advanced) : TemplateRun.Restore(advanced, resume, "Picked up from a saved run. Press Go to carry on.");
+            // A step that was under way is picked up, not started again: Go shows the orchestrator the worker's latest reply.
+            if (resume is { State: not RunState.Ready }) _stepBegun = Run.Current?.Step.Id;
+            _introduced = resume is not null && brainRemembers;
+        }
+        _launch = worker.SessionLaunch;
         if (workflow?.ContextThreshold is { } t) ContextThreshold = t;
         _constructed = true;
         _worker.TurnEnded += OnWorkerTurnEnded;
@@ -205,13 +260,28 @@ public sealed class PaneOrchestrator : IDisposable
     /// <summary>The real thing for a Cockpit pane: a Claude Code session on the owner's login reading the pane's folder.</summary>
     /// <param name="assumedWindowTokens">The orchestrator's own context window, for its bar (Claude Code does not record it).</param>
     public static PaneOrchestrator ForPane(IBuildWorker worker, ProcessRunner runner, string command, string model, string projectDirectory,
-        string paneLabel, OrchestratorWorkflow? workflow, string? sessionsRoot = null, long assumedWindowTokens = 200_000)
+        string paneLabel, OrchestratorWorkflow? workflow, string? sessionsRoot = null, long assumedWindowTokens = 200_000, AdvancedTemplate? advanced = null,
+        RunResume? resume = null)
     {
         var folder = Path.Combine(sessionsRoot ?? DefaultSessionsRoot, $"{DateTimeOffset.Now:yyyyMMdd-HHmmss}-{OrchestratorMessages.Slug(Path.GetFileName(projectDirectory.TrimEnd('\\', '/')))}");
         // Its own session loads no CLAUDE.md, so the worker's instruction files are copied into its prompt.
         var rules = OrchestratorRules.Gather(projectDirectory, Instructions.InstructionFiles.DetectCli(worker.SessionLaunch?.CommandLine));
-        var session = new ClaudeJsonSession(runner, command, workflow?.Model ?? model, folder, projectDirectory, SystemPrompt(projectDirectory, paneLabel, workflow, rules), PaneDecision.Schema);
-        return new PaneOrchestrator(worker, new ClaudePaneBrain(session, assumedWindowTokens), workflow?.Name ?? "Orchestrator", workflow, projectDirectory);
+        var prompt = SystemPrompt(projectDirectory, paneLabel, workflow, rules, advanced);
+        var schema = advanced is null ? PaneDecision.Schema : PaneDecision.RunSchema;
+        var brainModel = advanced?.Model ?? workflow?.Model ?? model;
+
+        // A saved run goes on with the orchestrator session that followed it, which remembers the job and the owner's
+        // instructions, as long as Claude Code still has its transcript; else with a new one, shown the worker's history.
+        ClaudeJsonSession? session = null;
+        if (resume is { BrainSessionId: { Length: > 0 } id, BrainFolder: { Length: > 0 } was })
+        {
+            var same = new ClaudeJsonSession(runner, command, brainModel, was, projectDirectory, prompt, schema, id, alreadyStarted: true);
+            if (File.Exists(same.TranscriptPath)) session = same;
+        }
+        var remembers = session is not null;
+        session ??= new ClaudeJsonSession(runner, command, brainModel, folder, projectDirectory, prompt, schema);
+        return new PaneOrchestrator(worker, new ClaudePaneBrain(session, assumedWindowTokens), advanced?.Name ?? workflow?.Name ?? "Orchestrator", workflow, projectDirectory,
+            advanced, resume?.Snapshot, remembers);
     }
 
     /// <summary>The orchestrator's own context window use, read from its transcript after each decision; null until it has decided once.</summary>
@@ -221,7 +291,14 @@ public sealed class PaneOrchestrator : IDisposable
     // ---- Prompts ----
 
     /// <param name="rules">The worker's instruction files (<see cref="OrchestratorRules.Gather"/>); the fixed rules are always included.</param>
-    public static string SystemPrompt(string projectDirectory, string paneLabel, OrchestratorWorkflow? workflow, IReadOnlyList<RulesFile>? rules = null)
+    /// <param name="advanced">The advanced template the orchestrator follows: adds the run's rules and its outline.</param>
+    public static string SystemPrompt(string projectDirectory, string paneLabel, OrchestratorWorkflow? workflow, IReadOnlyList<RulesFile>? rules = null, AdvancedTemplate? advanced = null)
+    {
+        var prompt = BasePrompt(projectDirectory, paneLabel, workflow, rules);
+        return advanced is null ? prompt : prompt + "\n\n\n" + RunPrompt(advanced);
+    }
+
+    private static string BasePrompt(string projectDirectory, string paneLabel, OrchestratorWorkflow? workflow, IReadOnlyList<RulesFile>? rules)
     {
         var core = $"""
             You are the ORCHESTRATOR attached to a running Claude Code session, the WORKER, in {projectDirectory} (AgentHub pane "{paneLabel}").
@@ -244,6 +321,9 @@ public sealed class PaneOrchestrator : IDisposable
             - Both at once is normal: pass the owner's wish to the worker and tell the owner what you did.
             - When the worker finishes a turn: judge its reply, tell the owner what matters in a line or two, and either give the worker
               its next step or leave it idle and ask the owner, whichever the standing instructions call for.
+            - worker_idle means the worker has been quiet at its prompt for a while and no turn end came since your last decision.
+              If it is waiting on something it started (a deploy, a test run), leave it; if it has stopped and the owner's standing
+              instructions call for a next step, give it; if it is the owner's call, ask them.
             - If the worker asks a question that the owner's instructions already answer, answer it yourself; otherwise put it to the owner.
             - Handoffs: when the worker's context window fills, AgentHub has it write .agenthub/handoff.md, ends that session and starts a
               fresh one with an empty memory in the same pane. You are then asked for the fresh session's first instruction: it must start
@@ -257,10 +337,11 @@ public sealed class PaneOrchestrator : IDisposable
                   finished work. A full context makes the worker slower, costlier and more error-prone, and new work would hit the hard
                   limit midway. Keep the session only when the message continues the very task in progress (an answer to its question,
                   a correction, a fix to what it just did), when the worker is mid-task, or when the owner said to stay in this session.
-              Never twice in a row without new work in between. With new_session set, tell the owner why in to_owner and put the new
-              task in to_worker as usual: the old session is only asked to write .agenthub/handoff.md, and AgentHub gives your
-              instruction back to you when the fresh session starts, for its first instruction. Under the mark, keep the session; if a
-              fresh one would still help, suggest it in to_owner.
+              Never twice in a row without new work in between, and never during an advanced-template run (it starts fresh sessions
+              at its own steps). With new_session set, tell the owner why in to_owner and put the new task in to_worker as usual: the
+              old session is only asked to write .agenthub/handoff.md, and AgentHub gives your instruction back to you when the fresh
+              session starts, for its first instruction. Under the mark, keep the session; if a fresh one would still help, suggest it
+              in to_owner.
             - You can read the project folder (Read, Grep, Glob) to check claims; keep that brief.
 
             {OrchestratorRules.HardRules}
@@ -281,10 +362,12 @@ public sealed class PaneOrchestrator : IDisposable
 
     /// <summary>One message for the orchestrator.</summary>
     /// <param name="history">The session before the orchestrator was attached (<see cref="ConversationHistory.Format"/>); first message only.</param>
-    public static string Compose(string eventText, string? fromOwner, string? workerReply, string? history, string? status, string? handoff = null)
+    /// <param name="run">Where the run of an advanced template stands (<see cref="TemplateRun.Describe"/>); null without one.</param>
+    public static string Compose(string eventText, string? fromOwner, string? workerReply, string? history, string? status, string? handoff = null, string? run = null)
     {
         var sb = new StringBuilder();
         sb.Append("[EVENT] ").Append(eventText).Append("\n\n");
+        if (!string.IsNullOrWhiteSpace(run)) sb.Append("[RUN] ").Append(run.Trim()).Append("\n\n");
         if (!string.IsNullOrWhiteSpace(history)) sb.Append("[CONVERSATION HISTORY]\n").Append(history.Trim()).Append("\n\n");
         if (!string.IsNullOrWhiteSpace(status)) sb.Append("[STATUS] ").Append(status.Trim()).Append("\n\n");
         if (!string.IsNullOrWhiteSpace(handoff)) sb.Append("[HANDOFF.MD]\n").Append(OrchestratorMessages.Cut(handoff.Trim(), OrchestratorMessages.MaxHandoffChars, keepTail: false)).Append("\n\n");
@@ -304,13 +387,17 @@ public sealed class PaneOrchestrator : IDisposable
     {
         if (string.IsNullOrWhiteSpace(text)) return;
         AddExchange(ExchangeKind.Steer, text.Trim());
-        var busy = _worker.IsRunning && !_worker.IsAwaitingInput;
+        var busy = _worker.IsRunning && !WorkerAtPrompt();
         var eventText = IsHandingOff
             ? "owner_message: the owner wrote to you. The worker is handing off (writing its notes before a fresh session starts): hold any instruction for the fresh session; answer the owner."
+            : Run is { State: RunState.Paused, Cause: PauseCause.Question }
+            ? "owner_message: the owner answered the question of the current step (see [RUN]). If that settles it: step_outcome \"done\". If you need more from them, ask in to_owner with step_outcome \"continuing\"."
+            : Run is { State: RunState.Paused, Cause: PauseCause.Escalation }
+            ? "owner_message: the run is paused on your escalation and the owner wrote back. If you now have what the step needs: step_outcome \"continuing\" (with to_worker when the worker needs telling) or \"done\"; the run then carries on. Still stuck: \"escalate\" again."
             : busy
             ? "owner_message: the owner wrote to you. The worker is mid-turn: a to_worker is typed in now and the worker reads it at its next step."
             : "owner_message: the owner wrote to you. The worker is idle at its prompt." + FreshSessionHint();
-        await AskAsync(eventText, fromOwner: text, workerReply: null);
+        await AskAndFollowAsync(eventText, fromOwner: text, workerReply: null);
     }
 
     // ---- Worker turn ends ----
@@ -332,12 +419,51 @@ public sealed class PaneOrchestrator : IDisposable
             await PerformHandoffCycleAsync("the session finished its handoff turn");
             return;
         }
+        // A paused run leaves the worker alone: Go shows the orchestrator the worker's latest reply.
+        if (Run is { State: RunState.Paused }) return;
         var reply = _worker.ReadLastReply();
         // The reply the orchestrator already read: the terminal went quiet (a long tool run, a dialog) before the worker's next
         // reply exists. Not a new turn end (live run 2026-11-07: "a duplicate step 2 report arrived").
         if (reply != null && reply == _lastReplyHandled) return;
-        await AskAsync("worker_turn_ended: the worker finished a turn and is waiting at its prompt." + FreshSessionHint(), fromOwner: null, workerReply: reply ?? "");
+        await AskAndFollowAsync(TurnEndedEvent + FreshSessionHint(), fromOwner: null, workerReply: reply ?? "");
     }
+
+    private const string TurnEndedEvent = "worker_turn_ended: the worker finished a turn and is waiting at its prompt.";
+
+    /// <summary>
+    /// The worker is at its prompt. The terminal's flag stays set from one wait until someone types, so it misses a turn the
+    /// worker started by itself (a background job finishing) and still reads "waiting" during that turn; the transcript
+    /// records every turn end and every prompt (live run 2026-11-13: the box said "worker busy" for a worker idle 20 minutes).
+    /// </summary>
+    private bool WorkerAtPrompt()
+    {
+        if (_worker.ReadTurnEndedAt() is { } ended && ended > _sessionStartedAt) return _worker.OutputSilentFor >= TurnSettle;
+        return _worker.IsAwaitingInput;
+    }
+
+    /// <summary>
+    /// The worker has been silent and the orchestrator unasked for a while. A reply it has not read means a turn end was
+    /// missed; otherwise it is told the worker is idle, so a run never just sits there until the owner writes.
+    /// </summary>
+    private async Task NudgeIfIdleAsync()
+    {
+        if (_thinking || _handoffRequested || !_introduced || !_worker.IsRunning || _idleNudges >= MaxIdleNudges) return;
+        var wait = IdleNudge * (1 << _idleNudges);
+        if (_worker.OutputSilentFor < wait || DateTimeOffset.Now - _lastDecisionAt < wait) return;
+        var reply = _worker.ReadLastReply();
+        if (reply != null && reply != _lastReplyHandled)
+        {
+            AddExchange(ExchangeKind.Note, "A worker turn end was missed; reading its reply now.");
+            _transcriptTurnHandled = _worker.ReadTurnEndedAt();
+            await AskAndFollowAsync(TurnEndedEvent, fromOwner: null, workerReply: reply);
+            return;
+        }
+        _idleNudges++;
+        await AskAndFollowAsync($"worker_idle: the worker has written nothing for {Minutes(_worker.OutputSilentFor)} and no turn end has come since your last decision; its last reply is the one you already read.",
+            fromOwner: null, workerReply: null, nudge: true);
+    }
+
+    private static string Minutes(TimeSpan t) => t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes} min" : $"{(int)t.TotalSeconds} s";
 
     private async Task<bool> SettleAsync()
     {
@@ -360,19 +486,25 @@ public sealed class PaneOrchestrator : IDisposable
         {
             while (!_disposeCts.IsCancellationRequested)
             {
-                await Task.Delay(LoopInterval, _disposeCts.Token);
+                await WaitLoopIntervalAsync();
                 if (_restarting) continue;
                 if (_worker.IsAtSecurityCheck) { NoteWaitingForOwner(); continue; }
                 if (_held != null) { await DeliverHeldAsync(); continue; }
-                // The terminal can miss a turn end (a message queued during a busy turn runs as the next one without the CLI
-                // ever going quiet in between). The transcript records every turn end.
-                if (!_thinking && (_sentSinceLastTurn || _handoffRequested) && _worker.IsRunning && _worker.ReadTurnEndedAt() is { } ended
-                    && ended > _lastSubmitAt && DateTimeOffset.Now - ended >= TurnSettle && ended != _transcriptTurnHandled)
+                if (_awaitingQuiet && !_thinking) await FollowWhenQuietAsync();
+                // The terminal can miss a turn end: a message queued during a busy turn runs as the next one without the CLI ever
+                // going quiet in between, and a turn the worker starts by itself (a background job finishing) comes after a wait
+                // no one typed into, so the terminal never re-arms (live run 2026-11-13: two finished parts sat unseen for 2 and
+                // 21 minutes). The transcript records every turn end, whoever started the turn. Turns that ended before the
+                // orchestrator was attached are the session's history, not news.
+                if (!_thinking && _worker.IsRunning && _worker.ReadTurnEndedAt() is { } ended
+                    && ended > _lastSubmitAt && ended > _attachedAt && ended > _sessionStartedAt
+                    && DateTimeOffset.Now - ended >= TurnSettle && ended != _transcriptTurnHandled)
                 {
                     _transcriptTurnHandled = ended;
                     await HandleTurnEndAsync(seenInTranscript: true);
                     continue;
                 }
+                await NudgeIfIdleAsync();
                 if (_handoffRequested && DateTimeOffset.Now - _handoffRequestedAt > HandoffTimeout)
                 {
                     AddExchange(ExchangeKind.Note, "The handoff turn took too long; starting the fresh session anyway.");
@@ -383,6 +515,22 @@ public sealed class PaneOrchestrator : IDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex) { AddExchange(ExchangeKind.Note, $"The orchestrator loop stopped: {ex.Message}"); }
     }
+
+    /// <summary>
+    /// Waits <see cref="LoopInterval"/>, read again every slice: the loop starts in the constructor, before an object initialiser
+    /// sets the interval, so a single delay would always wait the default first.
+    /// </summary>
+    private async Task WaitLoopIntervalAsync()
+    {
+        var started = DateTimeOffset.Now;
+        while (DateTimeOffset.Now - started < LoopInterval)
+        {
+            var left = LoopInterval - (DateTimeOffset.Now - started);
+            await Task.Delay(left < LoopSlice ? (left > TimeSpan.Zero ? left : TimeSpan.FromMilliseconds(1)) : LoopSlice, _disposeCts.Token);
+        }
+    }
+
+    private static readonly TimeSpan LoopSlice = TimeSpan.FromMilliseconds(250);
 
     // ---- Security checks are the owner's ----
 
@@ -408,7 +556,7 @@ public sealed class PaneOrchestrator : IDisposable
             if (!_worker.IsRunning) { AddExchange(ExchangeKind.Note, "The session is not running, so the held message was not delivered."); return; }
             _lastSubmitAt = DateTimeOffset.Now;
             await _worker.SubmitAsync(text);
-            _sentSinceLastTurn = true;
+            _freshSession = false;
             _turnEndedWhileThinking = false;
             AddExchange(ExchangeKind.Sent, text);
         }
@@ -467,23 +615,7 @@ public sealed class PaneOrchestrator : IDisposable
             Changed?.Invoke();
 
             AddExchange(ExchangeKind.Note, $"Session #{_session} ended ({why}); starting session #{_session + 1}: {launch.Value.CommandLine} in {launch.Value.WorkingDirectory}.");
-            if (_worker.IsRunning)
-            {
-                _expectExit = true;
-                _worker.Stop();
-                await Task.Delay(StopDelay, _disposeCts.Token);
-            }
-            _session++;
-            _sessionStartedAt = DateTimeOffset.Now;
-            _contextBaseline = null;
-            _workedThisSession = false;
-            _lastReplyHandled = null;
-            _sentSinceLastTurn = false;
-            _turnEndedWhileThinking = false;
-            _transcriptTurnHandled = null;
-            _expectExit = false;
-            _worker.Start(launch.Value.CommandLine, launch.Value.WorkingDirectory, launch.Value.Title, launch.Value.SessionName);
-            await Task.Delay(StartupDelay, _disposeCts.Token);
+            await RestartWorkerAsync(launch.Value);
         }
         catch (OperationCanceledException) { return; }
         finally
@@ -499,7 +631,7 @@ public sealed class PaneOrchestrator : IDisposable
         var carry = carried == null ? ""
             : " You started it for new work; the instruction you wrote for that work, not sent to the old session, was:\n\"\"\"\n" + carried +
               "\n\"\"\"\nGive that work to this session now, adapted as needed.";
-        await AskAsync($"new_worker_session: session #{_session} is a fresh session with an empty memory, started after a handoff. It has not been given anything yet. " +
+        await AskAndFollowAsync($"new_worker_session: session #{_session} is a fresh session with an empty memory, started after a handoff. It has not been given anything yet. " +
             "Write its first instruction (to_worker): read .agenthub/handoff.md first, then carry on with the job and the owner's standing instructions." + carry,
             fromOwner: null, workerReply: null, handoff: handoff);
     }
@@ -511,10 +643,36 @@ public sealed class PaneOrchestrator : IDisposable
     private string? NewSessionRefusal()
     {
         if (_handoffRequested || _restarting) return "a handoff is already under way";
+        if (Run is { State: RunState.Running }) return "an advanced-template run is in progress, and it starts fresh sessions at its own steps";
         if (!_worker.IsRunning) return "the session is not running";
         if (_worker.SessionLaunch is null) return "AgentHub does not know how this session was started, so it cannot start it again";
         if (_session > 1 && !_workedThisSession) return $"session #{_session} has not finished any work yet";
         return null;
+    }
+
+    /// <summary>
+    /// Ends the pane's session (when one runs) and starts a fresh one the same way, counted as the next session. The caller
+    /// holds <see cref="_gate"/> and has set <see cref="_restarting"/>, so the session's end is not taken for the owner's.
+    /// </summary>
+    private async Task RestartWorkerAsync(SessionLaunch launch)
+    {
+        if (_worker.IsRunning)
+        {
+            _expectExit = true;
+            _worker.Stop();
+            await Task.Delay(StopDelay, _disposeCts.Token);
+        }
+        _session++;
+        _sessionStartedAt = DateTimeOffset.Now;
+        _contextBaseline = null;
+        _workedThisSession = false;
+        _lastReplyHandled = null;
+        _turnEndedWhileThinking = false;
+        _transcriptTurnHandled = null;
+        _expectExit = false;
+        _freshSession = true;
+        _worker.Start(launch.CommandLine, launch.WorkingDirectory, launch.Title, launch.SessionName);
+        await Task.Delay(StartupDelay, _disposeCts.Token);
     }
 
     private string? ReadHandoff()
@@ -532,23 +690,41 @@ public sealed class PaneOrchestrator : IDisposable
     private void OnWorkerExited()
     {
         if (_expectExit) { _expectExit = false; return; }
-        if (_handoffRequested && !_restarting) _ = PerformHandoffCycleAsync("the session ended during its handoff turn");
+        if (_handoffRequested && !_restarting) { _ = PerformHandoffCycleAsync("the session ended during its handoff turn"); return; }
+        if (!_restarting) OnWorkerEndedDuringRun();
     }
 
     // ---- One orchestrator turn ----
 
-    private async Task AskAsync(string eventText, string? fromOwner, string? workerReply, string? handoff = null)
+    /// <summary>One orchestrator turn, then on with the run when that turn finished its current step.</summary>
+    private async Task AskAndFollowAsync(string eventText, string? fromOwner, string? workerReply, string? handoff = null, bool nudge = false)
     {
+        if (await AskAsync(eventText, fromOwner, workerReply, handoff, nudge: nudge)) await FollowRunAsync();
+    }
+
+    /// <summary>Returns true when the decision finished the run's current step, so the caller moves on to the next one.</summary>
+    /// <param name="fallbackToWorker">Typed into the worker when the orchestrator writes it nothing for a step that must tell it something.</param>
+    /// <param name="nudge">An idle nudge: it does not reset the nudge count, so silence is not nudged about without end.</param>
+    private async Task<bool> AskAsync(string eventText, string? fromOwner, string? workerReply, string? handoff = null, string? fallbackToWorker = null, bool nudge = false)
+    {
+        var advance = false;
         string? newSessionReason = null;
         await _gate.WaitAsync();
         try
         {
-            if (_disposeCts.IsCancellationRequested) return;
+            if (_disposeCts.IsCancellationRequested) return false;
+            // The terminal and the transcript can both report one turn end; the second waits here while the first is decided
+            // (live run 2026-11-13: one turn end reached the orchestrator twice, 12 s apart).
+            if (eventText.StartsWith(TurnEndedEvent, StringComparison.Ordinal) && workerReply is not null && workerReply == _lastReplyHandled) return false;
+            if (!nudge) _idleNudges = 0;
             if (_decisions >= MaxDecisions)
             {
                 AddExchange(ExchangeKind.Note, $"The orchestrator reached its limit of {MaxDecisions} decisions. Detach and attach it again to carry on.");
-                return;
+                Run?.Pause(PauseCause.Problem, $"The orchestrator reached its limit of {MaxDecisions} decisions.");
+                return false;
             }
+            var stepAtAsk = Run?.Current?.Step.Id;
+            _awaitingQuiet = false; // the orchestrator is being brought in now, whatever the run was waiting for
 
             // The first message carries the whole session so far, so the orchestrator knows the job (a transcript can be tens of MB: read off this thread).
             string? history = null;
@@ -556,9 +732,10 @@ public sealed class PaneOrchestrator : IDisposable
             {
                 var entries = await Task.Run(_worker.ReadHistory);
                 history = ConversationHistory.Format(entries, lastReplyFollows: workerReply is not null,
-                    lastTurnRunning: _worker.IsRunning && !_worker.IsAwaitingInput);
+                    lastTurnRunning: _worker.IsRunning && !WorkerAtPrompt());
             }
-            var message = Compose(eventText, fromOwner, workerReply, history, Status(), handoff);
+            var planChanged = _planChanged;
+            var message = Compose(eventText, fromOwner, workerReply, history, Status(), handoff, DescribeRun(planChanged));
             if (workerReply is not null) AddExchange(ExchangeKind.Read, workerReply.Length == 0 ? "(no text reply)" : workerReply);
 
             SetThinking(true);
@@ -567,19 +744,26 @@ public sealed class PaneOrchestrator : IDisposable
             catch (OrchestratorBrainException ex)
             {
                 AddExchange(ExchangeKind.Note, (ex.UsageLimit ? "Claude usage limit: " : "The orchestrator failed: ") + ex.Message);
-                return;
+                if (Run is { State: RunState.Running } failed)
+                {
+                    failed.Pause(PauseCause.Problem, ex.UsageLimit ? "Claude usage limit reached." : "The orchestrator failed: " + ex.Message);
+                    AddExchange(ExchangeKind.Note, "Run paused. Press Go to carry on from this step.");
+                }
+                return false;
             }
-            catch (OperationCanceledException) { return; }
-            finally { SetThinking(false); }
+            catch (OperationCanceledException) { return false; }
+            finally { SetThinking(false); _lastDecisionAt = DateTimeOffset.Now; }
 
             _introduced = true;
+            if (planChanged) _planChanged = false; // it has seen the new outline
             _decisions++;
             _orchestratorContext = _brain.ReadContext() ?? _orchestratorContext; // its transcript has this decision's usage
-            if (workerReply is not null) { _lastReplyHandled = workerReply; _sentSinceLastTurn = false; _turnEndedWhileThinking = false; _workedThisSession = true; }
+            if (workerReply is not null) { _lastReplyHandled = workerReply; _turnEndedWhileThinking = false; _workedThisSession = true; }
             if (d.Note.Length > 0) { Note = d.Note; Changed?.Invoke(); }
 
             if (d.ToOwner != null) AddExchange(ExchangeKind.Reply, d.ToOwner);
             var toWorker = d.ToWorker;
+            if (Run is { } run) toWorker = ApplyStepOutcome(run, d, stepAtAsk, fromOwner is not null, fallbackToWorker, out advance);
             if (d.NewSession is { } why)
             {
                 if (NewSessionRefusal() is { } refusal)
@@ -591,7 +775,7 @@ public sealed class PaneOrchestrator : IDisposable
                     toWorker = null;
                 }
             }
-            if (toWorker == null && handoff != null && newSessionReason == null)
+            if (toWorker == null && handoff != null && newSessionReason == null && Run is not { State: RunState.Paused })
                 toWorker = "Read .agenthub/handoff.md and the code, then carry on with the job in it."; // a fresh session must be told something
             if (toWorker != null && _handoffRequested)
             {
@@ -608,13 +792,13 @@ public sealed class PaneOrchestrator : IDisposable
                 {
                     _lastSubmitAt = DateTimeOffset.Now;
                     await _worker.SubmitAsync(toWorker);
-                    _sentSinceLastTurn = true;
+                    _freshSession = false;
                     _turnEndedWhileThinking = false;
                     AddExchange(ExchangeKind.Sent, toWorker);
                 }
                 else AddExchange(ExchangeKind.Note, "The session is not running, so the orchestrator's message was not delivered.");
             }
-            else if (d.ToOwner == null) AddExchange(ExchangeKind.Wait, d.Note.Length > 0 ? d.Note : "nothing to send yet");
+            else if (d.ToOwner == null && !advance && newSessionReason == null) AddExchange(ExchangeKind.Wait, d.Note.Length > 0 ? d.Note : "nothing to send yet");
         }
         finally { _gate.Release(); }
 
@@ -633,18 +817,20 @@ public sealed class PaneOrchestrator : IDisposable
                 }
                 else AddExchange(ExchangeKind.Note, "No fresh session could start, so the orchestrator's instruction was not sent: " + OrchestratorMessages.Cut(stranded, 200, keepTail: false));
             }
-            return;
+            return false;
         }
         if (_turnEndedWhileThinking)
         {
             _turnEndedWhileThinking = false;
             _ = HandleTurnEndAsync();
         }
+        return advance;
     }
 
     private string Status()
     {
-        var parts = new List<string> { $"session {_session}", $"decision {_decisions + 1}", _worker.IsRunning ? (_worker.IsAwaitingInput ? "worker idle" : "worker busy") : "worker not running" };
+        var parts = new List<string> { $"session {_session}", $"decision {_decisions + 1}", _worker.IsRunning ? (WorkerAtPrompt() ? "worker idle" : "worker busy") : "worker not running" };
+        if (_worker.IsRunning && _freshSession) parts.Add("the worker session is fresh: empty memory, sent nothing yet");
         if (_worker.LatestContextReading is { } c)
             parts.Add($"worker context {c.UsedTokens / 1000:N0}k tokens ({c.UsedFraction:P0} of {c.WindowTokens / 1000:N0}k), handoff at {ContextThreshold:P0}, " +
                 $"fresh session for new work from {FreshSessionMark(c) / 1000:N0}k");

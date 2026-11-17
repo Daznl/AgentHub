@@ -48,7 +48,9 @@ public partial class HistoryWindow : Window
         Controls.DarkTitleBar.Apply(this);
         Controls.WindowPlacement.KeepOnScreen(this);
         _archiveRoot = archiveRoot;
-        LocationList.ItemsSource = _locations;
+        var locations = new ListCollectionView(_locations);
+        locations.GroupDescriptions.Add(new PropertyGroupDescription(nameof(LaunchLocation.Group)));
+        LocationList.ItemsSource = locations;
         UpdateRepositories(repositories);
         _liveTimer.Tick += async (_, _) => await LiveTickAsync();
         _liveTimer.Start();
@@ -61,20 +63,88 @@ public partial class HistoryWindow : Window
         ShowEntryMessage("Pick a repository, then a session.");
     }
 
-    /// <summary>Home first, then registered repositories by name. Folders opened from a pane stay in the list.</summary>
+    /// <summary>Raised by ➕ Add to repositories on a found folder that is a Git repository.</summary>
+    public event Action<string>? RegisterRequested;
+
+    private List<RepositoryDefinition> _repositories = [];
+    private IReadOnlyList<SessionFolder> _found = [];
+
+    /// <summary>
+    /// Home first, then folders opened from a pane, then registered repositories by name, then (in their own section)
+    /// the other folders with sessions on this computer, newest first.
+    /// </summary>
     public void UpdateRepositories(IEnumerable<RepositoryDefinition> repositories)
     {
+        _repositories = repositories.ToList();
+        RebuildLocations();
+    }
+
+    /// <summary>Folders found from the sessions recorded on this computer (see <see cref="SessionFolderDiscovery"/>).</summary>
+    public void UpdateFoundFolders(IReadOnlyList<SessionFolder> folders)
+    {
+        _found = folders;
+        RebuildLocations();
+    }
+
+    private void RebuildLocations()
+    {
         var selected = LocationList.SelectedItem as LaunchLocation;
-        var extra = _locations.Where(l => l.Repository is null && l.Path != TerminalPaneControl.BaseDirectory).ToList();
+        var extra = _locations.Where(l => l.Repository is null && l.Found is null && l.Path != TerminalPaneControl.BaseDirectory).ToList();
 
-        _locations.Clear();
-        _locations.Add(new LaunchLocation { Name = "🏠 Home", Path = TerminalPaneControl.BaseDirectory });
-        foreach (var e in extra) _locations.Add(e);
-        foreach (var r in repositories.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase))
-            _locations.Add(new LaunchLocation { Name = r.Name, Path = r.LocalPath, Repository = r });
+        var list = new List<LaunchLocation> { new() { Name = "🏠 Home", Path = TerminalPaneControl.BaseDirectory } };
+        list.AddRange(extra);
+        list.AddRange(_repositories.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(r => new LaunchLocation { Name = r.Name, Path = r.LocalPath, Repository = r }));
+        list.AddRange(_found.Where(f => !list.Any(l => SamePath(l.Path, f.Path))).Select(LaunchLocation.FromFound));
 
-        if (selected is not null)
-            LocationList.SelectedItem = _locations.FirstOrDefault(l => SamePath(l.Path, selected.Path));
+        // Rebuilding the list clears the selection; the selected folder's sessions must not be reloaded for it.
+        _rebuilding = true;
+        try
+        {
+            _locations.Clear();
+            foreach (var l in list) _locations.Add(l);
+            if (selected is not null)
+                LocationList.SelectedItem = _locations.FirstOrDefault(l => SamePath(l.Path, selected.Path));
+        }
+        finally { _rebuilding = false; }
+        if (LocationList.SelectedItem is LaunchLocation now) RefreshRegisterButton(now);
+        else RegisterBtn.Visibility = Visibility.Collapsed;
+    }
+
+    private bool _rebuilding;
+
+    // A found folder that is a Git repository (its root, not a folder inside one) can be added to AgentHub's list.
+    private void RefreshRegisterButton(LaunchLocation location)
+    {
+        var offer = location.Found is { Exists: true } && IsRepositoryRoot(location.Path);
+        RegisterBtn.Visibility = offer ? Visibility.Visible : Visibility.Collapsed;
+        RegisterBtn.Tag = offer ? location.Path : null;
+        RegisterBtn.IsEnabled = true;
+        RegisterBtn.Content = RegisterLabel;
+    }
+
+    private const string RegisterLabel = "➕ Add to repositories";
+
+    private static bool IsRepositoryRoot(string folder)
+    {
+        try
+        {
+            var git = System.IO.Path.Combine(folder, ".git");
+            return System.IO.Directory.Exists(git) || System.IO.File.Exists(git); // a worktree's .git is a file
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private void Register_Click(object sender, RoutedEventArgs e)
+    {
+        if (RegisterBtn.Tag is not string folder) return;
+        // Git can take a few seconds on a synced folder; the list moves the folder up when it is added.
+        RegisterBtn.IsEnabled = false;
+        RegisterBtn.Content = "Adding…";
+        RegisterRequested?.Invoke(folder);
     }
 
     /// <summary>Shows <paramref name="folder"/>'s sessions and, when given, opens that transcript scrolled to the newest entry.</summary>
@@ -99,7 +169,9 @@ public partial class HistoryWindow : Window
 
     private async void LocationList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (LocationList.SelectedItem is LaunchLocation location) await LoadSessionsAsync(location);
+        if (_rebuilding || LocationList.SelectedItem is not LaunchLocation location) return;
+        RefreshRegisterButton(location);
+        await LoadSessionsAsync(location);
     }
 
     private async void RefreshSessions_Click(object sender, RoutedEventArgs e)

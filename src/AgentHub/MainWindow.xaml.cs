@@ -80,6 +80,7 @@ public partial class MainWindow : Window
         _discovery = new RepoDiscoveryService(_git);
         _usageService = new UsageService(_runner);
         _usageRefreshTimer.Tick += async (_, _) => await RefreshUsageAsync();
+        _foundFoldersTimer.Tick += async (_, _) => await RefreshFoundFoldersAsync();
         Loaded += MainWindow_Loaded;
         Controls.DarkTitleBar.Apply(this);
         Controls.WindowPlacement.KeepOnScreen(this);
@@ -140,6 +141,8 @@ public partial class MainWindow : Window
         ViewCockpitBtn_Click(this, new RoutedEventArgs());
         StatusText.Text = $"Settings: {_settingsService.SettingsPath}";
         StartHistoryArchive();
+        _ = RefreshFoundFoldersAsync();
+        _foundFoldersTimer.Start();
 
         UsageIntervalBox.Text = _settings.UsageRefreshMinutes.ToString("0.##", CultureInfo.InvariantCulture);
         UpdateUsagePollingInterval();
@@ -152,6 +155,9 @@ public partial class MainWindow : Window
         var args = Environment.GetCommandLineArgs();
         var timelineArg = Array.FindIndex(args, a => string.Equals(a, "--timeline", StringComparison.OrdinalIgnoreCase));
         if (timelineArg >= 0 && timelineArg + 1 < args.Length && Directory.Exists(args[timelineArg + 1])) ShowTimeline(args[timelineArg + 1]);
+        // "AgentHub.exe --advanced-templates <folder>" opens that project's advanced templates the same way.
+        var advancedArg = Array.FindIndex(args, a => string.Equals(a, "--advanced-templates", StringComparison.OrdinalIgnoreCase));
+        if (advancedArg >= 0 && advancedArg + 1 < args.Length) ShowAdvancedTemplates(args[advancedArg + 1]);
         _ = LoadGitHubReposAsync();
     }
 
@@ -242,6 +248,7 @@ public partial class MainWindow : Window
         pane.ConfigureHistory(HistoryArchiveRoot);
         pane.ConfigureHost(_sessionHosts);
         pane.UpdateRepositories(_settings.Repositories);
+        pane.UpdateFoundFolders(_foundFolders);
         pane.UpdateSshConnections(_settings.SshConnections);
         pane.SshManageRequested += () => ManageSsh_Click(pane, new RoutedEventArgs());
         pane.HistoryRequested += p => ShowHistory(p.HistoryFolder, p.TranscriptPath);
@@ -252,8 +259,9 @@ public partial class MainWindow : Window
         pane.OrchestratorDetachRequested += DetachPaneOrchestrator;
         pane.OrchestratorMessageSent += (p, text) => { if (_paneOrchestrators.TryGetValue(p, out var o)) _ = o.SendAsync(text); };
         pane.OrchestratorThresholdChanged += SetPaneOrchestratorThreshold;
-        // The session ended: the orchestrator goes with it, unless it ended the session itself for a handoff and is starting the next.
-        pane.SessionStateChanged += () => { if (!pane.IsRunning && _paneOrchestrators.TryGetValue(pane, out var o) && !o.IsRestarting) DetachPaneOrchestrator(pane); };
+        pane.OrchestratorRunRequested += p => { if (_paneRuns.TryGetValue(p, out var run)) _ = OpenAdvancedTemplatesAsync(run.Project, run.TemplateId); };
+        // The session ended: the orchestrator goes with it, unless it ended the session itself for a handoff and is starting the next, or follows a run that is not finished.
+        pane.SessionStateChanged += () => { if (!pane.IsRunning && _paneOrchestrators.TryGetValue(pane, out var o) && !o.KeepsEndedSession) DetachPaneOrchestrator(pane); };
         return pane;
     }
 
@@ -281,20 +289,219 @@ public partial class MainWindow : Window
             item.Click += (_, _) => AttachPaneOrchestrator(pane, picked);
             menu.Items.Add(item);
         }
+        // The project's advanced templates: an orchestrator that follows one step by step. Only those that can be run.
+        var project = await ResolveProjectAsync(pane.ContextFolder);
+        if (!pane.IsRunning || _paneOrchestrators.ContainsKey(pane)) return; // things moved on while git was asked
+        var runnable = project is null ? [] : ListAdvancedTemplates(project).Where(f => f.Template is { } t && t.Validate().Count == 0).ToList();
+        menu.Items.Add(new Separator());
+        foreach (var file in runnable)
+        {
+            var template = file.Template!;
+            var item = new MenuItem
+            {
+                Header = $"🗺 Follow: {template.Name} ({AdvancedTemplateTree.Summary(template)})",
+                ToolTip = "An orchestrator that follows this advanced template step by step, ticking each step off. Its tree opens beside the Cockpit; nothing happens until you press ▶ Go there." +
+                          (string.IsNullOrWhiteSpace(template.Description) ? "" : "\n\n" + template.Description),
+            };
+            item.Click += (_, _) => AttachPaneOrchestrator(pane, null, template, project);
+            menu.Items.Add(item);
+        }
+        // The project's paused runs: picked up on this session where they stood.
+        foreach (var saved in project is null ? [] : SavedRuns().Where(r => !r.IsFinished && SameFolder(r.Project, project)).Take(5))
+        {
+            var item = new MenuItem
+            {
+                Header = $"▶ Resume run: {saved.TemplateName} · {saved.Progress}",
+                ToolTip = $"Pick this paused run up on this session and carry it on from where it stood. Last moved {saved.UpdatedAt.LocalDateTime:d MMM HH:mm}." +
+                          (string.IsNullOrWhiteSpace(saved.Reason) ? "" : "\n\n" + saved.Reason),
+            };
+            item.Click += (_, _) => ResumeRun(saved, pane);
+            menu.Items.Add(item);
+        }
+        var advanced = new MenuItem
+        {
+            Header = "🗺 Advanced templates of this project…",
+            ToolTip = "The sequences of stages and steps kept in this project's orchestration folder, each shown as a tree.",
+        };
+        advanced.Click += (_, _) => ShowAdvancedTemplates(pane.ContextFolder);
+        menu.Items.Add(advanced);
         menu.IsOpen = true;
     }
 
-    private void AttachPaneOrchestrator(TerminalPaneControl pane, OrchestratorWorkflow? workflow)
+    private readonly Dictionary<string, AdvancedTemplatesWindow> _advancedTemplateWindows = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>A pane whose orchestrator follows an advanced template: the project and the template's id, to find its tree again, and the run's record on disk.</summary>
+    private sealed record PaneRun(string Project, string TemplateId, RunRecorder Recorder);
+
+    private readonly Dictionary<TerminalPaneControl, PaneRun> _paneRuns = [];
+
+    // ---- Runs kept on disk: every run is recorded as it goes, and a paused one is picked up again from ⏯ Runs or 🧭 Orchestrate ----
+
+    private readonly RunStore _runStore = new();
+    private RunsWindow? _runsWindow;
+
+    private static bool SameFolder(string a, string b) =>
+        string.Equals(Path.TrimEndingDirectorySeparator(a), Path.TrimEndingDirectorySeparator(b), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The runs on disk that no pane is following: paused, whatever their record says, or finished.</summary>
+    private IReadOnlyList<RunRecord> SavedRuns()
     {
-        if (!pane.IsRunning || _paneOrchestrators.ContainsKey(pane)) return;
-        var orchestrator = PaneOrchestrator.ForPane(new PaneBuildWorker(pane), _runner, PaneOrchestrator.DefaultCommand, "sonnet",
-            pane.ContextFolder, $"Terminal {pane.PaneIndex}", workflow, assumedWindowTokens: _settings.ClaudeContextWindowTokens);
+        var live = _paneRuns.Values.Select(r => r.Recorder.Record.Id).ToHashSet();
+        try { return _runStore.List().Where(r => !live.Contains(r.Id)).ToList(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            StatusText.Text = "Runs: could not read " + _runStore.Root + ": " + ex.Message;
+            return [];
+        }
+    }
+
+    private void OpenRuns_Click(object sender, RoutedEventArgs e)
+    {
+        if (_runsWindow is null)
+        {
+            _runsWindow = new RunsWindow(_runStore.Root)
+            {
+                Owner = this,
+                Rows = () => [.. _paneRuns.Select(r => new RunsWindow.Row(r.Value.Recorder.Record, $"Terminal {r.Key.PaneIndex}")).OrderBy(r => r.LivePane),
+                              .. SavedRuns().Select(r => new RunsWindow.Row(r, null))],
+                ResumeTargets = ResumeTargets,
+                OpenTree = record => _ = OpenAdvancedTemplatesAsync(record.Project, record.TemplateId),
+                Delete = record => _runStore.Delete(record.Id),
+            };
+            _runsWindow.Closed += (_, _) => _runsWindow = null;
+            _runsWindow.Show();
+        }
+        if (_runsWindow.WindowState == WindowState.Minimized) _runsWindow.WindowState = WindowState.Normal;
+        _runsWindow.Activate();
+    }
+
+    /// <summary>
+    /// Where a paused run can be picked up: the running sessions in its project that have no orchestrator yet. A run is
+    /// never put on a session by itself: the owner picks one.
+    /// </summary>
+    private IReadOnlyList<RunsWindow.Target> ResumeTargets(RunRecord record) =>
+        _panes.Where(p => p.IsRunning && !_paneOrchestrators.ContainsKey(p) && IsInside(p.ContextFolder, record.Project))
+              .Select(p => new RunsWindow.Target($"On Terminal {p.PaneIndex} · {p.ContextFolder}", () => ResumeRun(record, p)))
+              .ToList();
+
+    private static bool IsInside(string? folder, string project)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return false;
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(project));
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+        return full.Equals(root, StringComparison.OrdinalIgnoreCase) || full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Puts a paused run on a running session: an orchestrator that has the run where it stood, and Go.</summary>
+    private void ResumeRun(RunRecord record, TerminalPaneControl pane)
+    {
+        if (_paneRuns.Values.Any(r => r.Recorder.Record.Id == record.Id))
+        {
+            StatusText.Text = $"Runs: {record.TemplateName} is already being followed on a pane.";
+            return;
+        }
+        AdvancedTemplate template;
+        try { template = record.ReadTemplate(); }
+        catch (FormatException ex)
+        {
+            StatusText.Text = "Runs: this run's saved template cannot be read: " + ex.Message;
+            return;
+        }
+        if (!AttachPaneOrchestrator(pane, null, template, record.Project, record)) return;
+        _ = _paneOrchestrators[pane].GoAsync();
+    }
+
+    /// <summary>
+    /// The project a folder belongs to: the checkout it is in (its own worktree, since templates are files of the branch),
+    /// or the folder itself outside a repository. Null when there is no such folder.
+    /// </summary>
+    private async Task<string?> ResolveProjectAsync(string? folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return null;
+        try
+        {
+            var top = await _runner.RunAsync("git", ["rev-parse", "--show-toplevel"], folder);
+            if (top.ExitCode == 0 && top.StdOut.Trim() is { Length: > 0 } path && Directory.Exists(path)) return Path.GetFullPath(path);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or OperationCanceledException) { /* no git: the folder itself */ }
+        return Path.GetFullPath(folder);
+    }
+
+    private static IReadOnlyList<AdvancedTemplateFile> ListAdvancedTemplates(string project)
+    {
+        try { return new AdvancedTemplateStore(project).List(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
+    }
+
+    private void ShowAdvancedTemplates(string? folder) => _ = OpenAdvancedTemplatesAsync(folder, null);
+
+    /// <summary>
+    /// 🗺 Advanced templates: one window per project, reused; not modal, so it sits beside the Cockpit. Every run of one of
+    /// the project's templates on a pane is shown live in it.
+    /// </summary>
+    private async Task OpenAdvancedTemplatesAsync(string? folder, string? selectId)
+    {
+        if (await ResolveProjectAsync(folder) is not { } project)
+        {
+            StatusText.Text = "Advanced templates: this pane has no folder.";
+            return;
+        }
+        if (!_advancedTemplateWindows.TryGetValue(project, out var window))
+        {
+            window = new AdvancedTemplatesWindow(project) { Owner = this, HelperCommand = ClaudeCommand, CrabAnimated = _settings.AnimatedBackground && _settings.CrabMascot };
+            window.Closed += (_, _) => _advancedTemplateWindows.Remove(project);
+            _advancedTemplateWindows[project] = window;
+            window.Show();
+        }
+        foreach (var (pane, run) in _paneRuns)
+            if (string.Equals(run.Project, project, StringComparison.OrdinalIgnoreCase) && _paneOrchestrators.TryGetValue(pane, out var orchestrator))
+                window.BindRun(run.TemplateId, orchestrator, $"Terminal {pane.PaneIndex}");
+        if (selectId is not null) window.Select(selectId);
+        if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
+        window.Activate();
+    }
+
+    /// <param name="advanced">An advanced template of <paramref name="project"/> for the orchestrator to follow; its tree opens with the run waiting for Go.</param>
+    /// <param name="resume">A paused run of <paramref name="advanced"/> to pick up where it stood; its record carries on.</param>
+    /// <returns>True when the orchestrator is on the pane.</returns>
+    private bool AttachPaneOrchestrator(TerminalPaneControl pane, OrchestratorWorkflow? workflow, AdvancedTemplate? advanced = null, string? project = null, RunRecord? resume = null)
+    {
+        if (!pane.IsRunning || _paneOrchestrators.ContainsKey(pane)) return false;
+        PaneOrchestrator orchestrator;
+        try
+        {
+            orchestrator = PaneOrchestrator.ForPane(new PaneBuildWorker(pane), _runner, PaneOrchestrator.DefaultCommand, "sonnet",
+                pane.ContextFolder, $"Terminal {pane.PaneIndex}", workflow, assumedWindowTokens: _settings.ClaudeContextWindowTokens, advanced: advanced,
+                resume: resume?.Resume());
+        }
+        catch (InvalidOperationException ex) // the template stopped being sound between the menu and the click
+        {
+            StatusText.Text = "Orchestrate: " + ex.Message;
+            return false;
+        }
         // No workflow limit: the limit last set in a box (settings), so a chosen value carries over to the next orchestrator.
         if (workflow?.ContextThreshold is null && _settings.PaneOrchestratorContextThreshold > 0)
             orchestrator.ContextThreshold = _settings.PaneOrchestratorContextThreshold;
         orchestrator.Changed += RefreshOrchestratorBoxes;
         _paneOrchestrators[pane] = orchestrator;
         RefreshOrchestratorBoxes();
+        if (advanced is not null && project is not null)
+        {
+            // On disk from now on, so the run outlives its orchestrator and AgentHub.
+            var now = DateTimeOffset.Now;
+            var record = resume ?? new RunRecord
+            {
+                Id = _runStore.NewId(advanced.Name, now), Project = project, TemplateId = advanced.Id, TemplateName = advanced.Name,
+                Template = advanced.Serialize(), StartedAt = now,
+            };
+            record.Pane = $"Terminal {pane.PaneIndex}";
+            var recorder = new RunRecorder(_runStore, orchestrator, record);
+            if (recorder.Error is { } error) StatusText.Text = "Runs: this run could not be saved: " + error;
+            _paneRuns[pane] = new PaneRun(project, advanced.Id, recorder);
+            _ = OpenAdvancedTemplatesAsync(project, advanced.Id);
+            _runsWindow?.Refresh();
+        }
+        return true;
     }
 
     /// <summary>The handoff limit typed into a pane's box: applied to that orchestrator at once, and kept as the default for the next one.</summary>
@@ -310,9 +517,15 @@ public partial class MainWindow : Window
     private void DetachPaneOrchestrator(TerminalPaneControl pane)
     {
         if (!_paneOrchestrators.Remove(pane, out var orchestrator)) return;
+        if (_paneRuns.Remove(pane, out var run))
+        {
+            run.Recorder.Dispose(); // the run stays on disk, paused, to resume from ⏯ Runs
+            if (_advancedTemplateWindows.TryGetValue(run.Project, out var tree)) tree.UnbindRun(orchestrator);
+        }
         orchestrator.Changed -= RefreshOrchestratorBoxes;
         orchestrator.Dispose();
         RefreshOrchestratorBoxes();
+        _runsWindow?.Refresh();
     }
 
     /// <summary>
@@ -439,6 +652,56 @@ public partial class MainWindow : Window
     private HistoryWindow? _historyWindow;
     private HistoryArchiveService? _historyArchive;
 
+    // Folders with past sessions on this computer, for every pane's launcher and the History window. Read at start and
+    // every few minutes; transcripts already summarised are not re-read unless they changed.
+    private IReadOnlyList<SessionFolder> _foundFolders = [];
+    private readonly DispatcherTimer _foundFoldersTimer = new() { Interval = TimeSpan.FromMinutes(5) };
+    private bool _foundFoldersRefreshing;
+
+    private async Task RefreshFoundFoldersAsync()
+    {
+        if (_foundFoldersRefreshing) return;
+        _foundFoldersRefreshing = true;
+        try
+        {
+            var archiveRoot = HistoryArchiveRoot;
+            var home = TerminalPaneControl.BaseDirectory;
+            _foundFolders = await Task.Run(() => SessionFolderDiscovery.Discover(archiveRoot: archiveRoot)
+                .Where(f => !SessionFolderDiscovery.IsTemporary(f.Path) && !SessionFolderDiscovery.IsAgentHubOwn(f.Path) &&
+                            !string.Equals(f.Path.TrimEnd('\\'), home.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+                .ToList());
+            foreach (var pane in _panes) pane.UpdateFoundFolders(_foundFolders);
+            _historyWindow?.UpdateFoundFolders(_foundFolders);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Transcripts unreadable this time; the next tick tries again.
+        }
+        finally
+        {
+            _foundFoldersRefreshing = false;
+        }
+    }
+
+    // ➕ Add to repositories in the History window, for a found folder that is a Git repository.
+    private async void RegisterFoundFolder(string folder)
+    {
+        try
+        {
+            if (!await _git.IsRepositoryAsync(folder))
+            {
+                MessageBox.Show(this, $"{folder}\nis not a Git repository.", "AgentHub", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            await EnsureRepositoryAsync(folder);
+        }
+        finally
+        {
+            // Moves the folder up to the repositories, or puts the button back if it could not be added.
+            _historyWindow?.UpdateRepositories(_settings.Repositories);
+        }
+    }
+
     private string? HistoryArchiveRoot => _settings.HistoryArchiveEnabled && !string.IsNullOrWhiteSpace(_settings.HistoryArchiveDirectory)
         ? _settings.HistoryArchiveDirectory
         : null;
@@ -468,8 +731,11 @@ public partial class MainWindow : Window
         if (_historyWindow is null)
         {
             _historyWindow = new HistoryWindow(_settings.Repositories, HistoryArchiveRoot) { Owner = this };
+            _historyWindow.UpdateFoundFolders(_foundFolders);
+            _historyWindow.RegisterRequested += RegisterFoundFolder;
             _historyWindow.Closed += (_, _) => _historyWindow = null;
             _historyWindow.Show();
+            _ = RefreshFoundFoldersAsync();
         }
         else
         {
@@ -1094,10 +1360,7 @@ public partial class MainWindow : Window
         RepoViewGrid.Visibility = Visibility.Visible;
         GitHubViewGrid.Visibility = Visibility.Collapsed;
         CockpitViewGrid.Visibility = Visibility.Collapsed;
-        CockpitHeaderActions.Visibility = Visibility.Collapsed;
-        ManageBar.Visibility = Visibility.Visible;
-        ManageReposBtn.Background = NavActiveBrush;
-        ViewCockpitBtn.Background = NavInactiveBrush;
+        ShowHeaderFor(cockpit: false);
         ViewReposBtn.Background = NavActiveBrush;
         ViewGitHubBtn.Background = NavInactiveBrush;
     }
@@ -1107,10 +1370,7 @@ public partial class MainWindow : Window
         RepoViewGrid.Visibility = Visibility.Collapsed;
         GitHubViewGrid.Visibility = Visibility.Visible;
         CockpitViewGrid.Visibility = Visibility.Collapsed;
-        CockpitHeaderActions.Visibility = Visibility.Collapsed;
-        ManageBar.Visibility = Visibility.Visible;
-        ManageReposBtn.Background = NavActiveBrush;
-        ViewCockpitBtn.Background = NavInactiveBrush;
+        ShowHeaderFor(cockpit: false);
         ViewGitHubBtn.Background = NavActiveBrush;
         ViewReposBtn.Background = NavInactiveBrush;
 
@@ -1129,6 +1389,18 @@ public partial class MainWindow : Window
         }
     }
 
+    // Header shows only what the view needs, and never a button to the view already on screen:
+    // the Cockpit gets its actions and the other tools; Manage GitHub Repos gets its actions, the way back to the Cockpit and Settings.
+    private void ShowHeaderFor(bool cockpit)
+    {
+        var inCockpit = cockpit ? Visibility.Visible : Visibility.Collapsed;
+        var inManage = cockpit ? Visibility.Collapsed : Visibility.Visible;
+        CockpitHeaderActions.Visibility = inCockpit;
+        CockpitNavButtons.Visibility = inCockpit;
+        ManageBar.Visibility = inManage;
+        ViewCockpitBtn.Visibility = inManage;
+    }
+
     // The separator only divides the groups while they share a row; once the actions wrap below, it would dangle.
     // The crab roams only the header strip the buttons leave free.
     private void HeaderButtons_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -1142,10 +1414,7 @@ public partial class MainWindow : Window
         RepoViewGrid.Visibility = Visibility.Collapsed;
         GitHubViewGrid.Visibility = Visibility.Collapsed;
         CockpitViewGrid.Visibility = Visibility.Visible;
-        CockpitHeaderActions.Visibility = Visibility.Visible;
-        ManageBar.Visibility = Visibility.Collapsed;
-        ViewCockpitBtn.Background = NavActiveBrush;
-        ManageReposBtn.Background = NavInactiveBrush;
+        ShowHeaderFor(cockpit: true);
 
         if (_lastUsageRefresh is null || DateTimeOffset.Now - _lastUsageRefresh > _usageRefreshTimer.Interval)
             _ = RefreshUsageAsync();
@@ -2178,6 +2447,9 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _usageRefreshTimer.Stop();
+        // Runs under way are kept as paused: their sessions live on without AgentHub, their orchestrators do not.
+        foreach (var run in _paneRuns.Values) run.Recorder.Close("AgentHub was closed while this run was under way.");
+        _paneRuns.Clear();
         foreach (var o in _paneOrchestrators.Values) o.Dispose();
         _paneOrchestrators.Clear();
         _historyArchive?.Dispose();
