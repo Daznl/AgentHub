@@ -10,6 +10,12 @@ Separate from advanced templates, on branch `feature/discover-session-folders`. 
 
 Defaults taken without an answer: found folders show by themselves (no scan button); Git folders are offered for adding, never added by themselves; scratch folders under AppData/temp and everything under `C:\data\agenthub` except `worktrees` are left out.
 
+## Side piece, 2026-11-17: pull request cleanup and install guide
+
+- **Pull requests 7 and 9 merged.** Both conflicted with the advanced-template work and were brought up to date with `main`. 7 (turns the worker starts by itself) now sends turn ends, missed replies and idle nudges through `AskAndFollowAsync`. 9 (`new_session`) also carries the local follow-up `8909670`, which starts a fresh session by itself for new work over 150k tokens. 9 is now refused during an advanced-template run, which has its own New session steps. No pull requests are open.
+- **Install guide.** The new `CLAUDE.md` imports `AGENTS.md` and tells Claude Code how to install from a clone: prerequisite checks with winget installs, build and test, `scripts\Deploy-Taskbar.ps1 -InstallDir C:\Apps\AgentHub`, and a desktop shortcut to pin. README has an "Install with Claude Code" section. Tested with a fresh install into a folder whose path has a space. The winget package names could not be checked live because the winget source is blocked on the IGO network.
+- **Open:** 37 remote branches that are fully merged into `main` are waiting for the owner's go to delete them. 8 unmerged branches (`agenthub-workflows`, `compact-header`, two `deploy/taskbar-*`, `feature/animated-background`, `prompt-only-strip`, `turn-capture`, `turn-suggestions`) and the old worktrees under `C:\data\agenthub\worktrees\AgentHub` are untouched. The taskbar app likely still runs the older combined build of 7, 8 and 9; `Deploy-Taskbar.ps1 -Check` will say so.
+
 ## What the owner asked for
 
 An orchestrator that follows a planned sequence instead of improvising one: a tree of stages and steps (instruct the worker, wait for it, ask the owner, new session, close session, handoff, create branch, commit, merge, move work to a branch, open a pull request), shown like the Timeline tree but forward-looking; ticked off live; pausable at any time and resumable later; editable, also for later steps while a run is under way; and a helper crab that builds the sequence from a written plan.
