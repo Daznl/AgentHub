@@ -10,7 +10,7 @@ When the user asks to install, set up or build AgentHub, follow these steps in o
 
 ### 1. Check the prerequisites
 
-Run these in PowerShell:
+Run `.\bootstrap.cmd -CheckOnly` from the repository root. It reports every required and optional tool and changes nothing. If Git is missing, the clone cannot exist yet; if PowerShell cannot run the script, check by hand:
 
 ```powershell
 [Environment]::OSVersion.Version          # 10.0.17763 (Windows 10 version 1809) or later

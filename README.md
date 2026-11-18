@@ -20,8 +20,23 @@ AgentHub treats the **repository as the workspace** and the AI CLI as an **inter
 
 It never stores API keys or provider credentials. Authentication stays with the tools you already use: each coding CLI, the GitHub CLI and Git Credential Manager.
 
+## Quick start
+
+On Windows 10 (1809 or later) or Windows 11, with Git installed:
+
+```powershell
+git clone <the AgentHub repository URL>
+cd AgentHub
+.\bootstrap.cmd
+```
+
+The bootstrap script checks for the .NET SDK, the .NET 8 Desktop Runtime, Git and the WebView2 Runtime, offers to install any that are missing with `winget`, builds AgentHub and opens it. No Git yet? Run `winget install --id Git.Git -e` first, or download it from [git-scm.com](https://git-scm.com/download/win).
+
+Then [install it as a taskbar app](#install-as-a-taskbar-app) so it runs from a fixed folder, and follow [First launch](#first-launch). Details and alternatives: [Requirements](#requirements) and [Getting started](#getting-started).
+
 ## Contents
 
+- [Quick start](#quick-start)
 - [Features](#features)
 - [Requirements](#requirements)
 - [Getting started](#getting-started)
@@ -151,7 +166,7 @@ No IDE is required. Visual Studio 2022 or Rider open `AgentHub.sln` if you prefe
 
 Every CLI must be on `PATH` and already signed in through its own login flow. AgentHub does not manage provider authentication.
 
-The bootstrap script reports which of these it found before it builds.
+The bootstrap script reports which of these it found. It never installs them.
 
 ## Getting started
 
@@ -175,15 +190,28 @@ claude "Install AgentHub on this computer"
 
 To update later, ask Claude to update AgentHub, or follow [Updating a pinned install](#updating-a-pinned-install).
 
-### Fastest path
+### Bootstrap script
 
-Clone the repo and run the bootstrap script from the repository root. It checks prerequisites, restores and builds the solution, then launches the app.
+Run from the repository root. It checks each required tool, prints the `winget` command for anything missing and asks before installing it, then restores, builds (Debug) and launches the app from the clone.
 
-```cmd
-git clone <the AgentHub repository URL>
-cd AgentHub
-.\bootstrap.cmd
+```powershell
+.\bootstrap.cmd              # check, offer installs, build, launch
+.\bootstrap.cmd -CheckOnly   # report what is installed and what is missing, change nothing
+.\bootstrap.cmd -Yes         # install missing required tools without asking
+.\bootstrap.cmd -NoLaunch    # build but do not start the app
 ```
+
+If `winget` is missing or blocked (some company networks block it), the script lists the download pages instead. After a manual install, open a new terminal so the new tools are on `PATH`, then run it again.
+
+### Install as a taskbar app
+
+The bootstrap build runs from the clone, so pulling new code changes it. For everyday use, publish into a fixed folder outside the clone. The script needs a clean working tree that contains `origin/main`; a fresh clone does.
+
+```powershell
+.\scripts\Deploy-Taskbar.ps1 -InstallDir 'C:\Apps\AgentHub'
+```
+
+It prints `DEPLOYED: <commit> is installed in 'C:\Apps\AgentHub'` and starts the app. Avoid `%APPDATA%`, `%LOCALAPPDATA%` and `%TEMP%` as install folders; they are hidden and hard to find. Then right-click `C:\Apps\AgentHub\AgentHub.exe` and choose **Pin to taskbar** (Windows does not let a program pin itself). Once pinned, the script finds the folder from the pin, so later updates need no `-InstallDir`; see [Updating a pinned install](#updating-a-pinned-install).
 
 ### Build and run manually
 
