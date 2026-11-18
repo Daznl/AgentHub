@@ -544,6 +544,7 @@ public partial class MainWindow : Window
             var next = _paneOrchestrators.TryGetValue(pane, out var attached) ? OrchestratorBoxView.For(attached) : null;
             if (next != pane.OrchestratorView) pane.ShowOrchestrator(next);
         }
+        NoteOrchestratorsForWorld();
     }
 
     /// <summary>The orchestration templates every 🧭 Orchestrate menu offers.</summary>
@@ -633,6 +634,7 @@ public partial class MainWindow : Window
         {
             window = new TimelineWindow(_runner, scope, HistoryArchiveRoot) { Owner = this };
             window.HistoryRequested += (sessionFolder, transcript) => ShowHistory(sessionFolder, transcript);
+            window.WorldRequested += OpenWorld;
             // The review's rules for the user-wide CLAUDE.md go to the global Context editor as tickable changes.
             window.SuggestionsRequested += suggestion =>
             {
@@ -644,7 +646,6 @@ public partial class MainWindow : Window
             window.Show();
         }
         window.ReviewCommand = ClaudeCommand;
-        window.GodotCommand = _settings.GodotCommand;
         window.CrabAnimated = _settings.AnimatedBackground && _settings.CrabMascot;
         if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
         window.Activate();
@@ -2448,6 +2449,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _usageRefreshTimer.Stop();
+        StopWorld(); // Godot keeps showing the last state; the files just stop changing
         // Runs under way are kept as paused: their sessions live on without AgentHub, their orchestrators do not.
         foreach (var run in _paneRuns.Values) run.Recorder.Close("AgentHub was closed while this run was under way.");
         _paneRuns.Clear();

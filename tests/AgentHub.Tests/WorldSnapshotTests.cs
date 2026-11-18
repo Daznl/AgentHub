@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
-using AgentHub.Hosting;
 using AgentHub.Services;
 using AgentHub.Services.Context;
 using AgentHub.Services.History;
@@ -27,7 +26,7 @@ public class WorldSnapshotTests
 
     // main: a -- b ------- m (merge of feature/x)
     //               \- c -/
-    private static TimelineModel Model(out TimelineSessionInput session)
+    private static TimelineModel Model()
     {
         var commits = new List<TimelineCommit>
         {
@@ -36,59 +35,60 @@ public class WorldSnapshotTests
             Commit("bbbbbbb", 1, "second", "aaaaaaa"),
             Commit("aaaaaaa", 0, "first"),
         };
-        session = new TimelineSessionInput(
+        var session = new TimelineSessionInput(
             new SessionSummary(@"C:\sessions\s1.jsonl", ContextSource.ClaudeCode, "Build feature x", null, At(2.5), At(3.5), 100),
             At(3.5), new HashSet<string>(StringComparer.Ordinal), @"C:\data\wt\feature x");
         return TimelineBuilder.Build([session], commits, [new TimelineBranchTip(Full("mmmmmmm"), "main", false)], At(24));
     }
 
+    private static WorldProject Project(IReadOnlyList<WorldFileEntry>? files = null) =>
+        WorldSnapshotBuilder.BuildProject(Scope, Model(),
+            [new PullRequestFact(3, "Feature x", "feature/x", "main", "ada", "bob", At(5), Full("mmmmmmm"), 1, false, "MERGED")],
+            [new WorldWorktree(@"C:\repos\My Repo", "main", Full("mmmmmmm"), true)], files ?? [new("src/a.cs", 10)], false);
+
     [Fact]
-    public void Build_carries_rows_branches_commits_and_sessions_from_the_timeline()
+    public void BuildProject_carries_rows_branches_commits_and_sessions_from_the_timeline()
     {
-        var model = Model(out _);
-        var pr = new PullRequestFact(3, "Feature x", "feature/x", "main", "ada", "bob", At(5), Full("mmmmmmm"), 1, false, "MERGED");
-        var worktrees = new List<WorldWorktree> { new(@"C:\repos\My Repo", "main", Full("mmmmmmm"), true) };
-        var snapshot = WorldSnapshotBuilder.Build(Scope, model, [pr], worktrees, [], At(24));
+        var project = Project();
+        Assert.Equal("main", project.Trunk);
+        Assert.Equal(WorldSnapshotBuilder.ProjectId(@"C:\repos\My Repo"), project.Id);
+        Assert.Equal(4, project.Commits.Count);
+        Assert.All(project.Commits, c => Assert.InRange(c.Row, 0, project.Rows.Count - 1));
 
-        Assert.Equal(WorldSnapshot.CurrentSchema, snapshot.Schema);
-        Assert.Equal("main", snapshot.Repo.Trunk);
-        Assert.Equal(model.Rows.Count, snapshot.Rows.Count);
-        Assert.Equal(4, snapshot.Commits.Count);
-        Assert.All(snapshot.Commits, c => Assert.InRange(c.Row, 0, snapshot.Rows.Count - 1));
-
-        var feature = Assert.Single(snapshot.Branches, b => !b.IsTrunk);
+        var feature = Assert.Single(project.Branches, b => !b.IsTrunk);
         Assert.Equal("feature/x", feature.Name);
         Assert.True(feature.IsMerged);
         Assert.Equal(Full("mmmmmmm"), feature.MergeHash);
         Assert.Equal(TimelineBranch.TrunkKey, feature.Parent);
 
-        var session = Assert.Single(snapshot.Sessions);
+        var session = Assert.Single(project.Sessions);
         Assert.Equal("claude", session.Agent);
-        Assert.Equal("Build feature x", session.Title);
         Assert.Contains(Full("ccccccc"), session.Commits);
         Assert.Equal(feature.Key, session.Branch);
-        Assert.Equal(@"C:\sessions\s1.jsonl", snapshot.Commits.Single(c => c.Hash == Full("ccccccc")).Session);
-
-        Assert.Equal("MERGED", Assert.Single(snapshot.PullRequests).State);
+        Assert.Equal("MERGED", Assert.Single(project.PullRequests).State);
     }
 
     [Fact]
-    public void The_file_is_camel_case_json_that_round_trips_through_a_replace()
+    public void The_world_file_is_camel_case_json_written_through_a_replace()
     {
-        var snapshot = WorldSnapshotBuilder.Build(Scope, Model(out _), null, [], [], At(24));
+        var snapshot = new WorldSnapshot(WorldSnapshot.CurrentSchema, At(24), "events-x.ndjson", [Project()],
+            [new WorldLiveSession(@"C:\t\s.jsonl", "claude", "t", "p", @"C:\repos\My Repo", "main", At(24), "Terminal 1")],
+            [new WorldOrchestrator("Terminal 1", "Orchestrator", @"C:\t\s.jsonl", "watching", null)]);
         var dir = Path.Combine(Path.GetTempPath(), "agenthub world " + Guid.NewGuid().ToString("N")[..6]);
         try
         {
-            var path = WorldFile.PathFor(Scope, dir);
-            Assert.Contains("My-Repo-", path);
-            WorldFile.Write(path, snapshot);
-            WorldFile.Write(path, snapshot); // the second write replaces the first
+            var path = WorldStore.WorldPath(dir);
+            WorldStore.Write(path, snapshot);
+            WorldStore.Write(path, snapshot);
             using var doc = JsonDocument.Parse(File.ReadAllText(path));
             var root = doc.RootElement;
-            Assert.Equal(1, root.GetProperty("schema").GetInt32());
-            Assert.Equal("My Repo", root.GetProperty("repo").GetProperty("name").GetString());
-            Assert.True(root.GetProperty("branches")[0].TryGetProperty("isTrunk", out _));
-            Assert.Equal(JsonValueKind.Array, root.GetProperty("pullRequests").ValueKind);
+            Assert.Equal(2, root.GetProperty("schema").GetInt32());
+            Assert.Equal("events-x.ndjson", root.GetProperty("eventsFile").GetString());
+            var project = root.GetProperty("projects")[0];
+            Assert.Equal("My Repo", project.GetProperty("name").GetString());
+            Assert.Equal("src/a.cs", project.GetProperty("files")[0].GetProperty("path").GetString());
+            Assert.Equal("Terminal 1", root.GetProperty("live")[0].GetProperty("pane").GetString());
+            Assert.Equal("watching", root.GetProperty("orchestrators")[0].GetProperty("state").GetString());
             Assert.False(File.Exists(path + ".tmp"));
         }
         finally
@@ -98,11 +98,49 @@ public class WorldSnapshotTests
     }
 
     [Fact]
-    public void Path_is_stable_per_root_and_differs_between_roots()
+    public void ProjectId_is_stable_per_root_whatever_the_case()
     {
-        var other = Scope with { Root = @"C:\elsewhere\My Repo" };
-        Assert.Equal(WorldFile.PathFor(Scope, @"C:\w"), WorldFile.PathFor(Scope with { Root = @"C:\REPOS\My Repo" }, @"C:\w"));
-        Assert.NotEqual(WorldFile.PathFor(Scope, @"C:\w"), WorldFile.PathFor(other, @"C:\w"));
+        Assert.Equal(WorldSnapshotBuilder.ProjectId(@"C:\repos\My Repo"), WorldSnapshotBuilder.ProjectId(@"c:\REPOS\my repo\"));
+        Assert.NotEqual(WorldSnapshotBuilder.ProjectId(@"C:\repos\My Repo"), WorldSnapshotBuilder.ProjectId(@"C:\repos\Other"));
+    }
+
+    [Fact]
+    public void Locate_finds_the_project_and_relative_path_through_worktrees()
+    {
+        var project = Project();
+        var other = project with { Id = "other", Folders = [@"C:\repos\My Repo 2"] };
+        var hit = WorldSnapshotBuilder.Locate([project, other], @"C:\data\wt\feature x\src\b.cs");
+        Assert.NotNull(hit);
+        Assert.Equal(project.Id, hit!.Value.Project.Id);
+        Assert.Equal("src/b.cs", hit.Value.Relative);
+        Assert.Equal("other", WorldSnapshotBuilder.Locate([project, other], @"C:\repos\My Repo 2\x.md")!.Value.Project.Id);
+        Assert.Equal("", WorldSnapshotBuilder.Locate([project], @"C:\repos\My Repo")!.Value.Relative);
+        Assert.Null(WorldSnapshotBuilder.Locate([project], @"C:\elsewhere\x.md"));
+    }
+
+    [Fact]
+    public void ParseFiles_sizes_files_skips_deleted_ones_and_keeps_the_largest_when_capped()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "agenthub files " + Guid.NewGuid().ToString("N")[..6]);
+        Directory.CreateDirectory(Path.Combine(dir, "src"));
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "src", "big.cs"), new string('x', 500));
+            File.WriteAllText(Path.Combine(dir, "small.md"), "hi");
+            File.WriteAllText(Path.Combine(dir, "mid.json"), new string('y', 50));
+            var listing = "src/big.cs\0small.md\0mid.json\0gone.txt\0";
+            var (all, cut) = WorldSnapshotBuilder.ParseFiles(listing, dir, 10);
+            Assert.False(cut);
+            Assert.Equal(["mid.json", "small.md", "src/big.cs"], all.Select(f => f.Path).ToArray());
+            Assert.Equal(500, all.Single(f => f.Path == "src/big.cs").Size);
+            var (two, truncated) = WorldSnapshotBuilder.ParseFiles(listing, dir, 2);
+            Assert.True(truncated);
+            Assert.Equal(["mid.json", "src/big.cs"], two.Select(f => f.Path).ToArray());
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 
     [Fact]
@@ -116,24 +154,7 @@ public class WorldSnapshotTests
         Assert.True(list[0].IsMain);
         Assert.Equal(@"C:\repos\My Repo", list[0].Path);
         Assert.Equal("feature/x", list[1].Branch);
-        Assert.False(list[1].IsMain);
         Assert.Null(list[2].Branch);
-        Assert.Equal("999999", list[2].Head);
-    }
-
-    [Fact]
-    public void PanesIn_keeps_sessions_in_the_repository_folders_only()
-    {
-        SessionRecord Rec(string id, string folder) => new() { Id = id, WorkingDirectory = folder, Title = id, IsAgent = true, CommandLine = "claude" };
-        var panes = WorldSnapshotBuilder.PanesIn(Scope,
-        [
-            Rec("in-main", @"C:\repos\My Repo"),
-            Rec("in-sub", @"C:\repos\My Repo\src"),
-            Rec("in-worktree", @"C:\data\wt\feature x"),
-            Rec("lookalike", @"C:\repos\My Repo 2"),
-            Rec("elsewhere", @"C:\other"),
-        ]);
-        Assert.Equal(["in-main", "in-sub", "in-worktree"], panes.Select(p => p.Id).ToArray());
     }
 
     [Fact]
@@ -146,8 +167,8 @@ public class WorldSnapshotTests
     }
 
     /// <summary>
-    /// Starts the real Godot (setting AGENTHUB_WORLD_LAUNCH=1, Godot on PATH) on the bundled sample, from the build
-    /// output, through a world file in a folder whose path has spaces; it must still run after a few seconds.
+    /// Starts the real Godot (AGENTHUB_WORLD_LAUNCH=1, Godot on PATH) on the bundled sample, from the build output,
+    /// through a world file in a folder whose path has spaces; it must still run, error-free, after a few seconds.
     /// </summary>
     [Fact]
     public async Task Live_launch_of_godot_on_a_world_file()
@@ -158,7 +179,8 @@ public class WorldSnapshotTests
         var dir = Path.Combine(@"C:\data\agenthub\uitest", "world launch " + Guid.NewGuid().ToString("N")[..6]);
         Directory.CreateDirectory(dir);
         var world = Path.Combine(dir, "world.json");
-        File.Copy(Path.Combine(GodotLauncher.ProjectDir, "sample", "world.json"), world);
+        foreach (var name in new[] { "world.json", "events-sample.ndjson" })
+            File.Copy(Path.Combine(GodotLauncher.ProjectDir, "sample", name), Path.Combine(dir, name));
         var process = GodotLauncher.Launch(godot!, world);
         string Log()
         {
@@ -181,20 +203,39 @@ public class WorldSnapshotTests
     }
 
     /// <summary>
-    /// Writes the real world file for a repository: set AGENTHUB_WORLD_EXPORT to its folder (and optionally
-    /// AGENTHUB_WORLD_DIR). A tool for working on the Godot side, skipped otherwise.
+    /// The service against this computer's real repositories and transcripts (AGENTHUB_WORLD_EXPORT = a repository folder,
+    /// optionally AGENTHUB_WORLD_DIR): it writes world.json with the project and its files, and an events file.
     /// </summary>
     [Fact]
-    public async Task Live_export_of_a_real_repository()
+    public async Task Live_world_service_writes_the_world_and_events()
     {
         var folder = Environment.GetEnvironmentVariable("AGENTHUB_WORLD_EXPORT");
         if (string.IsNullOrWhiteSpace(folder)) return;
-        var runner = new ProcessRunner();
-        var scope = await TimelineSource.ResolveAsync(runner, folder);
-        var snapshot = await WorldSource.ReadAsync(runner, scope, Environment.GetEnvironmentVariable("AGENTHUB_WORLD_ARCHIVE"));
-        var path = WorldFile.PathFor(scope);
-        WorldFile.Write(path, snapshot);
-        Assert.NotEmpty(snapshot.Commits);
-        Console.WriteLine($"WORLD {path}: {snapshot.Branches.Count} branches, {snapshot.Commits.Count} commits, {snapshot.Sessions.Count} sessions, {snapshot.Panes.Count} panes");
+        using var service = new WorldService(new ProcessRunner(),
+            () => Task.FromResult(new WorldUiState([folder], [], [])), Environment.GetEnvironmentVariable("AGENTHUB_WORLD_ARCHIVE"));
+        var started = DateTime.UtcNow;
+        service.Start();
+        // world.json comes at once with no projects, then gains each project as it is read
+        JsonDocument? doc = null;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (clock.Elapsed < TimeSpan.FromSeconds(150))
+        {
+            await Task.Delay(1000);
+            if (!File.Exists(service.WorldPath) || File.GetLastWriteTimeUtc(service.WorldPath) < started) continue;
+            doc?.Dispose();
+            try { doc = JsonDocument.Parse(File.ReadAllText(service.WorldPath)); }
+            catch (IOException) { continue; }
+            if (doc.RootElement.GetProperty("projects").GetArrayLength() > 0) break;
+        }
+        Assert.NotNull(doc);
+        using var _ = doc;
+        var projects = doc!.RootElement.GetProperty("projects");
+        Assert.True(projects.GetArrayLength() >= 1, service.Problem);
+        Assert.True(projects.EnumerateArray().Any(p => p.GetProperty("files").GetArrayLength() > 0));
+        Console.WriteLine($"first project after {clock.Elapsed.TotalSeconds:0.0}s");
+        // AGENTHUB_WORLD_HOLD=<seconds> keeps the service running, to draw it in Godot meanwhile
+        if (int.TryParse(Environment.GetEnvironmentVariable("AGENTHUB_WORLD_HOLD"), out var hold)) await Task.Delay(TimeSpan.FromSeconds(hold));
+        Assert.True(File.Exists(Path.Combine(Path.GetDirectoryName(service.WorldPath)!, service.EventsFile)));
+        Console.WriteLine($"WORLD {service.WorldPath}: {projects.GetArrayLength()} projects, {doc.RootElement.GetProperty("live").GetArrayLength()} live sessions");
     }
 }

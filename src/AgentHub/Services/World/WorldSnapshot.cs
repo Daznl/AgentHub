@@ -7,28 +7,38 @@ using AgentHub.Services.Timeline;
 namespace AgentHub.Services.World;
 
 /// <summary>
-/// What the 3D world (the Godot project in <c>world/</c>) draws, written by AgentHub as <c>world.json</c> and read by
-/// Godot whenever the file changes. AgentHub is the only reader of git, GitHub and transcripts; Godot only draws this.
-/// The format is versioned by <see cref="Schema"/>; Godot refuses a newer one rather than drawing it wrongly.
-/// Rows are the Timeline's rows (one per session or run of outside commits, oldest first), so the world's height
-/// matches the 2D tree's order instead of clock time, which has days-long gaps.
+/// What the 3D world (the Godot project in <c>world/</c>) draws: every project with its git tree and files, the coding
+/// sessions running now, and the orchestrators over them. AgentHub's <see cref="WorldService"/> writes it as
+/// <c>world.json</c> when the structure changes; what sessions do moment to moment goes to <see cref="EventsFile"/>
+/// (<see cref="WorldEvent"/>, one JSON object per line), which Godot tails. AgentHub is the only reader of git, GitHub
+/// and transcripts; Godot only draws. Godot refuses a newer <see cref="Schema"/> rather than drawing it wrongly.
 /// </summary>
 public sealed record WorldSnapshot(
     int Schema,
     DateTimeOffset GeneratedAt,
-    WorldRepo Repo,
+    string EventsFile,
+    IReadOnlyList<WorldProject> Projects,
+    IReadOnlyList<WorldLiveSession> Live,
+    IReadOnlyList<WorldOrchestrator> Orchestrators)
+{
+    public const int CurrentSchema = 2;
+}
+
+/// <summary>
+/// One repository (or plain folder). Rows are the Timeline's rows (one per session or run of outside commits, oldest
+/// first), so height in the world follows the 2D tree's order instead of clock time, which has days-long gaps.
+/// <see cref="Folders"/> are the main folder and every worktree; a path in any of them is this project's.
+/// </summary>
+public sealed record WorldProject(
+    string Id, string Name, string Root, string Trunk, bool IsGit, IReadOnlyList<string> Folders,
     IReadOnlyList<WorldRow> Rows,
     IReadOnlyList<WorldBranch> Branches,
     IReadOnlyList<WorldCommit> Commits,
     IReadOnlyList<WorldSession> Sessions,
     IReadOnlyList<WorldPullRequest> PullRequests,
     IReadOnlyList<WorldWorktree> Worktrees,
-    IReadOnlyList<WorldPane> Panes)
-{
-    public const int CurrentSchema = 1;
-}
-
-public sealed record WorldRepo(string Name, string Root, string Trunk, bool IsGit);
+    IReadOnlyList<WorldFileEntry> Files,
+    bool FilesTruncated);
 
 /// <summary>One Timeline row: its index is the height in the world.</summary>
 public sealed record WorldRow(int Index, string Kind, DateTimeOffset Time, string? Branch);
@@ -43,7 +53,7 @@ public sealed record WorldBranch(string Key, string Name, bool IsTrunk, bool IsI
 public sealed record WorldCommit(string Hash, string Short, IReadOnlyList<string> Parents, DateTimeOffset Time, string Author, string Subject,
     string? Branch, int Row, string? Session);
 
-/// <summary>A coding session from its transcript. <see cref="Id"/> is the transcript path, which is stable.</summary>
+/// <summary>A past or present coding session from its transcript. <see cref="Id"/> is the transcript path, which is stable.</summary>
 public sealed record WorldSession(string Id, string Agent, string? Title, DateTimeOffset StartedAt, DateTimeOffset EndedAt, bool IsLive,
     string? Folder, string? Branch, int Row, IReadOnlyList<string> Commits);
 
@@ -53,13 +63,32 @@ public sealed record WorldPullRequest(int Number, string Title, string Head, str
 /// <summary>A git worktree: a folder holding a checkout of a branch.</summary>
 public sealed record WorldWorktree(string Path, string? Branch, string? Head, bool IsMain);
 
-/// <summary>A terminal AgentHub hosts (a Cockpit pane's session) that runs in one of the repository's folders right now.</summary>
-public sealed record WorldPane(string Id, string Title, string Folder, bool IsAgent, string Command, DateTimeOffset StartedAt);
+/// <summary>A tracked file, its path relative to the project root with forward slashes, and its size in bytes.</summary>
+public sealed record WorldFileEntry(string Path, long Size);
+
+/// <summary>
+/// A coding session running now (its transcript was written to lately): one crab in the world. <see cref="Id"/> is the
+/// transcript path, as in <see cref="WorldSession"/> and <see cref="WorldEvent.Session"/>. <see cref="Pane"/> names the
+/// Cockpit pane it runs in, when AgentHub hosts it.
+/// </summary>
+public sealed record WorldLiveSession(string Id, string Agent, string? Title, string Project, string Folder, string? Branch,
+    DateTimeOffset LastActivity, string? Pane);
+
+/// <summary>A pane orchestrator over a live session (<see cref="Worker"/> is that session's id), with the step its run is on.</summary>
+public sealed record WorldOrchestrator(string Id, string Title, string? Worker, string State, string? Step);
+
+/// <summary>
+/// Something a session or orchestrator just did, as a line of the events file. <see cref="Kind"/>: read, edit, write,
+/// search, bash, build, test, commit, push, merge, pr, branch, snowflake, azure, web, agent, tool, prompt, reply,
+/// orchestrate. <see cref="File"/> is relative to <see cref="Project"/>'s root when the target is one of its files.
+/// </summary>
+public sealed record WorldEvent(long Seq, DateTimeOffset Time, string Session, string Kind, string? Project, string? File, string? Text,
+    string? Orchestrator = null);
 
 public static class WorldSnapshotBuilder
 {
-    public static WorldSnapshot Build(TimelineScope scope, TimelineModel model, IReadOnlyList<PullRequestFact>? pullRequests,
-        IReadOnlyList<WorldWorktree> worktrees, IReadOnlyList<WorldPane> panes, DateTimeOffset now)
+    public static WorldProject BuildProject(TimelineScope scope, TimelineModel model, IReadOnlyList<PullRequestFact>? pullRequests,
+        IReadOnlyList<WorldWorktree> worktrees, IReadOnlyList<WorldFileEntry> files, bool filesTruncated)
     {
         var rows = new List<WorldRow>();
         var commits = new List<WorldCommit>();
@@ -83,9 +112,14 @@ public static class WorldSnapshotBuilder
         var prs = (pullRequests ?? []).Select(p => new WorldPullRequest(p.Number, p.Title, p.Head, p.Base, p.State, p.IsDraft, p.MergedAt,
             p.MergeCommit, p.Author)).ToList();
 
-        return new WorldSnapshot(WorldSnapshot.CurrentSchema, now, new WorldRepo(scope.Name, scope.Root, model.TrunkName, scope.IsGit),
-            rows, branches, commits, sessions, prs, worktrees, panes);
+        return new WorldProject(ProjectId(scope.Root), scope.Name, scope.Root, model.TrunkName, scope.IsGit, scope.Folders,
+            rows, branches, commits, sessions, prs, worktrees, files, filesTruncated);
     }
+
+    /// <summary>A short id that stays the same for a root folder, whatever its letter case.</summary>
+    public static string ProjectId(string root) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(TimelineSource.NormalisePath(root).ToLowerInvariant())))[..10].ToLowerInvariant();
 
     public static string AgentName(ContextSource source) => source switch
     {
@@ -94,11 +128,11 @@ public static class WorldSnapshotBuilder
         _ => "other"
     };
 
-    private static string? Shorten(string? text)
+    public static string? Shorten(string? text, int max = 80)
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
-        var line = text.Trim().Split('\n')[0].Trim();
-        return line.Length > 80 ? line[..79] + "…" : line;
+        var line = text.Trim().Split('\n')[0].Trim().Replace("\r", "");
+        return line.Length > max ? line[..(max - 1)] + "…" : line;
     }
 
     /// <summary>
@@ -130,43 +164,68 @@ public static class WorldSnapshotBuilder
         return list;
     }
 
-    /// <summary>Live hosted sessions whose folder is one of the scope's folders or inside one.</summary>
-    public static List<WorldPane> PanesIn(TimelineScope scope, IEnumerable<SessionRecord> live) =>
-        live.Where(r => !string.IsNullOrWhiteSpace(r.WorkingDirectory) && scope.Folders.Any(f => IsInside(r.WorkingDirectory, f)))
-            .Select(r => new WorldPane(r.Id, r.Title, TimelineSource.NormalisePath(r.WorkingDirectory), r.IsAgent, r.CommandLine, r.StartedAt))
-            .ToList();
-
-    private static bool IsInside(string folder, string root)
+    /// <summary>
+    /// <c>git ls-files -z</c> output with each file's size, largest kept first when there are more than <paramref name="max"/>
+    /// (a city of every file in a huge repository would be unreadable and slow); the rest in path order.
+    /// </summary>
+    public static (List<WorldFileEntry> Files, bool Truncated) ParseFiles(string lsFilesZ, string root, int max)
     {
-        var a = TimelineSource.NormalisePath(folder).TrimEnd('\\', '/');
-        var b = TimelineSource.NormalisePath(root).TrimEnd('\\', '/');
-        return a.Equals(b, StringComparison.OrdinalIgnoreCase) || a.StartsWith(b + "\\", StringComparison.OrdinalIgnoreCase);
+        var files = new List<WorldFileEntry>();
+        foreach (var rel in lsFilesZ.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+        {
+            long size = 0;
+            try
+            {
+                var info = new FileInfo(Path.Combine(root, rel.Replace('/', Path.DirectorySeparatorChar)));
+                if (!info.Exists) continue; // deleted in the working tree
+                size = info.Length;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { }
+            files.Add(new WorldFileEntry(rel.Replace('\\', '/'), size));
+        }
+        var truncated = files.Count > max;
+        if (truncated) files = files.OrderByDescending(f => f.Size).Take(max).ToList();
+        files.Sort((a, b) => string.CompareOrdinal(a.Path, b.Path));
+        return (files, truncated);
+    }
+
+    /// <summary>The project a path belongs to (inside its root or one of its worktrees) and the path relative to that folder.</summary>
+    public static (WorldProject Project, string Relative)? Locate(IEnumerable<WorldProject> projects, string path)
+    {
+        string full;
+        try { full = TimelineSource.NormalisePath(path); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return null; }
+        (WorldProject, string)? best = null;
+        var bestLength = -1;
+        foreach (var project in projects)
+            foreach (var folder in project.Folders)
+            {
+                var f = folder.TrimEnd('\\', '/');
+                if (f.Length <= bestLength) continue;
+                if (full.Equals(f, StringComparison.OrdinalIgnoreCase)) { best = (project, ""); bestLength = f.Length; }
+                else if (full.StartsWith(f + "\\", StringComparison.OrdinalIgnoreCase)) { best = (project, full[(f.Length + 1)..].Replace('\\', '/')); bestLength = f.Length; }
+            }
+        return best;
     }
 }
 
-/// <summary>Where a repository's world file lives, and writing it so Godot never reads half a file.</summary>
-public static class WorldFile
+/// <summary>Where the world's files live, and writing them so Godot never reads half a file.</summary>
+public static class WorldStore
 {
     public const string DefaultRoot = @"C:\data\agenthub\world";
 
+    public static string Root => Environment.GetEnvironmentVariable("AGENTHUB_WORLD_DIR") is { Length: > 0 } custom ? custom : DefaultRoot;
+
+    public static string WorldPath(string? root = null) => Path.Combine(root ?? Root, "world.json");
+
     public static readonly JsonSerializerOptions JsonOptions = new()
     {
-        WriteIndented = true,
+        WriteIndented = false,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.Never
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    /// <summary><c>C:\data\agenthub\world\&lt;repo&gt;-&lt;hash of root&gt;\world.json</c>: one file per repository, names never collide.</summary>
-    public static string PathFor(TimelineScope scope, string? root = null)
-    {
-        var baseDir = string.IsNullOrWhiteSpace(root) ? Environment.GetEnvironmentVariable("AGENTHUB_WORLD_DIR") ?? DefaultRoot : root;
-        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes(scope.Root.ToLowerInvariant())))[..8].ToLowerInvariant();
-        var safe = string.Concat(scope.Name.Select(ch => Path.GetInvalidFileNameChars().Contains(ch) || ch == ' ' ? '-' : ch));
-        return Path.Combine(baseDir, $"{safe}-{hash}", "world.json");
-    }
-
-    public static string Serialize(WorldSnapshot snapshot) => JsonSerializer.Serialize(snapshot, JsonOptions);
+    public static string Serialize<T>(T value) => JsonSerializer.Serialize(value, JsonOptions);
 
     /// <summary>Writes through a temporary file and a replace, so the reader sees the old file or the new one, never a mix.</summary>
     public static void Write(string path, WorldSnapshot snapshot)

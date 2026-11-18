@@ -75,7 +75,7 @@ public sealed class AppSettings
     public long ClaudeContextWindowTokens { get; set; } = 1_000_000;
 
     /// <summary>
-    /// The Godot command that draws the 3D world (🌐 3D in the Timeline): a full path, or a name looked up on PATH.
+    /// The Godot command that draws the 3D world (🌐 World): a full path, or a name looked up on PATH.
     /// A .cmd launcher works too. Experimental (branch feature/world-3d).
     /// </summary>
     public string GodotCommand { get; set; } = "godot";

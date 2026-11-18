@@ -1,10 +1,9 @@
 using System.Diagnostics;
-using AgentHub.Hosting;
 using AgentHub.Services.Timeline;
 
 namespace AgentHub.Services.World;
 
-/// <summary>Reads what the Timeline does not: the repository's worktrees and the sessions AgentHub hosts in them.</summary>
+/// <summary>Reads what the Timeline does not: the repository's worktrees.</summary>
 public static class WorldSource
 {
     public static async Task<List<WorldWorktree>> ReadWorktreesAsync(ProcessRunner runner, TimelineScope scope, CancellationToken cancellationToken = default)
@@ -20,32 +19,10 @@ public static class WorldSource
             return []; // git not installed
         }
     }
-
-    /// <summary>
-    /// The whole snapshot read from scratch, as the Timeline window reads its model (for tools and tests; the window
-    /// passes its own model instead of reading twice).
-    /// </summary>
-    public static async Task<WorldSnapshot> ReadAsync(ProcessRunner runner, TimelineScope scope, string? archiveRoot, CancellationToken cancellationToken = default)
-    {
-        var commits = await TimelineSource.ReadCommitsAsync(runner, scope, cancellationToken);
-        var tips = await TimelineSource.ReadBranchTipsAsync(runner, scope, cancellationToken);
-        var prs = scope.IsGit ? await TimelineSource.ReadPullRequestsAsync(runner, scope, cancellationToken) : null;
-        var squashes = await new SquashMatcher(runner, scope).MatchAsync(commits, BranchGraph.OpenTips(commits, tips), SquashMatcher.FromPullRequests(prs, commits));
-        var model = TimelineBuilder.Build(TimelineSource.ReadSessions(scope, archiveRoot), commits, tips, DateTimeOffset.UtcNow, squashes);
-        var worktrees = await ReadWorktreesAsync(runner, scope, cancellationToken);
-        return WorldSnapshotBuilder.Build(scope, model, prs, worktrees, ReadPanes(scope), DateTimeOffset.UtcNow);
-    }
-
-    /// <summary>Hosted sessions whose host still runs, in the scope's folders.</summary>
-    public static List<WorldPane> ReadPanes(TimelineScope scope, SessionStore? store = null)
-    {
-        var live = (store ?? new SessionStore()).ListAll().Where(r => !r.HasExited && SessionStore.IsHostAlive(r));
-        return WorldSnapshotBuilder.PanesIn(scope, live);
-    }
 }
 
 /// <summary>
-/// Starts the Godot project that draws a world file. The project ships beside <c>AgentHub.exe</c> in <c>world\</c>.
+/// Starts the Godot project that draws the world. The project ships beside <c>AgentHub.exe</c> in <c>world\</c>.
 /// Godot is found from the setting (a full path, or a name looked up on <c>PATH</c>; a <c>.cmd</c> launcher works too).
 /// Godot's output goes to <c>godot.log</c> beside the world file.
 /// </summary>
@@ -92,6 +69,7 @@ public static class GodotLauncher
             RedirectStandardError = true
         };
         var process = Process.Start(psi) ?? throw new InvalidOperationException("Godot did not start.");
+        Directory.CreateDirectory(Path.GetDirectoryName(worldPath)!);
         var log = Path.Combine(Path.GetDirectoryName(worldPath)!, "godot.log");
         // Shared, so the log can be read (by the owner, by tests) while Godot still runs
         var writer = new StreamWriter(new FileStream(log, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) { AutoFlush = true };

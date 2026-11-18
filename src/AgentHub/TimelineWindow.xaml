@@ -52,7 +52,7 @@
                 <Button x:Name="RefreshBtn" Click="Refresh_Click" Content="↻ Refresh" ToolTip="Read the commits and transcripts again now (they are re-read every 20 seconds while this window is open)"
                         Padding="10,5" Margin="0,0,8,0" FontSize="12" />
                 <Button x:Name="WorldBtn" Click="World_Click" Content="🌐 3D" Padding="10,5" Margin="0,0,8,0" FontSize="12"
-                        ToolTip="Open this repository as a 3D world in Godot (experimental): branches grow as a tree, sessions orbit the work they did, live panes glow. It follows this window's refreshes." />
+                        ToolTip="Open the 3D world (experimental, Godot): this repository and every other project, files as a city, branches as a tree, a crab for each running session" />
                 <Button Click="Close_Click" Content="✕ Close" ToolTip="Close the timeline (Esc does too)" Padding="10,5" Margin="0" FontSize="12" />
             </StackPanel>
             <!-- The crab, and the button that opens the Timeline helper (the two reviews, and questions about the timeline):

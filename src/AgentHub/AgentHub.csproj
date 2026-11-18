@@ -38,8 +38,12 @@
     <None Include="..\..\workflows\*.md" Link="workflows\%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <!-- The 3D world's Godot project (🌐 3D in the Timeline), run from beside AgentHub.exe; Godot's own cache (.godot) stays out. -->
+    <!-- The 3D world's Godot project (🌐 World), run from beside AgentHub.exe; Godot's own cache (.godot) stays out. -->
     <None Include="..\..\world\**\*" Exclude="..\..\world\.godot\**" Link="world\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <!-- The world's crabs are the mascot: the same strips, beside the project (world.gd also finds them in the repository) -->
+    <None Include="Assets\Crab\*.png" Link="world\sprites\crab\%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

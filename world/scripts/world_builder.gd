@@ -1,9 +1,11 @@
 extends RefCounted
-## Turns a world.json dictionary (schema 1, written by AgentHub's WorldSnapshotBuilder) into 3D nodes.
+## Draws one project's git tree (a project of world.json schema 2, written by AgentHub's WorldSnapshotBuilder).
 ## Pure drawing: no files, no input. Height is the Timeline's row (oldest at the bottom); the trunk stands at the
 ## centre and every other branch is a lane around it, at the 2D tree's column (radius) and colour (angle).
 
 const ROW_H := 0.8
+## Height of one row in this project: world.gd lowers it for long histories so the tree stays in scale with its city.
+var row_h := ROW_H
 const GOLDEN := 2.399963
 # The 2D Timeline's lane colours (Controls/TimelineGutter.cs), so a branch looks the same in both views.
 const LANE_PALETTE := ["#2FD4F5", "#C084FC", "#34D399", "#FBBF24", "#60A5FA", "#F472B6", "#FB923C", "#A3E635", "#E879F9", "#2DD4BF", "#F87171", "#FDE047"]
@@ -11,18 +13,19 @@ const TRUNK_COLOUR := Color("#9FB4D6")
 const AGENT_COLOURS := {"claude": Color("#E07A52"), "codex": Color("#10B981"), "other": Color("#8AB4F8")}
 const PR_OPEN := Color("#3FB950")
 const PR_MERGED := Color("#A371F7")
-const PANE_COLOUR := Color("#E8F6FF")
 
 ## Everything that can be pointed at: {node: Node3D, kind: String, title: String, body: String, id: String}
 var pickables: Array = []
-## Nodes that pulse (live sessions, pane beacons).
+## Nodes that pulse (live sessions, open pull requests).
 var pulsing: Array = []
 ## Nodes that were not in the previous build, for the grow-in animation.
 var fresh: Array = []
 ## Counts for the header and the tests.
 var stats := {}
-## Ids seen in this build (commits, sessions, panes), to tell new things from old on the next one.
+## Ids seen in this build (commits, sessions), to tell new things from old on the next one.
 var ids := {}
+## How far the lanes reach from the trunk, for laying the island out.
+var reach := 3.0
 
 var _lanes := {}          # branch key -> {angle, radius, colour, start, end}
 var _commit_at := {}      # hash -> {row, branch}
@@ -48,8 +51,8 @@ func build(data: Dictionary, root: Node3D, known: Dictionary) -> void:
 	var sessions: Array = data.get("sessions", [])
 	var prs: Array = data.get("pullRequests", [])
 	var worktrees: Array = data.get("worktrees", [])
-	var panes: Array = data.get("panes", [])
 	_top_row = max(rows.size() - 1, 0)
+	_branches = branches
 
 	for c in commits:
 		_commit_at[c["hash"]] = {"row": int(c["row"]), "branch": c.get("branch")}
@@ -63,14 +66,30 @@ func build(data: Dictionary, root: Node3D, known: Dictionary) -> void:
 	_draw_sessions(root, sessions, known)
 	_draw_pull_requests(root, prs, branches)
 	_draw_worktrees(root, worktrees, branches)
-	_draw_panes(root, panes, worktrees, branches, known)
 	_draw_ruler(root, rows)
+	for key in _lanes:
+		reach = max(reach, float(_lanes[key]["radius"]) + 2.0)
 
 	stats = {
 		"rows": rows.size(), "branches": branches.size(), "commits": commits.size(), "sessions": sessions.size(),
 		"live": sessions.filter(func(s): return s.get("isLive", false)).size(),
-		"pullRequests": prs.size(), "worktrees": worktrees.size(), "panes": panes.size(), "pickables": pickables.size(),
+		"pullRequests": prs.size(), "worktrees": worktrees.size(), "pickables": pickables.size(),
 	}
+
+
+var _branches: Array = []
+
+
+## Where a branch's lane ends (local to the tree), found by name; the top of the trunk for main or an unknown branch.
+func branch_tip(name) -> Vector3:
+	var key := _branch_key_named(_branches, name)
+	if key == "" or not _lanes.has(key) or _lanes[key]["radius"] == 0.0:
+		return trunk_top()
+	return _tip(key) + Vector3(0, 0.35, 0)
+
+
+func trunk_top() -> Vector3:
+	return lane_point("trunk", _top_row + 1.0)
 
 
 # ---------------------------------------------------------------- layout
@@ -101,7 +120,7 @@ func lane_point(key, row: float) -> Vector3:
 	var lane = _lanes.get(key if key != null else "trunk", _lanes["trunk"])
 	var r: float = lane["radius"]
 	var a: float = lane["angle"]
-	return Vector3(cos(a) * r, row * ROW_H, sin(a) * r)
+	return Vector3(cos(a) * r, row * row_h, sin(a) * r)
 
 
 func _outward(key) -> Vector3:
@@ -115,11 +134,10 @@ func _outward(key) -> Vector3:
 # ---------------------------------------------------------------- trunk and lanes
 
 func _draw_trunk(root: Node3D, data: Dictionary) -> void:
-	var top := (_top_row + 1.5) * ROW_H
+	var top := (_top_row + 1.5) * row_h
 	var pts := PackedVector3Array([Vector3(0, -0.6, 0), Vector3(0, top, 0)])
 	_add_tube(root, pts, 0.32, TRUNK_COLOUR, 0.9)
-	var repo: Dictionary = data.get("repo", {})
-	_add_label(root, Vector3(0, top + 0.9, 0), str(repo.get("trunk", "main")), TRUNK_COLOUR, 64)
+	_add_label(root, Vector3(0, top + 0.9, 0), str(data.get("trunk", "main")), TRUNK_COLOUR, 64)
 	# The root: a soft disc where the first commit sits
 	var base := MeshInstance3D.new()
 	var disc := CylinderMesh.new()
@@ -365,46 +383,6 @@ func _draw_worktrees(root: Node3D, worktrees: Array, branches: Array) -> void:
 			"worktree:" + path)
 
 
-func _draw_panes(root: Node3D, panes: Array, worktrees: Array, branches: Array, known: Dictionary) -> void:
-	var by_folder := {}
-	for w in worktrees:
-		by_folder[str(w.get("path", "")).to_lower()] = w
-	var stacked := {}
-	for p in panes:
-		var folder := str(p.get("folder", "")).to_lower()
-		var key := "trunk"
-		if by_folder.has(folder):
-			key = _worktree_key(by_folder[folder], branches)
-		var n: int = stacked.get(key, 0)
-		stacked[key] = n + 1
-		var base := _tip(key) + Vector3(0, 1.2, 0) + _outward(key) * (0.8 * n) + Vector3(0.8 * n if key == "trunk" else 0.0, 0, 0)
-		var beam := MeshInstance3D.new()
-		var cyl := CylinderMesh.new()
-		cyl.top_radius = 0.05
-		cyl.bottom_radius = 0.16
-		cyl.height = 7.0
-		beam.mesh = cyl
-		var mat := _material(PANE_COLOUR, 3.0).duplicate() as StandardMaterial3D
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.albedo_color = Color(PANE_COLOUR, 0.35)
-		beam.material_override = mat
-		beam.position = base + Vector3(0, 3.5, 0)
-		root.add_child(beam)
-		var light := OmniLight3D.new()
-		light.light_color = PANE_COLOUR
-		light.light_energy = 1.5
-		light.omni_range = 6.0
-		light.position = Vector3(0, -3.0, 0)
-		beam.add_child(light)
-		pulsing.append(beam)
-		var id: String = p["id"]
-		_remember(beam, "p:" + id, known)
-		var title := str(p.get("title", "pane"))
-		_add_label(root, base + Vector3(0, 7.5, 0), title, PANE_COLOUR, 40)
-		_pick(beam, "live pane", title, "%s\n%s\nstarted %s" % [p.get("command", ""), p.get("folder", ""), _time_text(str(p.get("startedAt", "")))],
-			"pane:" + id)
-
-
 func _draw_ruler(root: Node3D, rows: Array) -> void:
 	if rows.is_empty():
 		return
@@ -415,7 +393,7 @@ func _draw_ruler(root: Node3D, rows: Array) -> void:
 		if day == last_day:
 			continue
 		last_day = day
-		_add_label(root, Vector3(-0.9, i * ROW_H, -0.9), _day_text(day), Color("#5A6B85"), 28)
+		_add_label(root, Vector3(-0.9, i * row_h, -0.9), _day_text(day), Color("#5A6B85"), 28)
 
 
 # ---------------------------------------------------------------- helpers

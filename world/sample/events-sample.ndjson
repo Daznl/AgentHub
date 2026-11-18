@@ -1,0 +1,6 @@
+{"seq":1,"time":"2026-11-18T06:00:01Z","session":"C:\\sessions\\three.jsonl","kind":"prompt","project":"sample0001","text":"add retries to the api client"}
+{"seq":2,"time":"2026-11-18T06:00:02Z","session":"C:\\sessions\\three.jsonl","kind":"orchestrate","text":"Sent: build the retry policy, tests first","orchestrator":"Terminal 1"}
+{"seq":3,"time":"2026-11-18T06:00:03Z","session":"C:\\sessions\\three.jsonl","kind":"read","project":"sample0001","file":"src/api/client.ts","text":"Read client.ts"}
+{"seq":4,"time":"2026-11-18T06:00:04Z","session":"C:\\sessions\\four.jsonl","kind":"read","project":"sample0002","file":"pipeline/harvest.py","text":"Read harvest.py"}
+{"seq":5,"time":"2026-11-18T06:00:05Z","session":"C:\\sessions\\three.jsonl","kind":"edit","project":"sample0001","file":"src/api/retry.ts","text":"Edit retry.ts"}
+{"seq":6,"time":"2026-11-18T06:00:06Z","session":"C:\\sessions\\four.jsonl","kind":"snowflake","project":"sample0002","text":"snow sql -f sql/tables.sql"}

@@ -32,11 +32,32 @@ Tests: `RunTreeViewTests`, `RunTreePanelTests` (renders off screen, checks green
 
 ## Side piece, 2026-11-18: 3D world (experiment)
 
-Branch `feature/world-3d`, worktree `C:\data\agenthub\worktrees\AgentHub\world-3d`. The owner wants the coding space in 3D: repos, sessions, files, APIs, frontends and Snowflake, all connected and explorable, starting with AgentHub's own GitHub sessions. Built stage 1: **🌐 3D** in the Timeline writes `world.json` on every refresh, and the Godot project `world/` draws it as a growing tree (see `docs/WORLD_3D.md`). Real export of this repository: 44 branches, 224 commits, 22 sessions. Screenshot: `C:\data\agenthub\uitest\world-3d.png`. Tests: `WorldSnapshotTests` (8, with the live export and live Godot launch), `world/tests/test_world.gd` (headless). Full suite 409 passing.
+Branch `feature/world-3d`, worktree `C:\data\agenthub\worktrees\AgentHub\world-3d`, not pushed. The owner wants the coding space in 3D: every project's files, branches, sessions, APIs, frontends, Azure and Snowflake, all connected and explorable. Every running session should be a crab that moves with each tool call, and orchestrators should hover over their sessions.
+
+Built (see `docs/WORLD_3D.md`):
+- **🌐 World** in the main header (the Timeline's 🌐 3D opens the same world) starts `WorldService` and Godot.
+- **The service:** it tails every live Claude Code and Codex transcript into `C:\data\agenthub\world\events-*.ndjson` and keeps `world.json` (schema 2) with all projects. Each project's island arrives as soon as its files are read; its git tree follows.
+- **Godot draws:**
+  - islands on a ring, each with a file city and its git tree;
+  - a hub with GitHub, Azure, Snowflake and the web;
+  - crabs (the mascot sprites) that hop to files, branches and landmarks per event;
+  - orchestrator crabs on clouds over their workers;
+  - a live feed.
+
+Checked on real data: 4 projects, 1,203 commits, 5 live crabs. Two parallel AgentHub sessions show as separate crabs, and the feed carries both. Screenshots are in `C:\data\agenthub\uitest\` (`world-real.png`, `world-real-crab.png`, `world-sample*.png`).
+
+First read of all four projects takes 81 s: squash matching took 57 s in contractor-management and transcripts 37 s in Raptor. It is cached afterwards, and the service log `C:\data\agenthub\world\world-service.log` has the timings.
+
+Tests:
+- `WorldSnapshotTests` (live ones opt in), `TranscriptActionsTests`;
+- `world/tests/test_world.gd` (headless, passes).
 
 Owner's rule: the world hooks only into AgentHub. Snowflake, Azure and other connections are worked out from the repositories' code, never by connecting to those services.
 
-Not done: clicking **🌐 3D** in the running app by hand (the launch path is covered by the live test); not on the taskbar install. Open question for the owner: a faster refresh (2 to 5 s) while the world is open.
+Not done:
+- Clicking **🌐 World** in the running app by hand (the launch path is covered by the live test). It is not on the taskbar install.
+- An orchestrator over a real run has not been seen (only in the sample).
+- Next is stage 5: resources found in the code, on the hub. See the Next section of `docs/WORLD_3D.md`.
 
 ## What the owner asked for
 
