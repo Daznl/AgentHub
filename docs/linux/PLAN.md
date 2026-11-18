@@ -1,6 +1,6 @@
 # AgentHub headless on Ubuntu: plan
 
-Status: **plan only, nothing built.** Written 2026-11-18. This file sits in `docs/linux/` on purpose: the Windows app packs `docs/*.md` (top level only) into its helper's knowledge, and a plan must not make the helper think Linux support exists.
+Status: **slice 1 (Core split) built, nothing runs headless yet.** Written 2026-11-18. This file sits in `docs/linux/` on purpose: the Windows app packs `docs/*.md` (top level only) into its helper's knowledge, and a plan must not make the helper think Linux support exists.
 
 ## Goal
 

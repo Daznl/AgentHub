@@ -22,12 +22,12 @@ public class RunStoreTests : IDisposable
     }
 
     private static PaneOrchestrator Attach(ScriptedWorker worker, ScriptedBrain brain, RunSnapshot? resume = null, bool remembers = false, AdvancedTemplate? template = null) =>
-        new(worker, brain, "Staged build", advanced: template ?? TemplateRunTests.StagedBuild(), resume: resume, brainRemembers: remembers)
+        new(worker, brain, "Staged build", advanced: template ?? SampleTemplates.StagedBuild(), resume: resume, brainRemembers: remembers)
         { TurnSettle = TimeSpan.Zero, StopDelay = TimeSpan.Zero, StartupDelay = TimeSpan.Zero, LoopInterval = TimeSpan.FromMilliseconds(20) };
 
     private RunRecord NewRecord(RunStore store, AdvancedTemplate? template = null)
     {
-        template ??= TemplateRunTests.StagedBuild();
+        template ??= SampleTemplates.StagedBuild();
         var now = DateTimeOffset.Now;
         return new RunRecord
         {
@@ -41,12 +41,12 @@ public class RunStoreTests : IDisposable
     [Fact]
     public void A_run_under_way_comes_back_paused_at_its_step_with_what_was_done()
     {
-        var run = new TemplateRun(TemplateRunTests.StagedBuild());
+        var run = new TemplateRun(SampleTemplates.StagedBuild());
         run.Start();
         run.CompleteCurrent();
         run.CompleteCurrent(); // at s1-watch, running
 
-        var back = TemplateRun.Restore(TemplateRunTests.StagedBuild(), run.Snapshot(), "Picked up.");
+        var back = TemplateRun.Restore(SampleTemplates.StagedBuild(), run.Snapshot(), "Picked up.");
 
         Assert.Equal(RunState.Paused, back.State);
         Assert.Equal(PauseCause.Owner, back.Cause);
@@ -66,19 +66,19 @@ public class RunStoreTests : IDisposable
     [Fact]
     public void A_pause_for_the_owner_is_kept_and_ready_and_finished_runs_come_back_as_they_were()
     {
-        var run = new TemplateRun(TemplateRunTests.StagedBuild());
-        Assert.Equal(RunState.Ready, TemplateRun.Restore(TemplateRunTests.StagedBuild(), run.Snapshot(), "x").State);
+        var run = new TemplateRun(SampleTemplates.StagedBuild());
+        Assert.Equal(RunState.Ready, TemplateRun.Restore(SampleTemplates.StagedBuild(), run.Snapshot(), "x").State);
 
         run.Start("s2-check");
         run.Pause(PauseCause.Question, "Stage 2 is built. Open the pull request?");
-        var asked = TemplateRun.Restore(TemplateRunTests.StagedBuild(), run.Snapshot(), "x");
+        var asked = TemplateRun.Restore(SampleTemplates.StagedBuild(), run.Snapshot(), "x");
         Assert.Equal(PauseCause.Question, asked.Cause);
         Assert.Equal("Stage 2 is built. Open the pull request?", asked.PauseReason);
         Assert.Equal(StepState.Skipped, asked.StateOf("s1-build"));
 
         run.Start();
         while (run.CompleteCurrent() is not null) { }
-        var done = TemplateRun.Restore(TemplateRunTests.StagedBuild(), run.Snapshot(), "x");
+        var done = TemplateRun.Restore(SampleTemplates.StagedBuild(), run.Snapshot(), "x");
         Assert.Equal(RunState.Finished, done.State);
         Assert.Null(done.Current);
     }
@@ -86,12 +86,12 @@ public class RunStoreTests : IDisposable
     [Fact]
     public void A_template_changed_in_between_keeps_what_was_done_by_step_id()
     {
-        var run = new TemplateRun(TemplateRunTests.StagedBuild());
+        var run = new TemplateRun(SampleTemplates.StagedBuild());
         run.Start();
         run.CompleteCurrent();
         run.CompleteCurrent(); // at s1-watch
 
-        var changed = TemplateRunTests.StagedBuild();
+        var changed = SampleTemplates.StagedBuild();
         changed.Stages[0].Steps.RemoveAll(s => s.Id == "s1-watch");                                                    // the step it was at is gone
         changed.Stages[0].Steps.Insert(1, new TemplateStep { Id = "s1-lint", Kind = StepKind.Instruct, Text = "Run the linter." }); // a new one before it
 
@@ -235,7 +235,7 @@ public class RunStoreTests : IDisposable
     [Fact]
     public async Task A_new_orchestrator_session_is_shown_the_workers_history_when_the_old_one_is_gone()
     {
-        var run = new TemplateRun(TemplateRunTests.StagedBuild());
+        var run = new TemplateRun(SampleTemplates.StagedBuild());
         run.Start("s1-build");
         var worker = new ScriptedWorker { LastReply = "Done." };
         var brain = new ScriptedBrain();
@@ -257,12 +257,12 @@ public class RunStoreTests : IDisposable
     [Fact]
     public async Task A_run_picked_up_on_a_quiet_session_goes_on_and_on_a_session_mid_turn_waits_for_its_turn_end()
     {
-        var run = new TemplateRun(TemplateRunTests.StagedBuild());
+        var run = new TemplateRun(SampleTemplates.StagedBuild());
         run.Start("s1-build");
 
         var quiet = new ScriptedWorker { IsAwaitingInput = false, OutputSilentFor = TimeSpan.FromSeconds(40) };
         var brain = new ScriptedBrain { Answer = _ => new PaneDecision(null, "Build stage 1 now.", "", StepOutcome.Continuing) };
-        using (var o = new PaneOrchestrator(quiet, brain, "Staged build", advanced: TemplateRunTests.StagedBuild(), resume: run.Snapshot()))
+        using (var o = new PaneOrchestrator(quiet, brain, "Staged build", advanced: SampleTemplates.StagedBuild(), resume: run.Snapshot()))
         {
             await o.GoAsync();
             Assert.Contains("run_resumed", Assert.Single(brain.Messages));
@@ -271,7 +271,7 @@ public class RunStoreTests : IDisposable
 
         var working = new ScriptedWorker { IsAwaitingInput = false, OutputSilentFor = TimeSpan.FromSeconds(1) };
         var silent = new ScriptedBrain();
-        using (var o = new PaneOrchestrator(working, silent, "Staged build", advanced: TemplateRunTests.StagedBuild(), resume: run.Snapshot())
+        using (var o = new PaneOrchestrator(working, silent, "Staged build", advanced: SampleTemplates.StagedBuild(), resume: run.Snapshot())
                { TurnSettle = TimeSpan.FromSeconds(15), LoopInterval = TimeSpan.FromMilliseconds(20) })
         {
             await o.GoAsync();

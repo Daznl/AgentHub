@@ -710,7 +710,7 @@ public partial class MainWindow : Window
     private void StartHistoryArchive()
     {
         if (HistoryArchiveRoot is not { } root) return;
-        _historyArchive = new HistoryArchiveService(root);
+        _historyArchive = new HistoryArchiveService(root, Controls.DispatcherTickTimer.Create);
         var first = true;
         _historyArchive.Synced += result =>
         {

@@ -1,4 +1,3 @@
-using System.Windows.Threading;
 using AgentHub.Services.Context;
 
 namespace AgentHub.Services.History;
@@ -159,16 +158,20 @@ public static class HistoryArchiver
 /// <summary>Runs <see cref="HistoryArchiver.SyncAll"/> at startup and then on an interval, never two passes at once.</summary>
 public sealed class HistoryArchiveService : IDisposable
 {
-    private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMinutes(1) };
+    private static readonly TimeSpan PassInterval = TimeSpan.FromMinutes(1);
+
+    private readonly ITickTimer _timer;
     private readonly string _root;
     private bool _running;
 
-    /// <summary>Raised on the UI thread after each pass.</summary>
+    /// <summary>Raised on the caller's thread (the UI thread in the Windows app) after each pass.</summary>
     public event Action<ArchiveResult>? Synced;
 
-    public HistoryArchiveService(string root)
+    /// <param name="timer">Makes the interval timer; <see cref="SynchronizationContextTickTimer"/> when not given.</param>
+    public HistoryArchiveService(string root, Func<TimeSpan, ITickTimer>? timer = null)
     {
         _root = root;
+        _timer = (timer ?? SynchronizationContextTickTimer.Create)(PassInterval);
         _timer.Tick += async (_, _) => await RunAsync();
     }
 
@@ -199,5 +202,9 @@ public sealed class HistoryArchiveService : IDisposable
         }
     }
 
-    public void Dispose() => _timer.Stop();
+    public void Dispose()
+    {
+        _timer.Stop();
+        (_timer as IDisposable)?.Dispose();
+    }
 }

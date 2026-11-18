@@ -42,8 +42,15 @@ MainWindow (WPF)
                         |
                         +-- LocalSession (fallback: no host) -- ConPtySession in-process, ends with AgentHub
 
-AgentHub.Hosting (class library shared by both executables)
-    +-- ConPtySession / ConPtyNative (kernel32 CreatePseudoConsole, CreateProcess, anonymous pipes)
+AgentHub.Core (class library, net8.0: everything that needs no screen; also builds and is tested on Linux)
+    +-- Models (no UI types: a badge's colour is a BadgeTone, drawn by the app's BadgeToneBrushConverter)
+    +-- Services: orchestrator, templates, runs, history, timeline, context files, usage, git, gh, settings, help
+    +-- ITickTimer: services poll on a timer they are given (the app passes DispatcherTickTimer, the UI-thread timer
+    |   they always had; without one, SynchronizationContextTickTimer)
+    +-- IBuildWorker (the app's pane implements it as PaneBuildWorker)
+
+AgentHub.Hosting (class library, net8.0, shared by both executables and Core)
+    +-- ConPtySession / ConPtyNative (kernel32 CreatePseudoConsole, CreateProcess, anonymous pipes; marked Windows-only)
     +-- SessionFrame (pipe protocol), ReplayBuffer, SessionRecord / SessionStore (C:\data\agenthub\sessions\<id>\)
 
 External tools

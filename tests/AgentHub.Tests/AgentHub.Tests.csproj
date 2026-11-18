@@ -24,4 +24,10 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Shared with the screen-free tests, which own it -->
+    <Compile Include="..\AgentHub.Core.Tests\LiveFactAttribute.cs" Link="LiveFactAttribute.cs" />
+    <Compile Include="..\AgentHub.Core.Tests\SampleTemplates.cs" Link="SampleTemplates.cs" />
+  </ItemGroup>
+
 </Project>

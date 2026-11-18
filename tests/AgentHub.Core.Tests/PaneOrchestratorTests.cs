@@ -522,12 +522,16 @@ public class PaneOrchestratorTests
     [Fact]
     public async Task A_worker_idle_long_after_a_wait_is_put_to_the_orchestrator_a_few_times_then_left()
     {
-        var worker = new ScriptedWorker { OutputSilentFor = TimeSpan.FromMinutes(30) };
+        // The worker writes while it works and goes silent only when its turn ends: a worker silent from the start can be
+        // nudged before its turn end lands, when the test thread is slow (full test run, 2026-11-18).
+        var worker = new ScriptedWorker { OutputSilentFor = TimeSpan.Zero };
         var brain = new ScriptedBrain { Answer = m => m.Contains("[FROM OWNER]") ? new PaneDecision(null, "deploy it", "") : new PaneDecision(null, null, "waiting") };
         using var o = new PaneOrchestrator(worker, brain, "Orchestrator")
         { TurnSettle = TimeSpan.Zero, LoopInterval = TimeSpan.FromMilliseconds(10), IdleNudge = TimeSpan.FromMilliseconds(30), MaxIdleNudges = 2 };
         await o.SendAsync("deploy");
         worker.EndTurn("Waiting on the deploy.");
+        await Until(() => brain.Messages.Count == 2);
+        worker.OutputSilentFor = TimeSpan.FromMinutes(30);
         await Until(() => brain.Messages.Count == 4);
         Assert.Contains("worker_idle", brain.Messages[2]);
         Assert.Contains("worker_idle", brain.Messages[3]);
@@ -544,7 +548,8 @@ public class PaneOrchestratorTests
     public async Task A_missed_turn_end_without_a_transcript_signal_is_found_by_the_idle_check()
     {
         // A worker whose turn end no signal records (a CLI without a transcript turn marker): its new reply is still read.
-        var worker = new ScriptedWorker { OutputSilentFor = TimeSpan.FromMinutes(30) };
+        // Silent only once the second reply exists, so the idle check cannot fire in between, however slow the test thread.
+        var worker = new ScriptedWorker { OutputSilentFor = TimeSpan.Zero };
         var brain = new ScriptedBrain { Answer = m => m.Contains("[FROM OWNER]") ? new PaneDecision(null, "go", "") : new PaneDecision(null, null, "waiting") };
         using var o = new PaneOrchestrator(worker, brain, "Orchestrator")
         { TurnSettle = TimeSpan.Zero, LoopInterval = TimeSpan.FromMilliseconds(10), IdleNudge = TimeSpan.FromMilliseconds(200) };
@@ -552,6 +557,7 @@ public class PaneOrchestratorTests
         worker.EndTurn("Deploying.");
         await Until(() => brain.Messages.Count == 2);
         worker.LastReply = "Built and deployed.";
+        worker.OutputSilentFor = TimeSpan.FromMinutes(30);
         await Until(() => brain.Messages.Count == 3);
         Assert.Contains("worker_turn_ended", brain.Messages[2]);
         Assert.Contains("Built and deployed.", brain.Messages[2]);

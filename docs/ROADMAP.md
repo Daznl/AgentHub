@@ -82,9 +82,9 @@
 - **Stage 4:** Automated Git worktree isolation per task with cross-agent handoff orchestration.
 - **Stage 5 (Shipped 2026-11-04):** Sessions that outlive AgentHub. Each Cockpit session runs in its own `AgentHub.SessionHost` process that owns the pseudo-console and a 2 MB replay buffer; AgentHub attaches over a named pipe, detaches on close instead of killing, and reattaches on start from the saved pane layout (`PaneLayout` in settings), so AgentHub can be closed, updated and reopened while Claude Code keeps running. The pane comes back exactly as it was: each pane saves its terminal state on close (`screen.json`) and the host replays only the output written since; a pane resized while the host was starting now tells the host its size. Ended sessions come back with their last screen and a resume offer; the host runs from a versioned copy under `C:\data\agenthub\host\` so a live publish never touches it. Design in `docs/ARCHITECTURE.md` ("Sessions that outlive AgentHub"). Remaining: a "busy" message when another AgentHub instance holds the session; pruning old host version folders.
 
-## Headless on Ubuntu (planned, nothing built)
+## Headless on Ubuntu (in progress, nothing runs headless yet)
 
-- [ ] AgentHub without windows on an Ubuntu computer reached over SSH, driven by Claude Code through an MCP server and an `agenthub` command-line tool; same functionality as the Windows app, the owner still answers the owner's questions; the Windows app unchanged. Plan, decisions and slices: `docs/linux/PLAN.md` (slice 0 of 6)
+- [ ] AgentHub without windows on an Ubuntu computer reached over SSH, driven by Claude Code through an MCP server and an `agenthub` command-line tool; same functionality as the Windows app, the owner still answers the owner's questions; the Windows app unchanged. Plan, decisions and slices: `docs/linux/PLAN.md`. Done: the plan; slice 1, the screen-free code in `AgentHub.Core` (net8.0) built and tested on Linux in CI. Next: slice 2, the portable session host
 
 ## Later
 

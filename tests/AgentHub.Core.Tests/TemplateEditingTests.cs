@@ -1,6 +1,7 @@
 using System.IO;
 using AgentHub.Services.Orchestrator;
 using Xunit;
+using static AgentHub.Tests.SampleTemplates;
 using static AgentHub.Tests.TemplateRunTests;
 
 namespace AgentHub.Tests;

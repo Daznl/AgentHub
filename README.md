@@ -377,24 +377,31 @@ Before switching agents, record the current task, completed work, next steps and
 
 ```text
 AgentHub.sln
+AgentHub.Linux.slnf               the projects that also build and pass on Linux (Core, Hosting, Core tests)
 bootstrap.cmd / bootstrap.ps1     prerequisite check, build and launch
 AGENTS.md / CLAUDE.md             rules for coding agents; CLAUDE.md also tells Claude Code how to install AgentHub
 scripts/Deploy-Taskbar.ps1        publish into the install folder and prove the installed commit
-src/AgentHub/                     WPF application
-  Models/                         settings, repository, account and usage models
-  Services/                       Git, GitHub CLI, discovery, settings and agent launching
+src/AgentHub/                     WPF application: windows, controls, converters
+  Services/                       launching agents in Windows Terminal and opening Explorer
+  Terminal/                       terminal controls, xterm.js assets, the session interface (local or hosted), the host client, the pane as orchestrator worker
+src/AgentHub.Core/                everything that needs no screen (net8.0, also builds on Linux)
+  Models/                         settings, repository, account and usage models (no UI types: badges are a BadgeTone)
+  Services/                       Git, GitHub CLI, discovery, settings, process runner, the timer the services tick on
+  Services/Orchestrator/          pane orchestrator, workflow templates, advanced templates, runs, the Template helper
   Services/Usage/                 per-provider usage readers and the output parser
   Services/Context/               per-session context window readers (Claude Code, Codex transcripts)
   Services/History/               session transcripts: listing, reading, permanent archive
   Services/Instructions/          context files, the Claude Code review of them, and ClaudePrint (the shared claude -p lock-down)
   Services/Timeline/              project timeline: commit attribution, lane layout, git, gh and transcript readers, and the timeline review
-  Terminal/                       terminal controls, xterm.js assets, the session interface (local or hosted) and the host client
+  Services/Help/                  the AgentHub helper (README and docs packed in)
+  Terminal/                       attention detection, bracketed paste, folder trust prompt
   Sessions/                       interfaces for the planned session layer
 src/AgentHub.Hosting/             shared by both executables: ConPTY wrapper, pipe frame protocol, replay buffer, session records
 src/AgentHub.SessionHost/         the per-session host process that keeps a CLI running while AgentHub is closed
-tests/AgentHub.Tests/             xUnit tests
-docs/                             architecture, GitHub integration, cockpit design, roadmap
-.github/workflows/build.yml       CI: restore and Release build on windows-latest
+tests/AgentHub.Core.Tests/        xUnit tests of Core and Hosting (net8.0, run on Linux too)
+tests/AgentHub.Tests/             xUnit tests of the Windows app: controls, rendering, the live session host
+docs/                             architecture, GitHub integration, cockpit design, roadmap; docs/linux/ the headless plan
+.github/workflows/build.yml       CI: Release build and tests on windows-latest; Core build and tests on ubuntu-latest
 ```
 
 ## Development

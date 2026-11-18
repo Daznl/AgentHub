@@ -13,40 +13,6 @@ namespace AgentHub.Tests;
 /// </summary>
 public class TemplateRunTests
 {
-    // ---- The owner's example (2026-11-13): branch, read, build, watch, hand off, commit, close; then stage 2 in a fresh session ----
-
-    internal static AdvancedTemplate StagedBuild() => new()
-    {
-        Name = "Staged build",
-        Stages =
-        [
-            new()
-            {
-                Id = "stage-1", Title = "Stage 1",
-                Steps =
-                [
-                    new() { Id = "s1-branch", Kind = StepKind.CreateBranch, Branch = "feature/stage-1" },
-                    new() { Id = "s1-build", Kind = StepKind.Instruct, Title = "Build stage 1", Text = "Build stage 1 of docs/PLAN.md." },
-                    new() { Id = "s1-watch", Kind = StepKind.WaitForWorker, Escalate = true },
-                    new() { Id = "s1-handoff", Kind = StepKind.Handoff },
-                    new() { Id = "s1-commit", Kind = StepKind.Commit },
-                    new() { Id = "s1-close", Kind = StepKind.CloseSession },
-                ],
-            },
-            new()
-            {
-                Id = "stage-2", Title = "Stage 2",
-                Steps =
-                [
-                    new() { Id = "s2-session", Kind = StepKind.NewSession },
-                    new() { Id = "s2-build", Kind = StepKind.Instruct, Text = "Read .agenthub/handoff.md, then build stage 2." },
-                    new() { Id = "s2-check", Kind = StepKind.AskOwner, Text = "Stage 2 is built. Open the pull request?" },
-                    new() { Id = "s2-pr", Kind = StepKind.OpenPullRequest, Target = "main" },
-                ],
-            },
-        ],
-    };
-
     internal sealed class ScriptedWorker : IBuildWorker
     {
         public string Label => "Terminal 1";
@@ -118,7 +84,7 @@ public class TemplateRunTests
     }
 
     private static PaneOrchestrator Attach(ScriptedWorker worker, ScriptedBrain brain, AdvancedTemplate? template = null) =>
-        new(worker, brain, "Staged build", advanced: template ?? StagedBuild()) { TurnSettle = TimeSpan.Zero, StopDelay = TimeSpan.Zero, StartupDelay = TimeSpan.Zero, LoopInterval = TimeSpan.FromMilliseconds(20) };
+        new(worker, brain, "Staged build", advanced: template ?? SampleTemplates.StagedBuild()) { TurnSettle = TimeSpan.Zero, StopDelay = TimeSpan.Zero, StartupDelay = TimeSpan.Zero, LoopInterval = TimeSpan.FromMilliseconds(20) };
 
     internal static async Task Until(Func<bool> done, int ms = 5000)
     {
@@ -132,7 +98,7 @@ public class TemplateRunTests
     [Fact]
     public void A_run_steps_through_the_template_in_order_and_knows_where_it_is()
     {
-        var run = new TemplateRun(StagedBuild());
+        var run = new TemplateRun(SampleTemplates.StagedBuild());
 
         Assert.Equal(RunState.Ready, run.State);
         Assert.Null(run.Current);
@@ -175,7 +141,7 @@ public class TemplateRunTests
     [Fact]
     public void Going_on_from_a_step_skips_what_was_not_done_before_it_and_redoes_what_comes_after()
     {
-        var run = new TemplateRun(StagedBuild());
+        var run = new TemplateRun(SampleTemplates.StagedBuild());
         run.Start();
         run.CompleteCurrent(); // s1-branch done
         run.CompleteCurrent(); // s1-build done; at s1-watch
@@ -198,7 +164,7 @@ public class TemplateRunTests
     [Fact]
     public void The_orchestrator_is_told_the_current_step_what_it_means_and_what_comes_next()
     {
-        var run = new TemplateRun(StagedBuild());
+        var run = new TemplateRun(SampleTemplates.StagedBuild());
         run.Start("s1-watch");
         var text = run.Describe();
 
@@ -236,7 +202,7 @@ public class TemplateRunTests
     [Fact]
     public void A_template_with_problems_cannot_be_run()
     {
-        var broken = StagedBuild();
+        var broken = SampleTemplates.StagedBuild();
         broken.Stages[0].After = ["stage-2"];
 
         var ex = Assert.Throws<InvalidOperationException>(() => new TemplateRun(broken));
@@ -265,7 +231,7 @@ public class TemplateRunTests
     [Fact]
     public void Only_an_orchestrator_with_a_run_gets_the_runs_rules_and_the_templates_outline()
     {
-        var prompt = PaneOrchestrator.SystemPrompt(@"C:\My Project", "Terminal 1", null, advanced: StagedBuild());
+        var prompt = PaneOrchestrator.SystemPrompt(@"C:\My Project", "Terminal 1", null, advanced: SampleTemplates.StagedBuild());
 
         Assert.Contains("RUN: YOU FOLLOW AN ADVANCED TEMPLATE", prompt);
         Assert.Contains("step_outcome", prompt);

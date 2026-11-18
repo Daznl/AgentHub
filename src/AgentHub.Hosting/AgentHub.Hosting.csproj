@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Shared by AgentHub and AgentHub.SessionHost: the ConPTY wrapper, the pipe protocol, the replay buffer and the session records. No UI. -->
+  <!-- Shared by AgentHub and AgentHub.SessionHost: the ConPTY wrapper, the pipe protocol, the replay buffer and the session records. No UI.
+       Plain net8.0 so AgentHub.Core (Linux too) can use the records and SharedFile; the ConPTY types are marked Windows-only. -->
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>AgentHub.Hosting</RootNamespace>

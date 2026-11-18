@@ -2,9 +2,13 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:AgentHub.Controls"
-             xmlns:orch="clr-namespace:AgentHub.Services.Orchestrator"
+             xmlns:orch="clr-namespace:AgentHub.Services.Orchestrator;assembly=AgentHub.Core"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
+        <!-- Repository badges: the models say what a badge means (BadgeTone, a bool); these draw it. -->
+        <controls:BadgeToneBrushConverter x:Key="ToneBackground" Part="Background" />
+        <controls:BadgeToneBrushConverter x:Key="ToneForeground" Part="Foreground" />
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
         <!-- Futuristic AI palette, tuned to the AgentHub logo:
              deep blue-black surfaces, electric-cyan primary accent (robot),
              with mint (OpenAI) and orange (crab) available as neon highlights. -->

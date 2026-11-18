@@ -21,12 +21,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The AgentHub helper's knowledge (Services/Help/AppHelp.cs): packed in, so its answers always match this build -->
-    <EmbeddedResource Include="..\..\README.md" LogicalName="AgentHub.Docs.README.md" />
-    <EmbeddedResource Include="..\..\docs\*.md" LogicalName="AgentHub.Docs.%(Filename)%(Extension)" />
-  </ItemGroup>
-
-  <ItemGroup>
     <Using Include="System.IO" />
   </ItemGroup>
 
@@ -45,6 +39,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Everything that needs no screen; the helper's docs are packed into it (Services/Help/AppHelp.cs). -->
+    <ProjectReference Include="..\AgentHub.Core\AgentHub.Core.csproj" />
     <ProjectReference Include="..\AgentHub.Hosting\AgentHub.Hosting.csproj" />
     <!-- The session host ships beside AgentHub.exe: its exe, dll, runtimeconfig and deps come along with the reference. -->
     <ProjectReference Include="..\AgentHub.SessionHost\AgentHub.SessionHost.csproj" />

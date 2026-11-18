@@ -1,10 +1,10 @@
 using System.Collections.Concurrent;
-using System.Windows.Threading;
 
 namespace AgentHub.Services.Context;
 
 /// <summary>
-/// Follows one Cockpit session's transcript and reports its context usage and the user's last prompt. Polls on the UI dispatcher, reads off it.
+/// Follows one Cockpit session's transcript and reports its context usage and the user's last prompt. Polls on the
+/// timer's thread (the UI thread in the Windows app), reads off it.
 /// Each tracker claims the transcript it binds to so two panes in the same folder never show the same session.
 /// After <c>/clear</c> (or a new session in the same CLI) a newer unclaimed transcript appears and the tracker moves to it.
 /// </summary>
@@ -12,7 +12,9 @@ public sealed class ContextWindowTracker : IDisposable
 {
     private static readonly ConcurrentDictionary<string, ContextWindowTracker> Claims = new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(3) };
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(3);
+
+    private readonly ITickTimer _timer;
     private ContextSource _source;
     private string _workingDirectory = "";
     private DateTimeOffset _since;
@@ -24,17 +26,19 @@ public sealed class ContextWindowTracker : IDisposable
     private bool _polling;
     private int _generation;
 
-    /// <summary>Raised on the UI thread with the latest reading, or null when there is nothing to show.</summary>
+    /// <summary>Raised on the timer's thread with the latest reading, or null when there is nothing to show.</summary>
     public event Action<ContextReading?>? ReadingChanged;
 
-    /// <summary>Raised on the UI thread with the last prompt the user sent, or null when there is none.</summary>
+    /// <summary>Raised on the timer's thread with the last prompt the user sent, or null when there is none.</summary>
     public event Action<LastPrompt?>? PromptChanged;
 
     /// <summary>Transcript this tracker is following, or null before the CLI has written one.</summary>
     public string? BoundPath => _boundPath;
 
-    public ContextWindowTracker()
+    /// <param name="timer">Makes the polling timer; <see cref="SynchronizationContextTickTimer"/> when not given.</param>
+    public ContextWindowTracker(Func<TimeSpan, ITickTimer>? timer = null)
     {
+        _timer = (timer ?? SynchronizationContextTickTimer.Create)(PollInterval);
         _timer.Tick += async (_, _) => await PollAsync();
     }
 
@@ -128,6 +132,7 @@ public sealed class ContextWindowTracker : IDisposable
     public void Dispose()
     {
         _timer.Stop();
+        (_timer as IDisposable)?.Dispose();
         _generation++;
         Release();
     }

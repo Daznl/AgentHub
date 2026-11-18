@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace AgentHub.Hosting;
 
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 internal static class ConPtyNative
 {
     public const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;

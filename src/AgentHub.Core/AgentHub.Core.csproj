@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Everything in AgentHub that needs no screen: the orchestrator, templates and runs, history, timeline, context
+       files, usage, git and GitHub, settings. Plain net8.0 so it builds and runs on Linux too (docs/linux/PLAN.md).
+       The Windows app references it; nothing here may use WPF, Windows Forms or other Windows-only types. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AgentHub</RootNamespace>
+    <AssemblyName>AgentHub.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The AgentHub helper's knowledge (Services/Help/AppHelp.cs): packed in, so its answers always match this build -->
+    <EmbeddedResource Include="..\..\README.md" LogicalName="AgentHub.Docs.README.md" />
+    <EmbeddedResource Include="..\..\docs\*.md" LogicalName="AgentHub.Docs.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AgentHub.Hosting\AgentHub.Hosting.csproj" />
+  </ItemGroup>
+</Project>

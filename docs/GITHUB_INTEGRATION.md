@@ -41,10 +41,10 @@ Models
     +-- GitHubRepositoryOwner
 ```
 
-Files: `src/AgentHub/Services/GitHubService.cs`, `src/AgentHub/Services/GitHubLoginProgress.cs`,
-`src/AgentHub/Services/ProcessRunner.cs`, `src/AgentHub/GitHubLoginWindow.xaml(.cs)`,
-`src/AgentHub/Models/GitHubAccount.cs`, `src/AgentHub/Models/GitHubRepository.cs`,
-`src/AgentHub/MainWindow.xaml(.cs)` (GitHub view section), `tests/AgentHub.Tests/GitHubServiceTests.cs`.
+Files: `src/AgentHub.Core/Services/GitHubService.cs`, `src/AgentHub.Core/Services/GitHubLoginProgress.cs`,
+`src/AgentHub.Core/Services/ProcessRunner.cs`, `src/AgentHub/GitHubLoginWindow.xaml(.cs)`,
+`src/AgentHub.Core/Models/GitHubAccount.cs`, `src/AgentHub.Core/Models/GitHubRepository.cs`,
+`src/AgentHub/MainWindow.xaml(.cs)` (GitHub view section), `tests/AgentHub.Core.Tests/GitHubServiceTests.cs`.
 
 ## 3. Sign-in: real browser verification without a terminal
 
@@ -191,7 +191,7 @@ What the user can do:
 
 ## 5. Testing
 
-`tests/AgentHub.Tests/GitHubServiceTests.cs` covers the pure functions:
+`tests/AgentHub.Core.Tests/GitHubServiceTests.cs` covers the pure functions:
 
 - `ParseAccounts` — single host, multiple hosts/accounts (ordering, ⚠ on non-success state),
   empty/invalid JSON.

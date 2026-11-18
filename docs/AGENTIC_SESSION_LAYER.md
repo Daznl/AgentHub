@@ -1,7 +1,7 @@
 # Agentic Session Layer — Design Draft
 
 > **Status: DRAFT / not implemented.** This captures the intended shape only. The
-> interfaces live in [`src/AgentHub/Sessions/`](../src/AgentHub/Sessions/) as contracts with
+> interfaces live in [`src/AgentHub.Core/Sessions/`](../src/AgentHub.Core/Sessions/) as contracts with
 > no behaviour yet. Nothing here is wired into the app or DI. No build target depends on it.
 
 ## Purpose
@@ -24,8 +24,8 @@ TUI scraping.** Scraping redrawn frames is fragile — use it only where no clea
 ## The four-method contract
 
 Everything the orchestrator needs reduces to four things the substrate must expose. Each maps to a
-member in [`ISessionManager`](../src/AgentHub/Sessions/ISessionManager.cs) /
-[`ISessionBuffer`](../src/AgentHub/Sessions/ISessionManager.cs):
+member in [`ISessionManager`](../src/AgentHub.Core/Sessions/ISessionManager.cs) /
+[`ISessionBuffer`](../src/AgentHub.Core/Sessions/ISessionManager.cs):
 
 1. **Sanitized buffer + monotonic offsets** — `ISessionBuffer` (one per session; the single source
    of truth so the watcher and extractor agree on where "the previous halt" was). Sanitize with the
@@ -54,7 +54,7 @@ same capability.
 ## Safety (first-class, not a later patch)
 
 The decide→inject loop can run away. Brakes live in
-[`ISessionSafety.cs`](../src/AgentHub/Sessions/ISessionSafety.cs):
+[`ISessionSafety.cs`](../src/AgentHub.Core/Sessions/ISessionSafety.cs):
 
 - **`AutonomyLevel`** per session: `Observe → Suggest → ActWithConfirm → Autonomous`.
 - **`ISessionActionPolicy`** — command allowlist, **never auto-confirm destructive operations**

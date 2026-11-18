@@ -74,7 +74,7 @@ public class GitHubServiceTests
         Assert.False(repo.CanPush);
         Assert.Equal("🏢 IGOLimited · clone only (read access)", repo.Category);
         Assert.Equal(20, repo.CategoryOrder);
-        Assert.Equal(System.Windows.Visibility.Collapsed, repo.PushButtonVisibility);
+        Assert.False(repo.CanPushNow);
     }
 
     [Theory]

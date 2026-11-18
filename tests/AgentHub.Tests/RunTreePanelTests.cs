@@ -20,7 +20,7 @@ public class RunTreePanelTests
     [Fact]
     public void It_draws_done_steps_green_and_the_step_the_run_is_at_blue() => OnSta(() =>
     {
-        var run = new TemplateRun(TemplateRunTests.StagedBuild());
+        var run = new TemplateRun(SampleTemplates.StagedBuild());
         var before = Render(run);
         Assert.Equal(0, Count(before, Green));
         Assert.Equal(0, Count(before, Blue));

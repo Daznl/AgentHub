@@ -39,7 +39,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     private SolidColorBrush? _workingBorderBrush;
     private SolidColorBrush? _workingHeaderBrush;
-    private readonly ContextWindowTracker _context = new();
+    private readonly ContextWindowTracker _context = new(Controls.DispatcherTickTimer.Create);
     private long _claudeContextWindowTokens = 1_000_000;
     private const double PromptCollapsedMaxHeight = 18;
     private const double PromptExpandedMaxHeight = 160;

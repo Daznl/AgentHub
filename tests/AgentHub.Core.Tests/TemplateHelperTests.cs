@@ -240,7 +240,7 @@ public class TemplateHelperTests : IDisposable
     public void A_change_a_run_cannot_take_is_written_all_the_same_and_the_run_says_why()
     {
         // The helper may change a template a run follows: as a draft, which Apply then refuses if it touches reached steps.
-        var t = TemplateRunTests.StagedBuild();
+        var t = SampleTemplates.StagedBuild();
         var run = new TemplateRun(t);
         run.Start();
         var changed = t.Clone();

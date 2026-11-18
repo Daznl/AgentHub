@@ -14,3 +14,16 @@ jobs:
           dotnet-version: '8.0.x'
       - run: dotnet restore AgentHub.sln
       - run: dotnet build AgentHub.sln --configuration Release --no-restore
+      - run: dotnet test AgentHub.sln --configuration Release --no-build
+
+  # The projects that must build and pass on Linux too (docs/linux/PLAN.md): Core, Hosting and their tests.
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: dotnet restore AgentHub.Linux.slnf
+      - run: dotnet build AgentHub.Linux.slnf --configuration Release --no-restore
+      - run: dotnet test AgentHub.Linux.slnf --configuration Release --no-build
