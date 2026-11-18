@@ -191,14 +191,18 @@ public partial class RunTreePanel : System.Windows.Controls.UserControl
         };
         head.Children.Add(title);
 
-        var details = new StackPanel { Margin = new Thickness(0, 4, 0, 1) };
-        // The title in full, when one line cut it short.
-        details.Children.Add(new TextBlock { Text = row.Title, Foreground = Text, FontSize = 11, TextWrapping = TextWrapping.Wrap });
+        var details = new StackPanel { Margin = new Thickness(17, 2, 0, 1) };
+        // Opened, the title shows in full instead of cut to one line.
+        details.IsVisibleChanged += (_, _) =>
+        {
+            title.TextWrapping = details.IsVisible ? TextWrapping.Wrap : TextWrapping.NoWrap;
+            title.TextTrimming = details.IsVisible ? TextTrimming.None : TextTrimming.CharacterEllipsis;
+        };
         details.Children.Add(new TextBlock
         {
             Text = ((row.Label ?? "") + " · " + StateWord(row.State)).ToUpperInvariant(),
             Foreground = row.State switch { RunTreeState.Done => Green, RunTreeState.Current => Blue, _ => Faint },
-            FontSize = 9, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 3, 0, 0),
+            FontSize = 9, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 1, 0, 0),
         });
         if (row.Detail is { } detail) details.Children.Add(new TextBlock { Text = detail, Foreground = Muted, FontSize = 10.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 3, 0, 0) });
         if (row.Escalate) details.Children.Add(new TextBlock { Text = "⚑ pauses for you", Foreground = Amber, FontSize = 10, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 3, 0, 0) });

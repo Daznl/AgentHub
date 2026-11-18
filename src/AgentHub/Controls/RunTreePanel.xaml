@@ -44,10 +44,10 @@
     <Border Background="#151129" BorderBrush="#4C3A8C" BorderThickness="1" CornerRadius="8" Padding="8,6,2,6">
         <DockPanel>
             <DockPanel DockPanel.Dock="Top" LastChildFill="True" Margin="0,0,6,6">
-                <Button x:Name="CloseBtn" DockPanel.Dock="Right" Click="Close_Click" Content="✕" ToolTip="Hide the run tree (🌲 Tree above the session shows it again)"
+                <Button x:Name="CloseBtn" DockPanel.Dock="Right" Click="Close_Click" Content="✕" ToolTip="Hide the run tree (◨ Tree above the session shows it again)"
                         AutomationProperties.Name="Hide the run tree" Style="{StaticResource CloseButton}" FontSize="10" VerticalAlignment="Top" />
                 <StackPanel>
-                    <TextBlock Text="🌲 RUN TREE" Foreground="#A78BFA" FontSize="10" FontWeight="Bold" />
+                    <TextBlock Text="RUN TREE" Foreground="#A78BFA" FontSize="10" FontWeight="Bold" />
                     <TextBlock x:Name="SummaryText" Foreground="#9A8FC7" FontSize="10" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
             </DockPanel>

@@ -1,5 +1,6 @@
-﻿# UI test: the run tree beside a pane (🌲 Tree in the orchestrator box): shown and hidden, done green, current blue, steps opened.
-param([string]$Exe = (Join-Path $PSScriptRoot '..\..\src\AgentHub\bin\Debug\net8.0-windows\AgentHub.exe'))
+﻿# UI test: the run tree beside a pane (◨ Tree in the orchestrator box): shown and hidden, done green, current blue, steps opened.
+# -KeepOpen: stop with a run under way, the tree shown and a step opened, and leave that AgentHub open to look at.
+param([string]$Exe = (Join-Path $PSScriptRoot '..\..\src\AgentHub\bin\Debug\net8.0-windows\AgentHub.exe'), [switch]$KeepOpen)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
 Add-Type @'
@@ -69,7 +70,7 @@ Add-Type 'using System; using System.Runtime.InteropServices; public static clas
 function Named($root, $like) { @($root.FindAll($TS::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | Where-Object { $_.Current.Name -like $like }) }
 function Press($el) { [W2]::PostMessage([IntPtr]$el.Current.NativeWindowHandle, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null }
 
-# ---- The run tree beside a pane: 🌲 Tree in the orchestrator's box shows and hides it; done green, current blue ----
+# ---- The run tree beside a pane: ◨ Tree in the orchestrator's box shows and hides it; done green, current blue ----
 $T = 'C:\data\agenthub\test-run-tree'
 Remove-Item $T -Recurse -Force -ErrorAction SilentlyContinue
 $proj = Join-Path $T 'Pane Test'; New-Item -ItemType Directory -Force "$proj\orchestration" | Out-Null
@@ -115,7 +116,7 @@ try {
   for ($i = 0; $i -lt 80 -and -not $main; $i++) { $main = $A::RootElement.FindFirst($TS::Children, (Cond $A::ProcessIdProperty $p.Id)); Start-Sleep -Milliseconds 250 }
   Start-Sleep 3
 
-  "1. Follow the template on a session: 🌲 Tree is offered, the tree is hidden"
+  "1. Follow the template on a session: ◨ Tree is offered, the tree is hidden"
   Click (FindName $main 'Pane Test'); Start-Sleep 1
   Click (FindName $main 'Command Prompt'); Start-Sleep 6
   Click (FindName $main '*Orchestrate' 20)
@@ -123,10 +124,10 @@ try {
   $tree = Win '*Advanced Templates*'
   Start-Sleep 2
   $toggle = FindName $main 'Show the run tree' 10
-  Check ($null -ne $toggle) '🌲 Tree is in the orchestrator box'
+  Check ($null -ne $toggle) '◨ Tree is in the orchestrator box'
   Check ($null -eq (ById $main 'RunTreePanel')) 'the run tree is hidden until asked for'
 
-  "2. 🌲 Tree shows it beside the session: every stage, every step to do"
+  "2. ◨ Tree shows it beside the session: every stage, every step to do"
   Click $toggle; Start-Sleep 1
   $panel = ById $main 'RunTreePanel'
   Check ($null -ne $panel) 'the run tree is shown'
@@ -165,20 +166,23 @@ try {
   Click $watch; Start-Sleep -Milliseconds 500
   Check ((Texts $panel '*pauses for you').Count -eq 1) 'an escalation point says it pauses for you'
   Grab $main 'run-tree-open.png'
+  if ($KeepOpen) { "Left open: AgentHub process $($p.Id), test settings in $T"; return }
   Click $build; Start-Sleep -Milliseconds 500
   Check ((Texts $panel 'echo building stage 1 of the plan*').Count -eq 0) 'a second click closes it'
 
-  "6. ✕ in the tree hides it; 🌲 Tree brings it back; Detach takes it away"
+  "6. ✕ in the tree hides it; ◨ Tree brings it back; Detach takes it away"
   Click (FindName $panel 'Hide the run tree'); Start-Sleep -Milliseconds 500
   Check ($null -eq (ById $main 'RunTreePanel')) '✕ hides the tree'
   Click (FindName $main 'Show the run tree'); Start-Sleep -Milliseconds 500
-  Check ($null -ne (ById $main 'RunTreePanel')) '🌲 Tree shows it again'
+  Check ($null -ne (ById $main 'RunTreePanel')) '◨ Tree shows it again'
   Click (FindName $main '*Detach'); Start-Sleep 2
   Check ($null -eq (ById $main 'RunTreePanel')) 'detached, the tree is gone'
   Check ((Buttons $main | Where-Object { $_.Current.Name -like '*run tree' }).Count -eq 0) 'and so is its button'
 } finally {
-  Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-  Get-Process cmd -ErrorAction SilentlyContinue | Where-Object { $_.StartTime -gt (Get-Date).AddMinutes(-10) -and $_.MainWindowTitle -eq '' -and $_.Parent.Id -eq $p.Id } | Stop-Process -Force -ErrorAction SilentlyContinue
+  if (-not ($KeepOpen -and $script:fails -eq 0)) {
+    Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+    Get-Process cmd -ErrorAction SilentlyContinue | Where-Object { $_.StartTime -gt (Get-Date).AddMinutes(-10) -and $_.MainWindowTitle -eq '' -and $_.Parent.Id -eq $p.Id } | Stop-Process -Force -ErrorAction SilentlyContinue
+  }
 }
 "Failures: $script:fails"
 exit $script:fails

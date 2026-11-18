@@ -110,7 +110,7 @@
                              AutomationProperties.Name="Handoff limit, per cent of the context window" />
                     <TextBlock Text="%" Foreground="#C4B5FD" FontSize="10" VerticalAlignment="Center" Margin="2,0,0,0" />
                 </StackPanel>
-                <Button x:Name="OrchestratorTreeBtn" Click="OrchestratorTree_Click" Content="🌲 Tree" Visibility="Collapsed"
+                <Button x:Name="OrchestratorTreeBtn" Click="OrchestratorTree_Click" Content="◨ Tree" Visibility="Collapsed"
                         ToolTip="Show or hide the run tree beside this session: every stage and step, the one the run is at in blue, done ones green. Click a step for its details."
                         Background="#221A3D" Foreground="#C4B5FD" Padding="8,2" FontSize="11" FontWeight="SemiBold" Margin="0,0,6,0" />
                 <Button x:Name="OrchestratorRunBtn" Click="OrchestratorRun_Click" Content="🗺 Run" Visibility="Collapsed"
@@ -160,7 +160,7 @@
         </Grid>
     </Border>
 
-    <!-- The session, and beside it the run tree of an orchestrator that follows an advanced template (🌲 Tree in its box). -->
+    <!-- The session, and beside it the run tree of an orchestrator that follows an advanced template (◨ Tree in its box). -->
     <Grid Grid.Row="1">
     <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />

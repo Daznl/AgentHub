@@ -190,7 +190,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
         ShowRunTree(OrchestratorView);
     }
 
-    // 🌲 Tree in the box: the box's own button colours while the tree is hidden, lit while it shows.
+    // ◨ Tree in the box: the box's own button colours while the tree is hidden, lit while it shows.
     private static readonly SolidColorBrush TreeBtnOff = Frozen(0x22, 0x1A, 0x3D);
     private static readonly SolidColorBrush TreeBtnOffText = Frozen(0xC4, 0xB5, 0xFD);
     private static readonly SolidColorBrush TreeBtnOn = Frozen(0x4C, 0x3A, 0x8C);
