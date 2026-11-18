@@ -19,7 +19,8 @@ public sealed record WorldSnapshot(
     string EventsFile,
     IReadOnlyList<WorldProject> Projects,
     IReadOnlyList<WorldLiveSession> Live,
-    IReadOnlyList<WorldOrchestrator> Orchestrators)
+    IReadOnlyList<WorldOrchestrator> Orchestrators,
+    IReadOnlyList<string>? Loading = null)
 {
     public const int CurrentSchema = 2;
 }

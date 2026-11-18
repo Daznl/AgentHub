@@ -27,7 +27,8 @@ Everything lives in `C:\data\agenthub\world\` (`AGENTHUB_WORLD_DIR` to move it):
   - A project is read three at a time.
   - Its island appears at once with its files; its git tree follows when read (git log, branch tips, pull requests, squash matching, session attribution).
   - The tree is read again after a session of that project commits, pushes, merges or switches branch, or every 5 minutes. The file list is read again after a write, or every minute.
-- **Live sessions:** a Claude Code or Codex transcript written in the last 15 minutes, plus any transcript a Cockpit pane is bound to. AgentHub's own sessions are left out (orchestrators, reviews, helpers, scratch folders).
+- **Live sessions:** a Claude Code or Codex transcript written in the last 15 minutes, plus every session in an AgentHub pane whose session host still runs, however long it has been quiet (from `C:\data\agenthub\sessions`, so the panes of any AgentHub copy count). A quiet session starts as a sleeping crab. AgentHub's own sessions are left out (orchestrators, reviews, helpers, scratch folders).
+- **Order:** projects with live sessions are read first, four at a time. Godot's header lists those still being read. `AgentHub.exe --world` opens the world at start-up.
 
 ## world.json, schema 2
 

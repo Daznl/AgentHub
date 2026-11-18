@@ -110,7 +110,9 @@ public sealed class WorldService : IDisposable
                 if (tick++ % 5 == 0)
                 {
                     var ui = await _ui();
+                    var found = System.Diagnostics.Stopwatch.StartNew();
                     var live = FindLive(ui);
+                    if (tick == 1) Log($"started: {live.Count} live transcripts found in {found.Elapsed.TotalSeconds:0.0}s, {ui.RegisteredRoots.Count} registered repositories");
                     var due = _structureWanted || DateTimeOffset.UtcNow - lastStructure > StructureEvery || NewProjectNeeded(live);
                     if (due && structure is not { IsCompleted: false })
                     {
@@ -141,53 +143,66 @@ public sealed class WorldService : IDisposable
     private static readonly TimeSpan GitEvery = TimeSpan.FromMinutes(5), FilesEvery = TimeSpan.FromMinutes(1);
 
     /// <summary>
-    /// Reads the projects three at a time and writes world.json as each one arrives. A project's git tree is read again
-    /// only after one of its sessions committed, pushed, merged or switched branch (or every five minutes); its files
-    /// after a write (or every minute). The rest comes from the cache.
+    /// Brings every project up to date, those with live sessions first, four at a time. A project new to the world shows
+    /// as soon as its folder is resolved and its files listed (an island with its city), and gains its git tree when that
+    /// has been read; world.json is rewritten at each step. A project's git tree is read again only after one of its
+    /// sessions committed, pushed, merged or switched branch (or every five minutes); its files after a write (or every
+    /// minute). The rest comes from the cache.
     /// </summary>
     private async Task RefreshStructureAsync(WorldUiState ui, IReadOnlyList<LiveTranscript> live, CancellationToken token)
     {
         try
         {
-            var roots = new List<string>();
-            foreach (var root in ui.RegisteredRoots.Concat(live.Select(l => l.Folder)))
-            {
-                if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) continue;
-                var scope = await ScopeAsync(root, token);
-                if (!roots.Contains(scope.Root, StringComparer.OrdinalIgnoreCase)) roots.Add(scope.Root);
-            }
-            // Projects no longer wanted leave the world
-            foreach (var gone in _cache.Keys.Where(k => !roots.Contains(k, StringComparer.OrdinalIgnoreCase)).ToList()) _cache.TryRemove(gone, out _);
-            Publish(roots);
-
+            var folders = live.Select(l => l.Folder).Concat(ui.RegisteredRoots)
+                .Where(f => !string.IsNullOrWhiteSpace(f)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            Log($"structure: {folders.Count} folders ({ui.RegisteredRoots.Count} registered, {live.Count} live sessions)");
             var clock = System.Diagnostics.Stopwatch.StartNew();
-            using var gate = new SemaphoreSlim(3);
-            await Task.WhenAll(roots.Select(async root =>
+            var roots = new List<string>();
+            lock (_publishGate)
+                foreach (var f in folders) _loading.Add(Path.GetFileName(f.TrimEnd('\\')));
+            using var gate = new SemaphoreSlim(4);
+            await Task.WhenAll(folders.Select(async folder =>
             {
                 await gate.WaitAsync(token);
+                var name = Path.GetFileName(folder.TrimEnd('\\'));
                 try
                 {
+                    if (!Directory.Exists(folder)) return;
                     var started = clock.Elapsed;
-                    var scope = _scopes[root].Scope;
+                    var scope = await ScopeAsync(folder, token);
+                    var root = scope.Root;
+                    lock (roots)
+                    {
+                        if (roots.Contains(root, StringComparer.OrdinalIgnoreCase)) return; // a worktree of a project already handled
+                        roots.Add(root);
+                    }
                     if (!_cache.ContainsKey(root))
                     {
                         // First sight: the island and its files now, the git tree when it has been read
                         _cache[root] = new CachedProject(await ReadSkeletonAsync(scope, token), DateTimeOffset.MinValue, DateTimeOffset.UtcNow);
-                        Publish(roots);
+                        Publish();
                     }
                     if (await RefreshProjectAsync(scope, token) is { } project)
                     {
-                        Publish(roots);
+                        lock (_publishGate) _loading.Remove(name);
+                        Publish();
                         Log($"read {project.Name}: {project.Files.Count} files, {project.Commits.Count} commits, {project.Sessions.Count} sessions in {(clock.Elapsed - started).TotalSeconds:0.0}s");
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    Problem = $"{root}: {ex.Message}";
-                    Log($"could not read {root}: {ex}");
+                    Problem = $"{folder}: {ex.Message}";
+                    Log($"could not read {folder}: {ex.Message}");
                 }
-                finally { gate.Release(); }
+                finally
+                {
+                    lock (_publishGate) _loading.Remove(name);
+                    gate.Release();
+                }
             }));
+            // Projects no longer wanted (unregistered, their sessions gone) leave the world
+            foreach (var gone in _cache.Keys.Where(k => !roots.Contains(k, StringComparer.OrdinalIgnoreCase)).ToList()) _cache.TryRemove(gone, out _);
+            Publish();
             Log($"structure: {roots.Count} projects in {clock.Elapsed.TotalSeconds:0.0}s");
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
@@ -219,22 +234,25 @@ public sealed class WorldService : IDisposable
         return updated;
     }
 
-    /// <summary>The projects read so far, in the order of <paramref name="roots"/>, become the world's.</summary>
-    private void Publish(IReadOnlyList<string> roots)
+    /// <summary>The projects read so far become the world's, in name order so islands keep their places between refreshes.</summary>
+    private void Publish()
     {
         lock (_publishGate)
         {
-            _projects = roots.Select(r => _cache.GetValueOrDefault(r)?.Project).OfType<WorldProject>().ToList();
+            _projects = _cache.Values.Select(c => c.Project).OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
             WriteWorld();
         }
     }
 
     private readonly object _publishGate = new();
+    /// <summary>Folders still being read, for the world's header.</summary>
+    private readonly SortedSet<string> _loading = new(StringComparer.OrdinalIgnoreCase);
 
     private void WriteWorld()
     {
         lock (_publishGate)
-            WorldStore.Write(WorldPath, new WorldSnapshot(WorldSnapshot.CurrentSchema, DateTimeOffset.UtcNow, EventsFile, _projects, _live, _orchestrators));
+            WorldStore.Write(WorldPath, new WorldSnapshot(WorldSnapshot.CurrentSchema, DateTimeOffset.UtcNow, EventsFile, _projects, _live, _orchestrators,
+                _loading.ToList()));
     }
 
     private void Log(string line)
@@ -305,7 +323,7 @@ public sealed class WorldService : IDisposable
 
     // ---------------------------------------------------------------- live sessions
 
-    private sealed record LiveTranscript(string Path, ContextSource Agent, string Folder, string? Title, DateTimeOffset LastActivity);
+    private sealed record LiveTranscript(string Path, ContextSource Agent, string Folder, string? Title, DateTimeOffset LastActivity, string? Pane = null);
 
     private readonly ConcurrentDictionary<string, (SessionSummary? Summary, long Length)> _summaries = new(StringComparer.OrdinalIgnoreCase);
 
@@ -339,16 +357,37 @@ public sealed class WorldService : IDisposable
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Problem = ex.Message; }
-        // A pane's bound transcript counts even when quiet for long, so its crab stays while the pane is open
-        foreach (var pane in ui.Panes)
-            if (pane.TranscriptPath is { } p && File.Exists(p) && found.All(f => !f.Path.Equals(p, StringComparison.OrdinalIgnoreCase)))
+        // A session in a Cockpit pane counts however long it has been quiet, so its crab stays (asleep) while the pane
+        // is open: this window's panes, and every hosted session whose host still runs (any AgentHub's panes)
+        var open = ui.Panes.Where(p => p.TranscriptPath is not null).Select(p => (Path: p.TranscriptPath!, p.Folder, Pane: p.Title)).ToList();
+        try
+        {
+            foreach (var record in _sessionStore.ListAll())
+                if (!record.HasExited && record.TranscriptPath is { } t && Hosting.SessionStore.IsHostAlive(record))
+                    open.Add((t, record.WorkingDirectory, PaneName(record.Title)));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        foreach (var (p, folder, pane) in open)
+        {
+            var already = found.FindIndex(f => f.Path.Equals(p, StringComparison.OrdinalIgnoreCase));
+            if (already >= 0)
             {
-                var agent = p.Contains(@"\.codex\", StringComparison.OrdinalIgnoreCase) ? ContextSource.Codex : ContextSource.ClaudeCode;
-                var summary = Summary(p, agent, new FileInfo(p).Length);
-                found.Add(new LiveTranscript(p, agent, summary?.Folder ?? pane.Folder, summary?.Title, new DateTimeOffset(File.GetLastWriteTimeUtc(p), TimeSpan.Zero)));
+                if (found[already].Pane is null) found[already] = found[already] with { Pane = pane };
+                continue;
             }
+            if (!File.Exists(p)) continue;
+            var agent = p.Contains(@"\.codex\", StringComparison.OrdinalIgnoreCase) ? ContextSource.Codex : ContextSource.ClaudeCode;
+            var summary = Summary(p, agent, new FileInfo(p).Length);
+            found.Add(new LiveTranscript(p, agent, summary?.Folder ?? folder, summary?.Title ?? WorldSnapshotBuilder.Shorten(summary?.FirstPrompt, 50),
+                new DateTimeOffset(File.GetLastWriteTimeUtc(p), TimeSpan.Zero), pane));
+        }
         return found;
     }
+
+    private readonly Hosting.SessionStore _sessionStore = new();
+
+    /// <summary>"Terminal 1 · Claude Code" → "Terminal 1": the pane, not the CLI (the crab says which CLI).</summary>
+    private static string PaneName(string title) => title.Split(" · ")[0].Trim();
 
     private SessionSummary? Summary(string path, ContextSource agent, long length)
     {
@@ -369,7 +408,7 @@ public sealed class WorldService : IDisposable
         foreach (var l in live)
         {
             if (WorldSnapshotBuilder.Locate(projects, l.Folder) is not { } located) continue;
-            var pane = ui.Panes.FirstOrDefault(p => string.Equals(p.TranscriptPath, l.Path, StringComparison.OrdinalIgnoreCase))?.Title;
+            var pane = l.Pane;
             sessions.Add(new WorldLiveSession(l.Path, WorldSnapshotBuilder.AgentName(l.Agent), l.Title, located.Project.Id,
                 TimelineSource.NormalisePath(l.Folder), BranchOf(l.Folder), l.LastActivity, pane));
         }

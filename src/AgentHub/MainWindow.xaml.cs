@@ -155,6 +155,8 @@ public partial class MainWindow : Window
         var args = Environment.GetCommandLineArgs();
         var timelineArg = Array.FindIndex(args, a => string.Equals(a, "--timeline", StringComparison.OrdinalIgnoreCase));
         if (timelineArg >= 0 && timelineArg + 1 < args.Length && Directory.Exists(args[timelineArg + 1])) ShowTimeline(args[timelineArg + 1]);
+        // "AgentHub.exe --world" opens the 3D world straight away.
+        if (args.Any(a => string.Equals(a, "--world", StringComparison.OrdinalIgnoreCase))) OpenWorld();
         // "AgentHub.exe --advanced-templates <folder>" opens that project's advanced templates the same way.
         var advancedArg = Array.FindIndex(args, a => string.Equals(a, "--advanced-templates", StringComparison.OrdinalIgnoreCase));
         if (advancedArg >= 0 && advancedArg + 1 < args.Length) ShowAdvancedTemplates(args[advancedArg + 1]);

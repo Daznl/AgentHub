@@ -187,6 +187,8 @@ func _rebuild(data: Dictionary) -> void:
 			_grow_in(node)
 	_known = new_ids
 
+	var generated := str(data.get("generatedAt", ""))
+	_generated_at = Time.get_unix_time_from_datetime_string(generated.substr(0, 19)) if generated.length() >= 19 else 0.0
 	_live.clear()
 	for s in data.get("live", []):
 		_live[s["id"]] = s
@@ -199,6 +201,10 @@ func _rebuild(data: Dictionary) -> void:
 	_header.text = "AgentHub World"
 	_sub.text = "%d projects · %d live sessions · %d orchestrators · %d commits   ·   read %s UTC" % [
 		projects.size(), _live.size(), _orchestrators.size(), commits, TreeBuilder._time_text(str(data.get("generatedAt", "")))]
+	var loading: Array = data.get("loading", [])
+	if not loading.is_empty():
+		var names := ", ".join(loading.slice(0, 4)) + (" and %d more" % (loading.size() - 4) if loading.size() > 4 else "")
+		_sub.text += "\nStill reading: %s" % names
 	var events_file := str(data.get("eventsFile", ""))
 	var events_path := world_path.get_base_dir().path_join(events_file) if events_file != "" else ""
 	if events_path != _events_path:
@@ -322,6 +328,7 @@ func _grow_in(node: Node3D) -> void:
 # ---------------------------------------------------------------- crabs
 
 var _slots := {}             # session id -> its place in the row of crabs sharing a home
+var _generated_at := 0.0     # world.json's time (unix seconds), to tell how long a session has been quiet
 
 
 func _sync_crabs() -> void:
@@ -357,6 +364,12 @@ func _spawn_crab(s: Dictionary) -> Node3D:
 	crab.setup(_sprite_dir(), s["id"], _crab_title(s), colour, 1.0)
 	crab.place(_home(s, crab))
 	_crabs[s["id"]] = crab
+	# A session quiet for a while (an open pane nobody is typing in) starts asleep
+	var last := str(s.get("lastActivity", ""))
+	if last.length() >= 19 and _generated_at > 0.0:
+		var quiet: float = _generated_at - Time.get_unix_time_from_datetime_string(last.substr(0, 19))
+		if quiet > Crab.SLEEP_AFTER:
+			crab.doze()
 	return crab
 
 

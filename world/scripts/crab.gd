@@ -118,6 +118,12 @@ func act(pos: Vector3, action: String, label: String = "") -> void:
 		_next()
 
 
+## Asleep at once (its session has been quiet since before the crab was made).
+func doze() -> void:
+	_quiet = SLEEP_AFTER
+	_play("sleep")
+
+
 ## Acts where it stands (a reply, a prompt, an orchestrator's instruction): the action's clip and a caption for a while.
 func emote(action: String, label: String = "") -> void:
 	act(position, action, label)

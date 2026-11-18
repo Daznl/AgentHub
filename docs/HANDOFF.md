@@ -32,7 +32,7 @@ Tests: `RunTreeViewTests`, `RunTreePanelTests` (renders off screen, checks green
 
 ## Side piece, 2026-11-18: 3D world (experiment)
 
-Branch `feature/world-3d`, worktree `C:\data\agenthub\worktrees\AgentHub\world-3d`, not pushed. The owner wants the coding space in 3D: every project's files, branches, sessions, APIs, frontends, Azure and Snowflake, all connected and explorable. Every running session should be a crab that moves with each tool call, and orchestrators should hover over their sessions.
+Branch `feature/world-3d` (pushed, no pull request yet), worktree `C:\data\agenthub\worktrees\AgentHub\world-3d`. The owner wants the coding space in 3D: every project's files, branches, sessions, APIs, frontends, Azure and Snowflake, all connected and explorable. Every running session should be a crab that moves with each tool call, and orchestrators should hover over their sessions.
 
 Built (see `docs/WORLD_3D.md`):
 - **🌐 World** in the main header (the Timeline's 🌐 3D opens the same world) starts `WorldService` and Godot.
@@ -46,7 +46,19 @@ Built (see `docs/WORLD_3D.md`):
 
 Checked on real data: 4 projects, 1,203 commits, 5 live crabs. Two parallel AgentHub sessions show as separate crabs, and the feed carries both. Screenshots are in `C:\data\agenthub\uitest\` (`world-real.png`, `world-real-crab.png`, `world-sample*.png`).
 
-First read of all four projects takes 81 s: squash matching took 57 s in contractor-management and transcripts 37 s in Raptor. It is cached afterwards, and the service log `C:\data\agenthub\world\world-service.log` has the timings.
+**The owner's first try showed an empty world.** Two causes, both fixed:
+- The service resolved all 8 registered repositories one after another before drawing any of them.
+- The owner's Raptor session runs in a Cockpit pane but had been quiet for over 15 minutes, so it did not count as live.
+
+Now:
+- Every session whose AgentHub session host is still running counts as live, in any AgentHub copy. A quiet one starts as a sleeping crab.
+- Projects are resolved four at a time, live ones first, and each island appears as soon as its files are listed.
+- Godot's header lists the projects still being read.
+- `AgentHub.exe --world` opens the world at start-up.
+
+On this computer, the first islands and live crabs appear within about 20 s, and all 9 projects' trees within about 4 minutes. The slowest steps are squash matching (up to 96 s on contractor-management) and transcripts (49 s on Raptor). After that everything is cached. The service log `C:\data\agenthub\world\world-service.log` has the timings per step.
+
+**Testing it beside the normal AgentHub:** run the worktree's Debug build with `AGENTHUB_SETTINGS_DIR=C:\data\agenthub\world-test\settings` (a copy of the owner's settings with the pane layout cleared) and `--world`.
 
 Tests:
 - `WorldSnapshotTests` (live ones opt in), `TranscriptActionsTests`;
@@ -55,9 +67,13 @@ Tests:
 Owner's rule: the world hooks only into AgentHub. Snowflake, Azure and other connections are worked out from the repositories' code, never by connecting to those services.
 
 Not done:
-- Clicking **🌐 World** in the running app by hand (the launch path is covered by the live test). It is not on the taskbar install.
+- The owner has not yet confirmed the fixed world looks right. It is not on the taskbar install.
 - An orchestrator over a real run has not been seen (only in the sample).
+- The first read is slow on large repositories. Squash matching could be skipped for the world or done last.
 - Next is stage 5: resources found in the code, on the hub. See the Next section of `docs/WORLD_3D.md`.
+- Questions for the owner:
+  - Open a pull request, or keep this as an experiment branch?
+  - Faster world refresh for live sessions?
 
 ## What the owner asked for
 
