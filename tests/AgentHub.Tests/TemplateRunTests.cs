@@ -68,7 +68,18 @@ public class TemplateRunTests
 #pragma warning disable CS0067 // a scripted worker's context never changes
         public event Action<ContextReading?>? ContextChanged;
 #pragma warning restore CS0067
-        public void Start(string commandLine, string workingDirectory, string title, string sessionName) { Started.Add($"{commandLine} in {workingDirectory}"); IsRunning = true; LastReply = null; }
+        /// <summary>How long a started session takes to report running, as a hosted one does while its host process starts.</summary>
+        public TimeSpan StartsAfter { get; set; }
+        /// <summary>A started session never comes up (its launch failed).</summary>
+        public bool NeverStarts { get; set; }
+        public void Start(string commandLine, string workingDirectory, string title, string sessionName)
+        {
+            Started.Add($"{commandLine} in {workingDirectory}");
+            LastReply = null;
+            if (NeverStarts) return;
+            if (StartsAfter <= TimeSpan.Zero) { IsRunning = true; return; }
+            _ = Task.Run(async () => { await Task.Delay(StartsAfter); IsRunning = true; });
+        }
         public void Stop() { Stops++; IsRunning = false; Exited?.Invoke(); }
         public void Die() { IsRunning = false; Exited?.Invoke(); }
         public Task SubmitAsync(string prompt)
@@ -443,6 +454,46 @@ public class TemplateRunTests
         await o.GoAsync("s2-session"); // a new-session step brings one back
         await Until(() => o.Run.Cause == PauseCause.Question);
         Assert.Single(worker.Started);
+        Assert.Equal("do s2-build", worker.Submitted[^1]);
+    }
+
+    [Fact]
+    public async Task A_new_session_that_takes_a_while_to_start_does_not_stop_the_run()
+    {
+        // Tuesday run 2026-11-18: close-session, new-session, then the next step found no session yet (its host was still
+        // starting) and paused with "No worker session is running", waiting for Go for no reason.
+        var worker = new ScriptedWorker { Obeys = true, StartsAfter = TimeSpan.FromMilliseconds(400) };
+        var brain = new ScriptedBrain();
+        using var o = Attach(worker, brain);
+        o.SessionStartTimeout = TimeSpan.FromSeconds(5);
+
+        await o.GoAsync();
+        await Until(() => o.Run!.State == RunState.Paused);
+
+        Assert.Equal(PauseCause.Question, o.Run!.Cause); // the template's own question, not a problem
+        Assert.Equal("s2-check", o.Run.Current!.Step.Id);
+        Assert.Equal("do s2-build", worker.Submitted[^1]);
+    }
+
+    [Fact]
+    public async Task A_new_session_that_never_starts_pauses_the_run_saying_so()
+    {
+        var worker = new ScriptedWorker { Obeys = true };
+        var brain = new ScriptedBrain();
+        using var o = Attach(worker, brain);
+        o.SessionStartTimeout = TimeSpan.FromMilliseconds(300);
+        worker.NeverStarts = true;
+
+        await o.GoAsync("s2-session");
+        await Until(() => o.Run!.State == RunState.Paused);
+
+        Assert.Equal(PauseCause.Problem, o.Run!.Cause);
+        Assert.Equal("s2-session", o.Run.Current!.Step.Id); // not counted done for a session that never came: Go tries again
+        Assert.Contains("did not start", o.Run.PauseReason);
+
+        worker.NeverStarts = false;
+        await o.GoAsync();
+        await Until(() => o.Run.Cause == PauseCause.Question);
         Assert.Equal("do s2-build", worker.Submitted[^1]);
     }
 

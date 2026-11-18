@@ -115,7 +115,14 @@ public sealed partial class PaneOrchestrator
                             PauseForProblem(run, "AgentHub does not know how this pane's session was started, so it cannot start a new one. Start one in the pane, then go on from the next step.");
                             return;
                         }
-                        if (!await RestartForRunAsync(start)) return;
+                        switch (await RestartForRunAsync(start))
+                        {
+                            case null: return; // detached meanwhile
+                            case false:
+                                // Not done: Go tries again. A session the owner starts by hand is used from the next step.
+                                PauseForProblem(run, $"The new session did not start within {SessionStartTimeout.TotalSeconds:0} s. Press Go to try again, or start one in the pane and go on from the next step.");
+                                return;
+                        }
                         CompleteStep(run, at);
                         continue;
 
@@ -246,21 +253,23 @@ public sealed partial class PaneOrchestrator
         AddExchange(ExchangeKind.Note, $"Run paused at {run.Progress}. {problem}");
     }
 
-    /// <summary>A new-session step: a fresh session in the pane, started as the last one was. False when the orchestrator was detached meanwhile.</summary>
-    private async Task<bool> RestartForRunAsync(SessionLaunch launch)
+    /// <summary>
+    /// A new-session step: a fresh session in the pane, started as the last one was. True once it runs, false when it did
+    /// not come up in time, null when the orchestrator was detached meanwhile.
+    /// </summary>
+    private async Task<bool?> RestartForRunAsync(SessionLaunch launch)
     {
         await _gate.WaitAsync();
         try
         {
-            if (_disposeCts.IsCancellationRequested) return false;
+            if (_disposeCts.IsCancellationRequested) return null;
             _restarting = true;
             _handoffRequested = false;
             Changed?.Invoke();
             AddExchange(ExchangeKind.Note, $"Starting session #{_session + 1}: {launch.CommandLine} in {launch.WorkingDirectory}.");
-            await RestartWorkerAsync(launch);
-            return true;
+            return await RestartWorkerAsync(launch);
         }
-        catch (OperationCanceledException) { return false; }
+        catch (OperationCanceledException) { return null; }
         finally
         {
             _restarting = false;
