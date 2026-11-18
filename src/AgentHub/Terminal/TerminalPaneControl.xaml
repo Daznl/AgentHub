@@ -1,7 +1,8 @@
 ﻿<UserControl x:Class="AgentHub.Terminal.TerminalPaneControl"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:terminal="clr-namespace:AgentHub.Terminal">
+             xmlns:terminal="clr-namespace:AgentHub.Terminal"
+             xmlns:controls="clr-namespace:AgentHub.Controls">
     <UserControl.Resources>
         <!-- Launcher step card: active (list open), done (one line + Change) or pending (dimmed) -->
         <Style x:Key="StepCard" TargetType="Border">
@@ -109,6 +110,9 @@
                              AutomationProperties.Name="Handoff limit, per cent of the context window" />
                     <TextBlock Text="%" Foreground="#C4B5FD" FontSize="10" VerticalAlignment="Center" Margin="2,0,0,0" />
                 </StackPanel>
+                <Button x:Name="OrchestratorTreeBtn" Click="OrchestratorTree_Click" Content="◨ Tree" Visibility="Collapsed"
+                        ToolTip="Show or hide the run tree beside this session: every stage and step, the one the run is at in blue, done ones green. Click a step for its details."
+                        Background="#221A3D" Foreground="#C4B5FD" Padding="8,2" FontSize="11" FontWeight="SemiBold" Margin="0,0,6,0" />
                 <Button x:Name="OrchestratorRunBtn" Click="OrchestratorRun_Click" Content="🗺 Run" Visibility="Collapsed"
                         ToolTip="Open the tree of the advanced template this orchestrator follows: where the run stands, ▶ Go, ⏸ Pause, and going on from any step"
                         Background="#221A3D" Foreground="#C4B5FD" Padding="8,2" FontSize="11" FontWeight="SemiBold" Margin="0,0,6,0" />
@@ -156,7 +160,15 @@
         </Grid>
     </Border>
 
-    <Border x:Name="PaneBorder" Grid.Row="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" ClipToBounds="True">
+    <!-- The session, and beside it the run tree of an orchestrator that follows an advanced template (◨ Tree in its box). -->
+    <Grid Grid.Row="1">
+    <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+    </Grid.ColumnDefinitions>
+    <controls:RunTreePanel x:Name="RunTree" Grid.Column="1" Visibility="Collapsed" Margin="6,0,0,0" />
+
+    <Border x:Name="PaneBorder" Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" ClipToBounds="True">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -321,5 +333,6 @@
             </Border>
         </Grid>
     </Border>
+    </Grid>
     </Grid>
 </UserControl>

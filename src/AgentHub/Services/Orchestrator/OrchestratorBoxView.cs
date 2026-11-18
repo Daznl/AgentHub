@@ -62,6 +62,12 @@ public sealed record OrchestratorBoxView(string Title, string State, string Note
     /// <summary>The orchestrator follows an advanced template: the box offers its tree (🗺 Run).</summary>
     public bool HasRun { get; init; }
 
+    /// <summary>The run, for the run tree beside the pane; null without one.</summary>
+    public TemplateRun? Run { get; init; }
+
+    /// <summary>Where the run stands (<see cref="RunTreeView.Stamp"/>), so the box is shown again whenever a step moves.</summary>
+    public string? RunStamp { get; init; }
+
     /// <summary>The box for an attached pane orchestrator.</summary>
     public static OrchestratorBoxView For(PaneOrchestrator o)
     {
@@ -75,7 +81,9 @@ public sealed record OrchestratorBoxView(string Title, string State, string Note
             HandoffThreshold = o.ContextThreshold,
             ContextUsed = used,
             OrchestratorContext = o.OrchestratorContext,
-            HasRun = o.Run is not null
+            HasRun = o.Run is not null,
+            Run = o.Run,
+            RunStamp = o.Run is { } tree ? RunTreeView.Stamp(tree) : null,
         };
     }
 

@@ -79,6 +79,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     public TerminalPaneControl()
     {
         InitializeComponent();
+        RunTree.CloseRequested += () => SetRunTreeOpen(false);
         RefreshContextFolder();
         ApplyHeaderMode(working: false);
         Terminal.SessionStarted += () =>
@@ -178,10 +179,45 @@ public partial class TerminalPaneControl : UserControl, IDisposable
 
     private void OrchestratorRun_Click(object sender, RoutedEventArgs e) => OrchestratorRunRequested?.Invoke(this);
 
+    /// <summary>The owner wants the run tree beside the session; kept for the pane's next run while AgentHub runs. Hidden at first.</summary>
+    private bool _runTreeOpen;
+
+    private void OrchestratorTree_Click(object sender, RoutedEventArgs e) => SetRunTreeOpen(!_runTreeOpen);
+
+    private void SetRunTreeOpen(bool open)
+    {
+        _runTreeOpen = open;
+        ShowRunTree(OrchestratorView);
+    }
+
+    // ◨ Tree in the box: the box's own button colours while the tree is hidden, lit while it shows.
+    private static readonly SolidColorBrush TreeBtnOff = Frozen(0x22, 0x1A, 0x3D);
+    private static readonly SolidColorBrush TreeBtnOffText = Frozen(0xC4, 0xB5, 0xFD);
+    private static readonly SolidColorBrush TreeBtnOn = Frozen(0x4C, 0x3A, 0x8C);
+    private static readonly SolidColorBrush TreeBtnOnText = Frozen(0xED, 0xE9, 0xFE);
+
+    /// <summary>The run tree beside the session: only for an orchestrator that follows an advanced template, and only when asked for.</summary>
+    private void ShowRunTree(OrchestratorBoxView? view)
+    {
+        var run = view?.Run;
+        OrchestratorTreeBtn.Visibility = run is null ? Visibility.Collapsed : Visibility.Visible;
+        OrchestratorTreeBtn.Background = _runTreeOpen ? TreeBtnOn : TreeBtnOff;
+        OrchestratorTreeBtn.Foreground = _runTreeOpen ? TreeBtnOnText : TreeBtnOffText;
+        System.Windows.Automation.AutomationProperties.SetName(OrchestratorTreeBtn, _runTreeOpen ? "Hide the run tree" : "Show the run tree");
+        if (run is null || !_runTreeOpen)
+        {
+            RunTree.Visibility = Visibility.Collapsed;
+            return;
+        }
+        RunTree.Show(run);
+        RunTree.Visibility = Visibility.Visible;
+    }
+
     public void ShowOrchestrator(OrchestratorBoxView? view)
     {
         var wasAttached = OrchestratorView is not null;
         OrchestratorView = view;
+        ShowRunTree(view);
         if (view is null)
         {
             OrchestratorBox.Visibility = Visibility.Collapsed;
