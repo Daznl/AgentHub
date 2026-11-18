@@ -644,6 +644,7 @@ public partial class MainWindow : Window
             window.Show();
         }
         window.ReviewCommand = ClaudeCommand;
+        window.GodotCommand = _settings.GodotCommand;
         window.CrabAnimated = _settings.AnimatedBackground && _settings.CrabMascot;
         if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
         window.Activate();

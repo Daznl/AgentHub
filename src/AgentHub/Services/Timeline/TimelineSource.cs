@@ -216,7 +216,7 @@ public static partial class TimelineSource
         }
     }
 
-    private static string NormalisePath(string path) =>
+    public static string NormalisePath(string path) =>
         Path.GetFullPath(path.Replace('/', Path.DirectorySeparatorChar)).TrimEnd(Path.DirectorySeparatorChar);
 
     private static string FolderName(string folder) =>

@@ -244,6 +244,7 @@ public partial class TimelineWindow : Window
             if (generation != _generation) return;
             _model = model;
             UpdateReviewButtons();
+            if (WorldIsOpen) await ExportWorldAsync(model);
 
             var signature = Signature(model);
             if (forced || signature != _signature)

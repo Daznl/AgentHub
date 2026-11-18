@@ -23,6 +23,7 @@ MainWindow (WPF)
     +-- TimelineWindow -------- TimelineSource (git log, for-each-ref, gh pr list, transcripts) -> TimelineBuilder (branch graph, attribution)
     |     +-- SquashMatcher     squash merges (no merge commit): pull request head -> squash commit, else git diff --numstat match
     |     +-- TimelineReview     checks + digest -> ClaudePrint -> scored report; rules go to ContextWindow as review hunks
+    |     +-- 🌐 3D              WorldSnapshotBuilder: model + worktrees + live panes -> C:\data\agenthub\world\<repo>\world.json -> Godot (world/), see WORLD_3D.md
     |
     +-- Multi-Session Cockpit (WPF Grid + Splitters)
          |

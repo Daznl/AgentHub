@@ -30,6 +30,14 @@ Branch `feature/run-tree-panel`. Owner asked for the run tree next to the termin
 
 Tests: `RunTreeViewTests`, `RunTreePanelTests` (renders off screen, checks green and blue pixels; `AGENTHUB_RENDER_DIR` saves the PNG), `tests/ui/run-tree-panel.ps1` (24 checks pass). On-screen screenshots were not taken: the screen was locked; `Grab` and `advanced-template-run.ps1`'s menu shot now skip on a locked screen instead of failing. **To do:** look at it on screen with a real run (emoji icons do not show in the off-screen render).
 
+## Side piece, 2026-11-18: 3D world (experiment)
+
+Branch `feature/world-3d`, worktree `C:\data\agenthub\worktrees\AgentHub\world-3d`. The owner wants the coding space in 3D: repos, sessions, files, APIs, frontends and Snowflake, all connected and explorable, starting with AgentHub's own GitHub sessions. Built stage 1: **🌐 3D** in the Timeline writes `world.json` on every refresh, and the Godot project `world/` draws it as a growing tree (see `docs/WORLD_3D.md`). Real export of this repository: 44 branches, 224 commits, 22 sessions. Screenshot: `C:\data\agenthub\uitest\world-3d.png`. Tests: `WorldSnapshotTests` (8, with the live export and live Godot launch), `world/tests/test_world.gd` (headless). Full suite 409 passing.
+
+Owner's rule: the world hooks only into AgentHub. Snowflake, Azure and other connections are worked out from the repositories' code, never by connecting to those services.
+
+Not done: clicking **🌐 3D** in the running app by hand (the launch path is covered by the live test); not on the taskbar install. Open question for the owner: a faster refresh (2 to 5 s) while the world is open.
+
 ## What the owner asked for
 
 An orchestrator that follows a planned sequence instead of improvising one: a tree of stages and steps (instruct the worker, wait for it, ask the owner, new session, close session, handoff, create branch, commit, merge, move work to a branch, open a pull request), shown like the Timeline tree but forward-looking; ticked off live; pausable at any time and resumable later; editable, also for later steps while a run is under way; and a helper crab that builds the sequence from a written plan.

@@ -75,6 +75,12 @@ public sealed class AppSettings
     public long ClaudeContextWindowTokens { get; set; } = 1_000_000;
 
     /// <summary>
+    /// The Godot command that draws the 3D world (🌐 3D in the Timeline): a full path, or a name looked up on PATH.
+    /// A .cmd launcher works too. Experimental (branch feature/world-3d).
+    /// </summary>
+    public string GodotCommand { get; set; } = "godot";
+
+    /// <summary>
     /// Context window fraction (0.40–0.95) at which a pane orchestrator (🧭 Orchestrate) hands its session off to a fresh one,
     /// when the picked workflow sets none. The field in the orchestrator box changes it live and saves it here for the next one.
     /// </summary>

@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "generatedAt": "2026-11-18T06:00:00+00:00",
+  "repo": { "name": "Sample", "root": "C:\\repos\\Sample", "trunk": "main", "isGit": true },
+  "rows": [
+    { "index": 0, "kind": "start", "time": "2026-11-10T01:00:00+00:00", "branch": "trunk" },
+    { "index": 1, "kind": "session", "time": "2026-11-11T01:00:00+00:00", "branch": "feature/login@1" },
+    { "index": 2, "kind": "commits", "time": "2026-11-12T01:00:00+00:00", "branch": "trunk" },
+    { "index": 3, "kind": "session", "time": "2026-11-13T01:00:00+00:00", "branch": "feature/api@1" },
+    { "index": 4, "kind": "session", "time": "2026-11-14T01:00:00+00:00", "branch": "feature/api@1" }
+  ],
+  "branches": [
+    { "key": "trunk", "name": "main", "isTrunk": true, "isImported": false, "isMerged": false, "isSquash": false, "isLocalOnly": false, "parent": null, "column": 0, "colour": 0, "startRow": 0, "endRow": 4, "mergeHash": null, "commitCount": 3 },
+    { "key": "feature/login@1", "name": "feature/login", "isTrunk": false, "isImported": false, "isMerged": true, "isSquash": false, "isLocalOnly": false, "parent": "trunk", "column": 1, "colour": 1, "startRow": 1, "endRow": 2, "mergeHash": "m000000000000000000000000000000000000000", "commitCount": 2 },
+    { "key": "feature/api@1", "name": "feature/api", "isTrunk": false, "isImported": false, "isMerged": false, "isSquash": false, "isLocalOnly": false, "parent": "trunk", "column": 1, "colour": 2, "startRow": 3, "endRow": 4, "mergeHash": null, "commitCount": 2 }
+  ],
+  "commits": [
+    { "hash": "a000000000000000000000000000000000000000", "short": "a000000", "parents": [], "time": "2026-11-10T01:00:00+00:00", "author": "Ada", "subject": "first", "branch": "trunk", "row": 0, "session": null },
+    { "hash": "b000000000000000000000000000000000000000", "short": "b000000", "parents": ["a000000000000000000000000000000000000000"], "time": "2026-11-11T01:00:00+00:00", "author": "Ada", "subject": "feat: login form", "branch": "feature/login@1", "row": 1, "session": "C:\\sessions\\one.jsonl" },
+    { "hash": "c000000000000000000000000000000000000000", "short": "c000000", "parents": ["b000000000000000000000000000000000000000"], "time": "2026-11-11T02:00:00+00:00", "author": "Ada", "subject": "test: login", "branch": "feature/login@1", "row": 1, "session": "C:\\sessions\\one.jsonl" },
+    { "hash": "m000000000000000000000000000000000000000", "short": "m000000", "parents": ["a000000000000000000000000000000000000000", "c000000000000000000000000000000000000000"], "time": "2026-11-12T01:00:00+00:00", "author": "Ada", "subject": "Merge pull request #1 from ada/feature/login", "branch": "trunk", "row": 2, "session": null },
+    { "hash": "d000000000000000000000000000000000000000", "short": "d000000", "parents": ["m000000000000000000000000000000000000000"], "time": "2026-11-13T01:00:00+00:00", "author": "Ada", "subject": "feat: api client", "branch": "feature/api@1", "row": 3, "session": "C:\\sessions\\two.jsonl" },
+    { "hash": "e000000000000000000000000000000000000000", "short": "e000000", "parents": ["d000000000000000000000000000000000000000"], "time": "2026-11-14T01:00:00+00:00", "author": "Ada", "subject": "feat: api retries", "branch": "feature/api@1", "row": 4, "session": "C:\\sessions\\three.jsonl" }
+  ],
+  "sessions": [
+    { "id": "C:\\sessions\\one.jsonl", "agent": "claude", "title": "Build the login form", "startedAt": "2026-11-11T00:50:00+00:00", "endedAt": "2026-11-11T02:10:00+00:00", "isLive": false, "folder": "C:\\repos\\Sample", "branch": "feature/login@1", "row": 1, "commits": ["b000000000000000000000000000000000000000", "c000000000000000000000000000000000000000"] },
+    { "id": "C:\\sessions\\two.jsonl", "agent": "codex", "title": "API client", "startedAt": "2026-11-13T00:50:00+00:00", "endedAt": "2026-11-13T01:10:00+00:00", "isLive": false, "folder": "C:\\wt\\api", "branch": "feature/api@1", "row": 3, "commits": ["d000000000000000000000000000000000000000"] },
+    { "id": "C:\\sessions\\three.jsonl", "agent": "claude", "title": "Retries", "startedAt": "2026-11-14T00:50:00+00:00", "endedAt": "2026-11-14T01:10:00+00:00", "isLive": true, "folder": "C:\\wt\\api", "branch": "feature/api@1", "row": 4, "commits": ["e000000000000000000000000000000000000000"] }
+  ],
+  "pullRequests": [
+    { "number": 1, "title": "Login form", "head": "feature/login", "base": "main", "state": "MERGED", "isDraft": false, "mergedAt": "2026-11-12T01:00:00+00:00", "mergeCommit": "m000000000000000000000000000000000000000", "author": "ada" },
+    { "number": 2, "title": "API client", "head": "feature/api", "base": "main", "state": "OPEN", "isDraft": false, "mergedAt": null, "mergeCommit": null, "author": "ada" }
+  ],
+  "worktrees": [
+    { "path": "C:\\repos\\Sample", "branch": "main", "head": "m000000000000000000000000000000000000000", "isMain": true },
+    { "path": "C:\\wt\\api", "branch": "feature/api", "head": "e000000000000000000000000000000000000000", "isMain": false }
+  ],
+  "panes": [
+    { "id": "20261114-010000-abcd1234", "title": "Terminal 1 · Claude Code", "folder": "C:\\wt\\api", "isAgent": true, "command": "claude", "startedAt": "2026-11-14T00:50:00+00:00" }
+  ]
+}
