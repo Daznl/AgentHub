@@ -104,9 +104,10 @@ try {
   $item = MenuItem '*Follow: Staged build (1 stage*4 steps)' 30
   Check ($null -ne $item) 'Follow: Staged build is in the menu, with its size'
   Start-Sleep -Milliseconds 600
-  $r = $btn.Current.BoundingRectangle
-  $bmp = New-Object System.Drawing.Bitmap 620, 300; $g = [System.Drawing.Graphics]::FromImage($bmp)
-  $g.CopyFromScreen([int]($r.Left - 420), [int]($r.Top - 10), 0, 0, $bmp.Size); $bmp.Save((Join-Path $Shots 'run-menu.png')); $g.Dispose(); $bmp.Dispose()
+  if (Get-Process LogonUI -ErrorAction SilentlyContinue) { '  SKIP  screenshot run-menu.png (the screen is locked)' } else {
+    $r = $btn.Current.BoundingRectangle
+    $bmp = New-Object System.Drawing.Bitmap 620, 300; $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.CopyFromScreen([int]($r.Left - 420), [int]($r.Top - 10), 0, 0, $bmp.Size); $bmp.Save((Join-Path $Shots 'run-menu.png')); $g.Dispose(); $bmp.Dispose() }
   Click $item
 
   "2. The orchestrator is on, the tree opens, and nothing happens until Go"

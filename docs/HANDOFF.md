@@ -20,6 +20,12 @@ Defaults taken without an answer: found folders show by themselves (no scan butt
 
 Branch `docs/setup-quickstart`. `bootstrap.ps1` now checks the real prerequisites (Windows 1809+, .NET SDK 8+, the .NET 8 Desktop Runtime, Git, WebView2), prints the `winget` command for each missing one, asks before installing, refreshes `PATH` and checks again. New switches: `-CheckOnly`, `-Yes`, `-NoLaunch`. README has a Quick start at the top and an "Install as a taskbar app" section; `CLAUDE.md` step 1 uses `bootstrap.cmd -CheckOnly`. Tested here: all-present path, a faked missing WebView2, and a full build. The winget install path itself is untested (winget source blocked on the IGO network, and this computer has everything).
 
+## Side piece, 2026-11-18: run tree beside the pane
+
+Branch `feature/run-tree-panel`. Owner asked for the run tree next to the terminal a run drives, small, toggled by a button above the session, blue for the current step, green for done, steps clickable for detail, vertical scroll. Built: **🌲 Tree** in the orchestrator box (only when it follows an advanced template) toggles `Controls/RunTreePanel` in a column right of the pane; rows from `RunTreeView` (same rows as the window, no Start/Done caps). `OrchestratorBoxView` carries `Run` and `RunStamp`, so the pane redraws when a step moves. Read-only: Go/Pause stay in the window. "Blue" is the app's accent cyan `#2FD4F5`, the colour the window already uses for **● NOW**, so the two views match; when paused the tree stays blue (the window turns amber).
+
+Tests: `RunTreeViewTests`, `RunTreePanelTests` (renders off screen, checks green and blue pixels; `AGENTHUB_RENDER_DIR` saves the PNG), `tests/ui/run-tree-panel.ps1` (24 checks pass). On-screen screenshots were not taken: the screen was locked; `Grab` and `advanced-template-run.ps1`'s menu shot now skip on a locked screen instead of failing. **To do:** look at it on screen with a real run (emoji icons do not show in the off-screen render).
+
 ## What the owner asked for
 
 An orchestrator that follows a planned sequence instead of improvising one: a tree of stages and steps (instruct the worker, wait for it, ask the owner, new session, close session, handoff, create branch, commit, merge, move work to a branch, open a pull request), shown like the Timeline tree but forward-looking; ticked off live; pausable at any time and resumable later; editable, also for later steps while a run is under way; and a helper crab that builds the sequence from a written plan.
