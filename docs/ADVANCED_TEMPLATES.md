@@ -175,7 +175,7 @@ Step by step:
 - **Steps for the worker** (`instruct`, the git kinds, `handoff`): the orchestrator words the instruction; when the worker's turn ends it judges the reply. If it words nothing, AgentHub sends the step's own instruction (`TemplateRun.WorkerInstruction`).
 - **`wait-for-worker`**: nothing is sent. The orchestrator judges the worker's latest reply at once; when the worker is still busy, at its turn end.
 - **`ask-owner`**: AgentHub puts the question in the orchestrator box and pauses. The owner's answer goes to the orchestrator, and `done` carries the run on.
-- **`new-session`**, **`close-session`**: AgentHub starts a fresh session in the pane, the way the last one was started, or ends the session. The orchestrator stays on the pane while the run is unfinished, session or no session.
+- **`new-session`**, **`close-session`**: AgentHub starts a fresh session in the pane, the way the last one was started, or ends the session. The orchestrator stays on the pane while the run is unfinished, session or no session. A new session counts as started once it runs, which for a session in its own host can take several seconds: AgentHub waits up to 90 s (`SessionStartTimeout`), then 4 s more for its prompt, and goes on by itself. Only a session that never comes up pauses the run, at the new-session step, so Go tries again. (Before 2026-11-18 it waited a fixed 4 s; a slower host start paused the run at the next step with "No worker session is running" for no reason.)
 
 Pausing and going on:
 

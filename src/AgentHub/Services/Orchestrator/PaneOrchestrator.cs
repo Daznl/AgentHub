@@ -216,8 +216,14 @@ public sealed partial class PaneOrchestrator : IDisposable
     public ContextReading? LatestContext => _worker.LatestContextReading;
     /// <summary>A handoff turn that takes longer than this is cut short and the fresh session started anyway.</summary>
     public TimeSpan HandoffTimeout { get; set; } = TimeSpan.FromMinutes(10);
-    /// <summary>Time for a fresh CLI to show its prompt before its first instruction is typed.</summary>
+    /// <summary>Time for a fresh CLI to show its prompt before its first instruction is typed, counted once its session runs.</summary>
     public TimeSpan StartupDelay { get; set; } = TimeSpan.FromSeconds(4);
+    /// <summary>
+    /// How long a started session may take to report running. A hosted session runs only once its host process has started
+    /// and connected, which can take several seconds (Tuesday run 2026-11-18: longer than the old fixed wait, and the run
+    /// paused at the next step for "no worker session").
+    /// </summary>
+    public TimeSpan SessionStartTimeout { get; set; } = TimeSpan.FromSeconds(90);
     /// <summary>Time for the old CLI to go after it was stopped.</summary>
     public TimeSpan StopDelay { get; set; } = TimeSpan.FromMilliseconds(2500);
 
@@ -615,7 +621,11 @@ public sealed partial class PaneOrchestrator : IDisposable
             Changed?.Invoke();
 
             AddExchange(ExchangeKind.Note, $"Session #{_session} ended ({why}); starting session #{_session + 1}: {launch.Value.CommandLine} in {launch.Value.WorkingDirectory}.");
-            await RestartWorkerAsync(launch.Value);
+            if (!await RestartWorkerAsync(launch.Value))
+            {
+                AddExchange(ExchangeKind.Note, $"Session #{_session} did not start within {SessionStartTimeout.TotalSeconds:0} s. Start one in the pane; the orchestrator stays on.");
+                return;
+            }
         }
         catch (OperationCanceledException) { return; }
         finally
@@ -653,8 +663,10 @@ public sealed partial class PaneOrchestrator : IDisposable
     /// <summary>
     /// Ends the pane's session (when one runs) and starts a fresh one the same way, counted as the next session. The caller
     /// holds <see cref="_gate"/> and has set <see cref="_restarting"/>, so the session's end is not taken for the owner's.
+    /// Returns once the new session runs and has had <see cref="StartupDelay"/> to show its prompt; false when it did not
+    /// come up within <see cref="SessionStartTimeout"/>.
     /// </summary>
-    private async Task RestartWorkerAsync(SessionLaunch launch)
+    private async Task<bool> RestartWorkerAsync(SessionLaunch launch)
     {
         if (_worker.IsRunning)
         {
@@ -672,8 +684,15 @@ public sealed partial class PaneOrchestrator : IDisposable
         _expectExit = false;
         _freshSession = true;
         _worker.Start(launch.CommandLine, launch.WorkingDirectory, launch.Title, launch.SessionName);
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        while (!_worker.IsRunning && waited.Elapsed < SessionStartTimeout)
+            await Task.Delay(SessionStartPoll, _disposeCts.Token);
+        if (!_worker.IsRunning) return false;
         await Task.Delay(StartupDelay, _disposeCts.Token);
+        return true;
     }
+
+    private static readonly TimeSpan SessionStartPoll = TimeSpan.FromMilliseconds(100);
 
     private string? ReadHandoff()
     {
