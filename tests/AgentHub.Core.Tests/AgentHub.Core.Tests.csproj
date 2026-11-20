@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Tests of AgentHub.Core and AgentHub.Hosting that need no screen: run on Windows and on Linux (docs/linux/PLAN.md).
-       Tests of the Windows app's screens and its session host stay in AgentHub.Tests. -->
+  <!-- Tests of AgentHub.Core, AgentHub.Hosting and the session host that need no screen: run on Windows and on Linux
+       (docs/linux/PLAN.md). Tests of the Windows app's screens stay in AgentHub.Tests. -->
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -12,6 +12,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AgentHub.Core\AgentHub.Core.csproj" />
     <ProjectReference Include="..\..\src\AgentHub.Hosting\AgentHub.Hosting.csproj" />
+    <!-- The session host lands beside the tests, for SessionHostLiveTests (a real host, as the app runs it) -->
+    <ProjectReference Include="..\..\src\AgentHub.SessionHost\AgentHub.SessionHost.csproj" />
   </ItemGroup>
 
   <ItemGroup>

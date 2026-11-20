@@ -85,12 +85,12 @@ public sealed class RunRecord
 }
 
 /// <summary>
-/// The runs kept on this computer: <c>C:\data\agenthub\runs\&lt;id&gt;\run.json</c> (<c>AGENTHUB_RUNS_DIR</c> replaces the
+/// The runs kept on this computer: <c>runs\&lt;id&gt;\run.json</c> in the data folder (<c>AGENTHUB_RUNS_DIR</c> replaces the
 /// folder). Outside any project: a run is this owner's work in progress, not part of the repository.
 /// </summary>
 public sealed class RunStore
 {
-    public const string DefaultRoot = @"C:\data\agenthub\runs";
+    public static string DefaultRoot { get; } = AgentHub.Hosting.AgentHubData.Folder("runs");
     private const string FileName = "run.json";
 
     private static readonly JsonSerializerOptions Json = new()

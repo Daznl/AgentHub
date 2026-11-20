@@ -13,7 +13,7 @@ namespace AgentHub.Services.Instructions;
 public static class ClaudePrint
 {
     /// <summary>Where the CLI runs: an empty folder, so no repository's own CLAUDE.md or settings are picked up.</summary>
-    public const string WorkingDirectory = @"C:\data\agenthub\review";
+    public static string WorkingDirectory { get; } = AgentHub.Hosting.AgentHubData.Folder("review");
 
     /// <summary>Generous: a large request can take a few minutes, and the windows show the time running.</summary>
     public static readonly TimeSpan Timeout = TimeSpan.FromMinutes(10);

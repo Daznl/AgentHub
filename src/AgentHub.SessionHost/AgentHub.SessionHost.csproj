@@ -1,8 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- One process per Cockpit session. Owns the pseudo-console and the CLI so AgentHub can close, update and reattach. -->
+  <!-- One process per Cockpit session. Owns the pseudo-terminal and the CLI so AgentHub can close, update and reattach.
+       Plain net8.0: Windows (pseudo-console, named pipe) and Linux (pseudo-terminal, Unix socket), docs/linux/PLAN.md. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>AgentHub.SessionHost</RootNamespace>

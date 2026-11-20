@@ -11,7 +11,7 @@ namespace AgentHub.Hosting;
 /// relays and buffers) and as decoded text (what a terminal view writes).
 /// </summary>
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-public sealed class ConPtySession : IDisposable
+public sealed class ConPtySession : IPty
 {
     private IntPtr _hPC = IntPtr.Zero;
     private IntPtr _hProcess = IntPtr.Zero;

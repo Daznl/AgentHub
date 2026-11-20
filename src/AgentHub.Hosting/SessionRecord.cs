@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 namespace AgentHub.Hosting;
 
 /// <summary>
-/// One hosted session as both sides know it: <c>C:\data\agenthub\sessions\&lt;id&gt;\session.json</c>. AgentHub writes it
+/// One hosted session as both sides know it: <c>sessions\&lt;id&gt;\session.json</c> in the data folder (<see cref="AgentHubData"/>). AgentHub writes it
 /// before starting the host (what to run, where, how big); the host fills in its own process id and the CLI's, then the
 /// exit code; AgentHub adds the transcript path once the context badge has found it.
 /// </summary>
@@ -63,7 +63,7 @@ public sealed class ScreenSnapshot
 /// <summary>Where session records live and how both processes find each other through them.</summary>
 public sealed class SessionStore
 {
-    public const string DefaultRoot = @"C:\data\agenthub\sessions";
+    public static string DefaultRoot { get; } = AgentHubData.Folder("sessions");
     public const string HostProcessName = "AgentHub.SessionHost";
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
@@ -162,12 +162,31 @@ public sealed class SessionStore
     public static bool IsHostAlive(SessionRecord record)
     {
         if (record.HostPid <= 0) return false;
+        if (OperatingSystem.IsLinux()) return IsHostAliveOnLinux(record.HostPid);
         try
         {
             using var process = Process.GetProcessById(record.HostPid);
             return string.Equals(process.ProcessName, HostProcessName, StringComparison.OrdinalIgnoreCase) && !process.HasExited;
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Linux keeps only 15 characters of a process name, so the host is known by its command line instead: the host
+    /// program itself, or <c>dotnet AgentHub.SessionHost.dll</c>. An ended process (gone, or a zombie with an empty
+    /// command line) is not alive.
+    /// </summary>
+    private static bool IsHostAliveOnLinux(int pid)
+    {
+        try
+        {
+            var args = File.ReadAllText($"/proc/{pid}/cmdline").Split('\0', StringSplitOptions.RemoveEmptyEntries);
+            return args.Take(2).Any(a => Path.GetFileName(a) is HostProcessName or HostProcessName + ".dll");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return false;
         }

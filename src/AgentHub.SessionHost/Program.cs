@@ -1,15 +1,15 @@
-using System.Diagnostics;
-using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using AgentHub.Hosting;
 
 namespace AgentHub.SessionHost;
 
 /// <summary>
-/// <c>AgentHub.SessionHost.exe &lt;session id&gt; [--root &lt;sessions folder&gt;]</c>. Reads the session record AgentHub wrote,
-/// runs its command on a pseudo-console, keeps the last bytes of output, and serves one client at a time on the session's
-/// named pipe. Lives exactly as long as the CLI: when that exits, the host records the exit code, keeps the replay on
-/// disk, tells the attached client if any, and stops. AgentHub closing is a detach, nothing more.
+/// <c>AgentHub.SessionHost &lt;session id&gt; [--root &lt;sessions folder&gt;]</c>. Reads the session record AgentHub wrote,
+/// runs its command on a pseudo-terminal (Windows pseudo-console, Linux pseudo-terminal), keeps the last bytes of output,
+/// and serves one client at a time on the session's pipe or socket (<see cref="SessionTransport"/>). Lives exactly as long
+/// as the CLI: when that exits, the host records the exit code, keeps the replay on disk, tells the attached client if
+/// any, and stops. AgentHub closing is a detach, nothing more.
 /// </summary>
 public static class Program
 {
@@ -22,6 +22,10 @@ public static class Program
             Console.Error.WriteLine("usage: AgentHub.SessionHost <session id> [--root <sessions folder>]");
             return 2;
         }
+
+        // Linux: leave the starter's session and process group, so a Ctrl+C or hang-up meant for whoever started the
+        // host (a terminal, the daemon) never reaches it. Windows hosts already run apart from AgentHub.
+        if (OperatingSystem.IsLinux()) setsid();
 
         var id = args[0];
         string? root = null;
@@ -40,6 +44,9 @@ public static class Program
         return await host.RunAsync();
     }
 
+    [DllImport("libc")]
+    private static extern int setsid();
+
     private sealed class Host
     {
         private readonly SessionStore _store;
@@ -47,7 +54,7 @@ public static class Program
         private readonly ReplayBuffer _buffer = new();
         private readonly object _lock = new();
         private Channel<SessionFrame>? _client;
-        private ConPtySession? _session;
+        private IPty? _session;
         private readonly TaskCompletionSource<int> _exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _cols;
         private int _rows;
@@ -65,7 +72,7 @@ public static class Program
             Log($"host {Environment.ProcessId} starting: {_record.CommandLine} in {_record.WorkingDirectory} ({_cols}x{_rows})");
             try
             {
-                _session = ConPtySession.Start(_record.CommandLine, _record.WorkingDirectory, _cols, _rows);
+                _session = Pty.Start(_record.CommandLine, _record.WorkingDirectory, _cols, _rows, OnOutput, OnExited);
             }
             catch (Exception ex)
             {
@@ -80,29 +87,25 @@ public static class Program
             _record.HostPid = Environment.ProcessId;
             _record.ProcessId = _session.ProcessId;
             _store.Save(_record);
-            Log($"process {_session.ProcessId} running");
-
-            _session.OutputBytesReceived += OnOutput;
-            _session.ProcessExited += OnExited;
+            Log($"process {_session.ProcessId} running; listening at {SessionTransport.Address(_record.Id)}");
 
             try
             {
                 while (true)
                 {
-                    using var server = new NamedPipeServerStream(SessionStore.PipeName(_record.Id), PipeDirection.InOut, 1,
-                        PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
                     using var cancelWait = new CancellationTokenSource();
-                    var connect = server.WaitForConnectionAsync(cancelWait.Token);
+                    var connect = SessionTransport.AcceptAsync(_record.Id, cancelWait.Token);
                     var done = await Task.WhenAny(connect, _exited.Task);
                     if (done != connect)
                     {
                         cancelWait.Cancel();
-                        try { await connect; } catch (OperationCanceledException) { }
+                        try { (await connect).Dispose(); }
+                        catch (Exception ex) when (ex is OperationCanceledException or IOException or System.Net.Sockets.SocketException) { }
                         break; // the CLI ended while nobody was attached
                     }
 
-                    await connect;
-                    await ServeAsync(server);
+                    await using var client = await connect;
+                    await ServeAsync(client);
                     if (_exited.Task.IsCompleted) break;
                 }
             }
@@ -137,7 +140,7 @@ public static class Program
         }
 
         /// <summary>Talks to one attached client until it detaches, drops off, or has been told the CLI exited.</summary>
-        private async Task ServeAsync(NamedPipeServerStream pipe)
+        private async Task ServeAsync(Stream pipe)
         {
             var channel = Channel.CreateUnbounded<SessionFrame>(new UnboundedChannelOptions { SingleReader = true });
             try
@@ -195,7 +198,12 @@ public static class Program
             finally
             {
                 lock (_lock) { if (ReferenceEquals(_client, channel)) _client = null; }
-                try { pipe.Disconnect(); } catch { }
+                try
+                {
+                    if (pipe is System.IO.Pipes.NamedPipeServerStream server) server.Disconnect();
+                    else pipe.Dispose();
+                }
+                catch { }
             }
         }
 

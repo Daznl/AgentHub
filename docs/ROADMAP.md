@@ -84,7 +84,7 @@
 
 ## Headless on Ubuntu (in progress, nothing runs headless yet)
 
-- [ ] AgentHub without windows on an Ubuntu computer reached over SSH, driven by Claude Code through an MCP server and an `agenthub` command-line tool; same functionality as the Windows app, the owner still answers the owner's questions; the Windows app unchanged. Plan, decisions and slices: `docs/linux/PLAN.md`. Done: the plan; slice 1, the screen-free code in `AgentHub.Core` (net8.0) built and tested on Linux in CI. Next: slice 2, the portable session host
+- [ ] AgentHub without windows on an Ubuntu computer reached over SSH, driven by Claude Code through an MCP server and an `agenthub` command-line tool; same functionality as the Windows app, the owner still answers the owner's questions; the Windows app unchanged. Plan, decisions and slices: `docs/linux/PLAN.md`. Done: the plan; slice 1, the screen-free code in `AgentHub.Core` (net8.0) built and tested on Linux in CI; slice 2, the session host on Linux (pseudo-terminal, Unix socket, data folder), its live tests run with bash on Linux in CI. Next: slice 3, the session controller
 
 ## Later
 

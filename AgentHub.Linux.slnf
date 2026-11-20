@@ -4,6 +4,7 @@
     "projects": [
       "src\\AgentHub.Core\\AgentHub.Core.csproj",
       "src\\AgentHub.Hosting\\AgentHub.Hosting.csproj",
+      "src\\AgentHub.SessionHost\\AgentHub.SessionHost.csproj",
       "tests\\AgentHub.Core.Tests\\AgentHub.Core.Tests.csproj"
     ]
   }

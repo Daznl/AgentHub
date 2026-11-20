@@ -50,8 +50,12 @@ AgentHub.Core (class library, net8.0: everything that needs no screen; also buil
     +-- IBuildWorker (the app's pane implements it as PaneBuildWorker)
 
 AgentHub.Hosting (class library, net8.0, shared by both executables and Core)
-    +-- ConPtySession / ConPtyNative (kernel32 CreatePseudoConsole, CreateProcess, anonymous pipes; marked Windows-only)
-    +-- SessionFrame (pipe protocol), ReplayBuffer, SessionRecord / SessionStore (C:\data\agenthub\sessions\<id>\)
+    +-- IPty: ConPtySession / ConPtyNative (kernel32 CreatePseudoConsole, CreateProcess, anonymous pipes; Windows-only)
+    |         UnixPty / UnixNative (posix_openpt, posix_spawn in a new session, ioctl resize; Linux-only)
+    +-- SessionTransport: named pipe agenthub-session-<id> on Windows; Unix socket under $XDG_RUNTIME_DIR on Linux
+    +-- SessionFrame (protocol), ReplayBuffer, SessionRecord / SessionStore (<data folder>\sessions\<id>\)
+    +-- HostedSession (the client) and SessionHostService (starts hosts from a versioned copy, finds live ones)
+    +-- AgentHubData: the data folder, C:\data\agenthub on Windows
 
 External tools
     +-- git

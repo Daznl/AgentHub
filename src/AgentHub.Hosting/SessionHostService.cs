@@ -1,21 +1,24 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
-using AgentHub.Hosting;
 
-namespace AgentHub.Terminal;
+namespace AgentHub.Hosting;
 
 /// <summary>
-/// Starts session hosts and finds the ones still running. The host executable ships beside AgentHub.exe but runs from
-/// <c>C:\data\agenthub\host\&lt;version&gt;\</c>, a copy keyed by its own bytes: a publish over the live folder then never
+/// Starts session hosts and finds the ones still running. The host executable ships beside AgentHub but runs from
+/// <c>host\&lt;version&gt;\</c> in the data folder, a copy keyed by its own bytes: a publish over the live folder then never
 /// touches a running host, and an old host keeps its old code while a newer AgentHub attaches to it.
 /// </summary>
 public sealed class SessionHostService
 {
-    public const string DefaultInstallRoot = @"C:\data\agenthub\host";
-    private const string HostFileName = "AgentHub.SessionHost";
+    public static string DefaultInstallRoot { get; } = AgentHubData.Folder("host");
+    private const string HostFileName = SessionStore.HostProcessName;
+
+    /// <summary>The host program: <c>AgentHub.SessionHost.exe</c> on Windows, <c>AgentHub.SessionHost</c> on Linux.</summary>
+    private static readonly string HostProgram = HostFileName + (OperatingSystem.IsWindows() ? ".exe" : "");
+
     private static readonly string[] HostFiles =
     [
-        HostFileName + ".exe", HostFileName + ".dll", HostFileName + ".runtimeconfig.json", HostFileName + ".deps.json", HostFileName + ".pdb",
+        HostProgram, HostFileName + ".dll", HostFileName + ".runtimeconfig.json", HostFileName + ".deps.json", HostFileName + ".pdb",
         "AgentHub.Hosting.dll", "AgentHub.Hosting.pdb"
     ];
 
@@ -115,10 +118,10 @@ public sealed class SessionHostService
 
     private string? Install(string bundled)
     {
-        var source = Path.Combine(bundled, HostFileName + ".exe");
+        var source = Path.Combine(bundled, HostProgram);
         if (!File.Exists(source))
         {
-            UnavailableReason = $"{HostFileName}.exe is not beside AgentHub.exe; sessions run inside AgentHub and end with it.";
+            UnavailableReason = $"{HostProgram} is not beside AgentHub{(OperatingSystem.IsWindows() ? ".exe" : "")}; sessions run inside AgentHub and end with it.";
             return null;
         }
 
@@ -126,7 +129,7 @@ public sealed class SessionHostService
         {
             var version = VersionKey(bundled);
             var dir = Path.Combine(_installRoot, version);
-            var target = Path.Combine(dir, HostFileName + ".exe");
+            var target = Path.Combine(dir, HostProgram);
             if (!File.Exists(target))
             {
                 var staging = dir + ".staging-" + Environment.ProcessId;

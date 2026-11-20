@@ -2,13 +2,13 @@ using System.IO;
 using System.Diagnostics;
 using System.Text;
 using AgentHub.Hosting;
-using AgentHub.Terminal;
 
 namespace AgentHub.Tests;
 
 /// <summary>
-/// Runs a real AgentHub.SessionHost (the one built beside this test assembly) with PowerShell inside, in a folder whose
-/// path has spaces: attach, type, detach, reattach and see the replay, exit, and find the record and replay on disk.
+/// Runs a real AgentHub.SessionHost (the one built beside this test assembly) with a shell inside, in a folder whose path
+/// has spaces: attach, type, detach, reattach from an offset and see the replay, resize, exit, and find the record and
+/// replay on disk. PowerShell on a Windows pseudo-console; bash on a Linux pseudo-terminal (docs/linux/PLAN.md slice 2).
 /// </summary>
 public sealed class SessionHostLiveTests : IDisposable
 {
@@ -17,6 +17,18 @@ public sealed class SessionHostLiveTests : IDisposable
     public void Dispose()
     {
         try { Directory.Delete(_root, recursive: true); } catch { }
+    }
+
+    /// <summary>What each system's shell is asked to do.</summary>
+    private static class Shell
+    {
+        public static string Command => OperatingSystem.IsWindows() ? "powershell.exe -NoLogo -NoProfile" : "bash --norc --noprofile";
+        public static string EchoSum(string tag, int a) => OperatingSystem.IsWindows() ? $"echo {tag}-$({a}+{a})\r" : $"echo {tag}-$(({a}+{a}))\r";
+        public static string EchoSumAndWidth(string tag, int a) => OperatingSystem.IsWindows()
+            ? $"echo {tag}-$({a}+{a})-$($Host.UI.RawUI.WindowSize.Width)\r"
+            : $"echo {tag}-$(({a}+{a}))-$(stty size | cut -d' ' -f2)\r";
+        public static string MissingProgram => "no-such-program-" + Guid.NewGuid().ToString("N") + (OperatingSystem.IsWindows() ? ".exe" : "");
+        public static string CannotStart => OperatingSystem.IsWindows() ? "CreateProcess failed" : "was not found";
     }
 
     private static async Task<string> WaitForAsync(Func<string> text, string marker, TimeSpan timeout)
@@ -31,7 +43,7 @@ public sealed class SessionHostLiveTests : IDisposable
         throw new TimeoutException($"'{marker}' did not appear within {timeout}. Output so far:\n{text()}");
     }
 
-    [LiveFact("powershell")]
+    [HostShellFact]
     public async Task Session_survives_detach_and_replays_on_reattach()
     {
         var sessions = Path.Combine(_root, "sessions here");
@@ -46,7 +58,7 @@ public sealed class SessionHostLiveTests : IDisposable
         var record = new SessionRecord
         {
             Id = SessionStore.NewId(),
-            CommandLine = "powershell.exe -NoLogo -NoProfile",
+            CommandLine = Shell.Command,
             WorkingDirectory = work,
             Title = "test",
             SessionName = "work folder",
@@ -68,7 +80,7 @@ public sealed class SessionHostLiveTests : IDisposable
         Assert.Equal((100, 30), (first.Welcome.Cols, first.Welcome.Rows));
         Assert.True(first.Offset >= 0);
 
-        first.Write("echo marker-one-$(1+1)\r");
+        first.Write(Shell.EchoSum("marker-one", 1));
         string Seen() { lock (output) return output.ToString(); }
         await WaitForAsync(Seen, "marker-one-2", TimeSpan.FromSeconds(30));
         await Task.Delay(300);
@@ -93,7 +105,7 @@ public sealed class SessionHostLiveTests : IDisposable
         second.ProcessExited += code => exited2.TrySetResult(code);
         second.Start();
         second.Resize(120, 40);
-        second.Write("echo marker-two-$(2+2)-$($Host.UI.RawUI.WindowSize.Width)\r");
+        second.Write(Shell.EchoSumAndWidth("marker-two", 2));
         string Seen2() { lock (output2) return output2.ToString(); }
         await WaitForAsync(Seen2, "marker-two-4-120", TimeSpan.FromSeconds(30));
 
@@ -136,14 +148,40 @@ public sealed class SessionHostLiveTests : IDisposable
         Assert.Empty(service.ListLive());
     }
 
-    [LiveFact("powershell")]
+    [HostShellFact]
+    public async Task The_shell_runs_in_the_working_folder_on_a_real_terminal()
+    {
+        var work = Path.Combine(_root, "work folder with spaces");
+        Directory.CreateDirectory(work);
+        var service = new SessionHostService(Path.Combine(_root, "s"), Path.Combine(_root, "i"), AppContext.BaseDirectory);
+        var record = new SessionRecord { Id = SessionStore.NewId(), CommandLine = Shell.Command, WorkingDirectory = work, Cols = 90, Rows = 25, StartedAt = DateTimeOffset.Now };
+
+        var session = await service.StartAsync(record);
+        var output = new StringBuilder();
+        session.OutputDataReceived += (text, _) => { lock (output) output.Append(text); };
+        session.Start();
+        string Seen() { lock (output) return output.ToString(); }
+
+        // The folder (a path with spaces, given as the working directory, never in the command line) and a terminal.
+        session.Write(OperatingSystem.IsWindows()
+            ? "echo \"cwd=$((Get-Location).Path)|\"\r"
+            : "echo \"cwd=$(pwd)|tty=$([ -t 0 ] && echo yes)|\"\r");
+        await WaitForAsync(Seen, $"cwd={work}|", TimeSpan.FromSeconds(30));
+        if (!OperatingSystem.IsWindows()) await WaitForAsync(Seen, "tty=yes|", TimeSpan.FromSeconds(10));
+
+        session.Kill();
+        session.Dispose();
+    }
+
+    [HostShellFact]
     public async Task Kill_ends_the_process_and_the_host()
     {
         var service = new SessionHostService(Path.Combine(_root, "s"), Path.Combine(_root, "i"), AppContext.BaseDirectory);
+        Directory.CreateDirectory(_root);
         var record = new SessionRecord
         {
             Id = SessionStore.NewId(),
-            CommandLine = "powershell.exe -NoLogo -NoProfile",
+            CommandLine = Shell.Command,
             WorkingDirectory = _root,
             StartedAt = DateTimeOffset.Now
         };
@@ -164,23 +202,24 @@ public sealed class SessionHostLiveTests : IDisposable
         Assert.Equal(code, service.Store.Load(record.Id)!.ExitCode);
     }
 
-    [LiveFact("powershell")]
+    [HostShellFact]
     public async Task A_command_that_cannot_start_reports_why()
     {
         var service = new SessionHostService(Path.Combine(_root, "s"), Path.Combine(_root, "i"), AppContext.BaseDirectory);
+        Directory.CreateDirectory(_root);
         var record = new SessionRecord
         {
             Id = SessionStore.NewId(),
-            CommandLine = "no-such-program-" + Guid.NewGuid().ToString("N") + ".exe",
+            CommandLine = Shell.MissingProgram,
             WorkingDirectory = _root,
             StartedAt = DateTimeOffset.Now
         };
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.StartAsync(record));
-        Assert.Contains("CreateProcess failed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(Shell.CannotStart, ex.Message, StringComparison.Ordinal);
         Assert.NotNull(service.Store.Load(record.Id)!.Error);
     }
 
-    [LiveFact("powershell")]
+    [HostShellFact]
     public async Task Attaching_to_a_session_whose_host_is_gone_fails_fast()
     {
         var service = new SessionHostService(Path.Combine(_root, "s"), Path.Combine(_root, "i"), AppContext.BaseDirectory);
@@ -188,5 +227,16 @@ public sealed class SessionHostLiveTests : IDisposable
         var watch = Stopwatch.StartNew();
         await Assert.ThrowsAnyAsync<Exception>(() => service.AttachAsync(record));
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"took {watch.Elapsed}");
+    }
+}
+
+/// <summary>A live host test: needs this system's shell (PowerShell on Windows, bash on Linux); skipped elsewhere.</summary>
+public sealed class HostShellFactAttribute : FactAttribute
+{
+    public HostShellFactAttribute()
+    {
+        if (OperatingSystem.IsWindows()) Skip = new LiveFactAttribute("powershell").Skip;
+        else if (OperatingSystem.IsLinux()) Skip = new LiveFactAttribute("bash").Skip;
+        else Skip = "Session hosts run on Windows and Linux only.";
     }
 }

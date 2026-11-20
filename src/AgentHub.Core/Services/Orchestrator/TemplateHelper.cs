@@ -50,7 +50,7 @@ public static class TemplateHelper
     public const int MaxSuggestions = 3;
 
     /// <summary>Where the CLI runs: a folder of its own, so no repository's CLAUDE.md or settings are picked up and its prompt file has a home.</summary>
-    public const string WorkingDirectory = @"C:\data\agenthub\template-helper";
+    public static string WorkingDirectory { get; } = AgentHub.Hosting.AgentHubData.Folder("template-helper");
 
     /// <summary>A plan of many stages, read from the project, can take a few minutes.</summary>
     public static readonly TimeSpan Timeout = TimeSpan.FromMinutes(10);

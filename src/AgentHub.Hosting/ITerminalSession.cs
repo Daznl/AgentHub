@@ -1,7 +1,7 @@
-namespace AgentHub.Terminal;
+namespace AgentHub.Hosting;
 
 /// <summary>
-/// What a terminal pane needs from the process behind it, whether that process runs in AgentHub (<see cref="LocalSession"/>)
+/// What a terminal pane needs from the process behind it, whether that process runs in AgentHub (the Windows app's <c>LocalSession</c>)
 /// or in a session host that outlives it (<see cref="HostedSession"/>). Events arrive on background threads.
 /// </summary>
 public interface ITerminalSession : IDisposable

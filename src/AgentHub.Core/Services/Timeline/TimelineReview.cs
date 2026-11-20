@@ -137,7 +137,7 @@ public static class ReviewTimings
 /// </summary>
 public static partial class TimelineReview
 {
-    public const string ReportRoot = @"C:\data\agenthub\timeline";
+    public static string ReportRoot { get; } = AgentHub.Hosting.AgentHubData.Folder("timeline");
 
     /// <summary>Newest sessions whose prompts and last reply go in full; older ones are summarised from their first prompt.</summary>
     public const int DetailedSessions = 25;

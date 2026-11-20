@@ -27,7 +27,7 @@ public sealed record ReviewPlan(IReadOnlyList<DiffSegment> Segments, IReadOnlyLi
 public static class InstructionReview
 {
     /// <summary>Where the CLI runs: an empty folder, so no repository's own CLAUDE.md or settings are picked up.</summary>
-    public const string WorkingDirectory = ClaudePrint.WorkingDirectory;
+    public static string WorkingDirectory => ClaudePrint.WorkingDirectory;
 
     /// <summary>Generous: a large file with many edits can take a few minutes, and the window shows the time running.</summary>
     public static readonly TimeSpan Timeout = ClaudePrint.Timeout;

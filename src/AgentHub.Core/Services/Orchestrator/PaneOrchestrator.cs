@@ -261,7 +261,7 @@ public sealed partial class PaneOrchestrator : IDisposable
 
     /// <summary>Where the orchestrator's own Claude session runs (its transcript), apart from the project's sessions.</summary>
     public static string DefaultSessionsRoot =>
-        Environment.GetEnvironmentVariable("AGENTHUB_PANE_ORCHESTRATORS_DIR") is { Length: > 0 } d ? d : @"C:\data\agenthub\pane-orchestrators";
+        Environment.GetEnvironmentVariable("AGENTHUB_PANE_ORCHESTRATORS_DIR") is { Length: > 0 } d ? d : AgentHub.Hosting.AgentHubData.Folder("pane-orchestrators");
 
     /// <summary>The real thing for a Cockpit pane: a Claude Code session on the owner's login reading the pane's folder.</summary>
     /// <param name="assumedWindowTokens">The orchestrator's own context window, for its bar (Claude Code does not record it).</param>

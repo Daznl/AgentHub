@@ -1,18 +1,17 @@
-using System.IO.Pipes;
 using System.Text;
 using System.Threading.Channels;
-using AgentHub.Hosting;
 
-namespace AgentHub.Terminal;
+namespace AgentHub.Hosting;
 
 /// <summary>
-/// A session running in an <c>AgentHub.SessionHost</c> process, reached over its named pipe. Attaching yields the host's
-/// replay of everything the process wrote so far (<see cref="ReplayText"/>); <see cref="Start"/> then streams live output.
-/// Detaching leaves the process running for the next attach; only <see cref="Kill"/> ends it.
+/// A session running in an <c>AgentHub.SessionHost</c> process, reached over its named pipe (Windows) or Unix socket
+/// (Linux), see <see cref="SessionTransport"/>. Attaching yields the host's replay of everything the process wrote so far
+/// (<see cref="ReplayText"/>); <see cref="Start"/> then streams live output. Detaching leaves the process running for the
+/// next attach; only <see cref="Kill"/> ends it.
 /// </summary>
 public sealed class HostedSession : ITerminalSession
 {
-    private readonly NamedPipeClientStream _pipe;
+    private readonly Stream _pipe;
     private readonly Channel<SessionFrame> _outgoing = Channel.CreateUnbounded<SessionFrame>(new UnboundedChannelOptions { SingleReader = true });
     private readonly Decoder _decoder = Encoding.UTF8.GetDecoder();
     private readonly object _lock = new();
@@ -22,7 +21,7 @@ public sealed class HostedSession : ITerminalSession
 
     private long _offset;
 
-    private HostedSession(NamedPipeClientStream pipe, SessionRecord record, WelcomeInfo welcome, byte[] replay)
+    private HostedSession(Stream pipe, SessionRecord record, WelcomeInfo welcome, byte[] replay)
     {
         _pipe = pipe;
         Record = record;
@@ -64,10 +63,9 @@ public sealed class HostedSession : ITerminalSession
     /// </summary>
     public static async Task<HostedSession> AttachAsync(SessionRecord record, TimeSpan timeout, long fromOffset = -1, CancellationToken cancellation = default)
     {
-        var pipe = new NamedPipeClientStream(".", SessionStore.PipeName(record.Id), PipeDirection.InOut, PipeOptions.Asynchronous);
+        var pipe = await SessionTransport.ConnectAsync(record.Id, timeout, cancellation).ConfigureAwait(false);
         try
         {
-            await pipe.ConnectAsync((int)timeout.TotalMilliseconds, cancellation).ConfigureAwait(false);
             await SessionFrame.Hello(Environment.ProcessId, fromOffset).WriteAsync(pipe, cancellation).ConfigureAwait(false);
 
             var first = await SessionFrame.ReadAsync(pipe, cancellation).ConfigureAwait(false)

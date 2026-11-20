@@ -58,10 +58,10 @@ public static class SessionFolderDiscovery
     }
 
     /// <summary>AgentHub's data folder: orchestrator sessions, the Template helper, reviews, test runs and scratch.</summary>
-    public const string AgentHubDataRoot = @"C:\data\agenthub";
+    public static string AgentHubDataRoot => AgentHub.Hosting.AgentHubData.Root;
 
     /// <summary>Git worktrees made for tasks inside <see cref="AgentHubDataRoot"/>: real project work, so they are offered.</summary>
-    public const string AgentHubWorktreesRoot = @"C:\data\agenthub\worktrees";
+    public static string AgentHubWorktreesRoot { get; } = AgentHub.Hosting.AgentHubData.Folder("worktrees");
 
     /// <summary>
     /// Folders AgentHub runs its own Claude sessions in (orchestrators, the Template helper, reviews, tests): AgentHub's
@@ -81,6 +81,7 @@ public static class SessionFolderDiscovery
         return new[]
             {
                 string.IsNullOrEmpty(profile) ? "" : Path.Combine(profile, "AppData"),
+                string.IsNullOrEmpty(profile) || OperatingSystem.IsWindows() ? "" : Path.Combine(profile, ".cache"),
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 Path.GetTempPath()

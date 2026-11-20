@@ -22,7 +22,7 @@ public sealed record ArchiveResult(int Copied, int Appended, int Superseded, lon
 /// </summary>
 public static class HistoryArchiver
 {
-    public const string DefaultRoot = @"C:\data\agenthub\history";
+    public static string DefaultRoot { get; } = AgentHub.Hosting.AgentHubData.Folder("history");
 
     /// <summary>Bytes compared just before the archived length to confirm the source only grew.</summary>
     private const int VerifyBytes = 4096;

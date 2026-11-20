@@ -175,12 +175,12 @@ public sealed class WorkflowCatalogue
 
     /// <summary>
     /// <c>workflows/local/</c> of the AgentHub repository this build came from (or Desktop\AgentHub); without a repository,
-    /// <c>C:\data\agenthub\workflows</c>. <c>AGENTHUB_WORKFLOWS_DIR</c> overrides it.
+    /// <c>workflows</c> in the data folder. <c>AGENTHUB_WORKFLOWS_DIR</c> overrides it.
     /// </summary>
     public static string DefaultOwnFolder() =>
         Environment.GetEnvironmentVariable("AGENTHUB_WORKFLOWS_DIR") is { Length: > 0 } custom ? custom
         : FindAgentHubRepository() is { } repo ? Path.Combine(repo, "workflows", LocalSubfolder)
-        : @"C:\data\agenthub\workflows";
+        : AgentHub.Hosting.AgentHubData.Folder("workflows");
 
     private static string? FindAgentHubRepository()
     {

@@ -16,7 +16,8 @@ jobs:
       - run: dotnet build AgentHub.sln --configuration Release --no-restore
       - run: dotnet test AgentHub.sln --configuration Release --no-build
 
-  # The projects that must build and pass on Linux too (docs/linux/PLAN.md): Core, Hosting and their tests.
+  # The projects that must build and pass on Linux too (docs/linux/PLAN.md): Core, Hosting, the session host and their
+  # tests, the live host tests included (bash on a Linux pseudo-terminal).
   linux:
     runs-on: ubuntu-latest
     steps:
