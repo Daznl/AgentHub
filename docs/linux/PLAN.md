@@ -17,7 +17,7 @@ A colleague runs AgentHub on an Ubuntu computer they reach over Secure Shell (SS
 | 5 | Install the simplest way for the user and the build: Ubuntu's own `dotnet-sdk-8.0` package from `apt` (it brings the runtime), build from the clone, publish into an install folder. Same flow as Windows. No self-contained build, no Microsoft package feed. | owner, choice made here |
 | 6 | **The Windows app must not change.** See [Keeping Windows unchanged](#keeping-windows-unchanged). | owner |
 | 7 | One executable, `agenthub`: `agenthub daemon` (the background service), `agenthub <command>` (the command-line tool, CLI), `agenthub mcp` (the Model Context Protocol (MCP) server Claude Code talks to). | proposed |
-| 8 | Work lands on `main` in slices, one branch and pull request each, not on a long-lived Linux branch. | proposed |
+| 8 | All Linux work lives on the branch `linux-headless`, one commit or more per slice, and is never merged into `main`: the Windows app the owner runs is not touched by it. CI runs on every push to the branch. | owner, 2026-11-20 (replaces "slices land on main") |
 
 ## Shape
 
@@ -213,10 +213,10 @@ A run waiting on the owner shows as paused with its question in `agenthub status
 
 ## Keeping Windows unchanged
 
-Every slice, before its pull request:
+Every slice, before it is pushed to `linux-headless`:
 
 - The Windows build: `dotnet build AgentHub.sln -c Release`, 0 errors.
-- All unit tests pass, live tests with `AGENTHUB_LIVE_REVIEW=1` where a slice touches them, and the interface tests in `tests/ui/*.ps1`, screenshots looked at.
+- All unit tests pass on Windows (`dotnet test`) and in the `linux` CI job, live tests with `AGENTHUB_LIVE_REVIEW=1` where a slice touches them. Backend tests only: the interface tests in `tests/ui/*.ps1` open AgentHub windows on the owner's screen and are not run for this work (owner, 2026-11-20).
 - Windows paths, settings location, pipe names, the session protocol and its version stay as they are, so hosts started by the installed app keep working with a newer one and back.
 - Moves are moves: code moved into Core keeps its behaviour, pinned by tests written before the move where none exist.
 - Linux-only code lives in Linux-only types behind `OperatingSystem.IsLinux()`, or in projects the WPF app does not reference.
