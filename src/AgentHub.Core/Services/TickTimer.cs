@@ -14,13 +14,15 @@ public interface ITickTimer
 
 /// <summary>
 /// Ticks on the synchronisation context current when it was made (the caller's own thread or loop), or on the thread
-/// pool when there is none. A tick already queued when <see cref="Stop"/> is called is dropped.
+/// pool when there is none. A tick already queued when <see cref="Stop"/> is called is dropped, and once Stop returns
+/// no tick starts: Stop waits for a tick that is under way on another thread.
 /// </summary>
 public sealed class SynchronizationContextTickTimer : ITickTimer, IDisposable
 {
     private readonly TimeSpan _interval;
     private readonly SynchronizationContext? _context = SynchronizationContext.Current;
     private readonly System.Threading.Timer _timer;
+    private readonly object _tickLock = new();
     private int _generation;
 
     public SynchronizationContextTickTimer(TimeSpan interval)
@@ -37,16 +39,20 @@ public sealed class SynchronizationContextTickTimer : ITickTimer, IDisposable
 
     public void Stop()
     {
-        Interlocked.Increment(ref _generation);
+        lock (_tickLock) _generation++;
         _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
     }
 
     private void Fire()
     {
-        var generation = Volatile.Read(ref _generation);
+        int generation;
+        lock (_tickLock) generation = _generation;
         void Raise()
         {
-            if (generation == Volatile.Read(ref _generation)) Tick?.Invoke(this, EventArgs.Empty);
+            lock (_tickLock)
+            {
+                if (generation == _generation) Tick?.Invoke(this, EventArgs.Empty);
+            }
         }
 
         if (_context is null) Raise();

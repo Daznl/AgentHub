@@ -56,33 +56,22 @@ public static class SessionContextReader
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "sessions");
 
     /// <summary>Picks the transcript format from the executable at the start of a command line.</summary>
-    public static ContextSource DetectSource(string commandLine)
-    {
-        var trimmed = commandLine.TrimStart();
-        string exe;
-        if (trimmed.StartsWith('"'))
-        {
-            var close = trimmed.IndexOf('"', 1);
-            exe = close > 0 ? trimmed[1..close] : trimmed[1..];
-        }
-        else
-        {
-            var space = trimmed.IndexOf(' ');
-            exe = space > 0 ? trimmed[..space] : trimmed;
-        }
-
-        return Path.GetFileNameWithoutExtension(exe).ToLowerInvariant() switch
+    public static ContextSource DetectSource(string commandLine) =>
+        CommandLineText.ProgramName(commandLine) switch
         {
             "claude" => ContextSource.ClaudeCode,
             "codex" => ContextSource.Codex,
             _ => ContextSource.None
         };
-    }
 
-    /// <summary>Claude Code's project folder name: every character other than a letter or digit becomes '-'.</summary>
+    /// <summary>
+    /// Claude Code's project folder name: every character other than a letter or digit becomes '-'
+    /// (<c>C:\Work\Repo</c> → <c>C--Work-Repo</c>, <c>/home/me/repo</c> → <c>-home-me-repo</c>). A trailing separator of
+    /// either kind is dropped first.
+    /// </summary>
     public static string EncodeClaudeProjectName(string workingDirectory)
     {
-        var path = workingDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var path = workingDirectory.TrimEnd('\\', '/');
         var sb = new StringBuilder(path.Length);
         foreach (var ch in path)
             sb.Append(char.IsAsciiLetterOrDigit(ch) ? ch : '-');

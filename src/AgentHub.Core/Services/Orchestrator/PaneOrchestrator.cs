@@ -185,7 +185,7 @@ public sealed partial class PaneOrchestrator : IDisposable
             if (Math.Abs(next - _contextThreshold) < 0.0005) return;
             _contextThreshold = next;
             if (!_constructed) return; // the workflow's limit, set before anything runs: nothing to note or check yet
-            AddExchange(ExchangeKind.Note, $"Handoff limit set to {next:P0} of the context window.");
+            AddExchange(ExchangeKind.Note, $"Handoff limit set to {Percent.Of(next)} of the context window.");
             OnContextChanged(_worker.LatestContextReading);
         }
     }
@@ -582,12 +582,12 @@ public sealed partial class PaneOrchestrator : IDisposable
         {
             _contextBaseline = baseline = reading.UsedFraction;
             if (baseline >= threshold)
-                AddExchange(ExchangeKind.Note, $"This session already uses {baseline:P0} of its context window ({reading.UsedTokens:N0} of {reading.WindowTokens:N0} tokens), over the {threshold:P0} handoff limit; it hands off at {(baseline + 1) / 2:P0} instead.");
+                AddExchange(ExchangeKind.Note, $"This session already uses {Percent.Of(baseline)} of its context window ({reading.UsedTokens:N0} of {reading.WindowTokens:N0} tokens), over the {Percent.Of(threshold)} handoff limit; it hands off at {Percent.Of((baseline + 1) / 2)} instead.");
             return;
         }
         if (baseline >= threshold) threshold = (baseline + 1) / 2;
         if (reading.UsedFraction >= threshold)
-            _ = RequestHandoffAsync($"context window at {reading.UsedFraction:P0} (limit {threshold:P0}, {reading.UsedTokens:N0} tokens)");
+            _ = RequestHandoffAsync($"context window at {Percent.Of(reading.UsedFraction)} (limit {Percent.Of(threshold)},{reading.UsedTokens:N0} tokens)");
     }
 
     /// <summary>Asks the session to write its handoff now; the fresh session starts when this turn ends.</summary>
@@ -851,7 +851,7 @@ public sealed partial class PaneOrchestrator : IDisposable
         var parts = new List<string> { $"session {_session}", $"decision {_decisions + 1}", _worker.IsRunning ? (WorkerAtPrompt() ? "worker idle" : "worker busy") : "worker not running" };
         if (_worker.IsRunning && _freshSession) parts.Add("the worker session is fresh: empty memory, sent nothing yet");
         if (_worker.LatestContextReading is { } c)
-            parts.Add($"worker context {c.UsedTokens / 1000:N0}k tokens ({c.UsedFraction:P0} of {c.WindowTokens / 1000:N0}k), handoff at {ContextThreshold:P0}, " +
+            parts.Add($"worker context {c.UsedTokens / 1000:N0}k tokens ({Percent.Of(c.UsedFraction)} of {c.WindowTokens / 1000:N0}k), handoff at {Percent.Of(ContextThreshold)}, " +
                 $"fresh session for new work from {FreshSessionMark(c) / 1000:N0}k");
         return string.Join(" · ", parts);
     }

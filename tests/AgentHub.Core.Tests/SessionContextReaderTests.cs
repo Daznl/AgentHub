@@ -30,6 +30,8 @@ public class SessionContextReaderTests : IDisposable
     [InlineData("claude --model opus", ContextSource.ClaudeCode)]
     [InlineData("\"C:\\Program Files\\Claude\\claude.exe\" --resume", ContextSource.ClaudeCode)]
     [InlineData("codex.cmd", ContextSource.Codex)]
+    [InlineData("/usr/local/bin/claude --resume", ContextSource.ClaudeCode)]
+    [InlineData("\"/home/me/my tools/codex\" resume 1", ContextSource.Codex)]
     [InlineData("powershell.exe -NoLogo", ContextSource.None)]
     [InlineData("agy", ContextSource.None)]
     public void DetectSource_UsesExecutableName(string commandLine, ContextSource expected) =>
@@ -39,6 +41,11 @@ public class SessionContextReaderTests : IDisposable
     public void EncodeClaudeProjectName_MatchesClaudeCodeFolderNaming() =>
         Assert.Equal("C--Users-me-person-OneDrive---Company-Desktop-AgentHub-main",
             SessionContextReader.EncodeClaudeProjectName(@"C:\Users\me.person\OneDrive - Company\Desktop\AgentHub-main\"));
+
+    [Fact]
+    public void EncodeClaudeProjectName_MatchesClaudeCodeFolderNamingOnLinux() =>
+        Assert.Equal("-home-me-person-my-repo-main",
+            SessionContextReader.EncodeClaudeProjectName("/home/me.person/my repo_main/"));
 
     [Fact]
     public void Claude_FindsNewestTranscriptAndReadsLastMainThreadTurn()
@@ -189,7 +196,7 @@ public class SessionContextReaderTests : IDisposable
     [Fact]
     public void Codex_MatchesRolloutByCwdAndReadsRecordedWindow()
     {
-        var cwd = @"C:\Work\Codex Repo";
+        var cwd = TestPaths.Native(@"C:\Work\Codex Repo");
         var today = DateTime.Now;
         var dayDir = Path.Combine(_root, today.ToString("yyyy"), today.ToString("MM"), today.ToString("dd"));
         Directory.CreateDirectory(dayDir);
@@ -201,12 +208,12 @@ public class SessionContextReaderTests : IDisposable
             "\"total_token_usage\":{\"total_tokens\":999999},\"last_token_usage\":{\"input_tokens\":1,\"total_tokens\":" + total + "}," +
             "\"model_context_window\":" + window + "}}}";
 
-        File.WriteAllLines(Path.Combine(dayDir, "rollout-other.jsonl"), [Meta(@"C:\Elsewhere"), Tokens(1, 272_000)]);
+        File.WriteAllLines(Path.Combine(dayDir, "rollout-other.jsonl"), [Meta(TestPaths.Native(@"C:\Elsewhere")), Tokens(1, 272_000)]);
         var mine = Path.Combine(dayDir, "rollout-mine.jsonl");
         File.WriteAllLines(mine, [Meta(cwd), Tokens(40_000, 272_000), Tokens(68_000, 272_000), "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":null}}"]);
         File.SetLastWriteTimeUtc(mine, DateTime.UtcNow.AddSeconds(-5));
 
-        var found = SessionContextReader.FindCodexRollout(cwd + "\\", DateTimeOffset.UtcNow.AddMinutes(-1), None, _root);
+        var found = SessionContextReader.FindCodexRollout(cwd + Path.DirectorySeparatorChar,DateTimeOffset.UtcNow.AddMinutes(-1), None, _root);
         Assert.Equal(mine, found);
 
         var reading = SessionContextReader.ReadCodex(found!)!;

@@ -85,19 +85,7 @@ public static class InstructionFiles
     public static InstructionCli? DetectCli(string? commandLine)
     {
         if (string.IsNullOrWhiteSpace(commandLine)) return null;
-        var trimmed = commandLine.TrimStart();
-        string exe;
-        if (trimmed.StartsWith('"'))
-        {
-            var close = trimmed.IndexOf('"', 1);
-            exe = close > 0 ? trimmed[1..close] : trimmed[1..];
-        }
-        else
-        {
-            var space = trimmed.IndexOf(' ');
-            exe = space > 0 ? trimmed[..space] : trimmed;
-        }
-        return Path.GetFileNameWithoutExtension(exe).ToLowerInvariant() switch
+        return CommandLineText.ProgramName(commandLine) switch
         {
             "claude" => InstructionCli.ClaudeCode,
             "codex" => InstructionCli.Codex,

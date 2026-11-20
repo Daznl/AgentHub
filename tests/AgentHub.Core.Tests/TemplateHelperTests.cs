@@ -301,12 +301,30 @@ public class TemplateHelperTests : IDisposable
 
     // ---- The CLI round trip ----
 
+    /// <summary>
+    /// A stand-in for the claude command in a folder with spaces: a batch file on Windows, a shell script on Linux. Each
+    /// saves its standard input as request.txt beside itself (when asked to) and prints <paramref name="envelope"/>.
+    /// </summary>
+    private async Task<string> FakeCliAsync(string envelope, bool keepRequest)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var cmd = Path.Combine(_root, "fake helper.cmd");
+            await File.WriteAllTextAsync(cmd, "@echo off\r\nmore > " + (keepRequest ? "\"%~dp0request.txt\"" : "nul") + "\r\necho " + envelope.Replace("%", "%%") + "\r\n");
+            return cmd;
+        }
+
+        var script = Path.Combine(_root, "fake helper");
+        await File.WriteAllTextAsync(script, "#!/bin/sh\ncat > " + (keepRequest ? "\"$(dirname \"$0\")/request.txt\"" : "/dev/null") + "\ncat <<'END_OF_ENVELOPE'\n" + envelope + "\nEND_OF_ENVELOPE\n");
+        File.SetUnixFileMode(script, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return script;
+    }
+
     [Fact]
     public async Task It_runs_the_command_with_the_request_on_stdin_and_reads_its_envelope()
     {
-        var fake = Path.Combine(_root, "fake helper.cmd");
         var envelope = JsonSerializer.Serialize(new { type = "result", is_error = false, result = "", structured_output = JsonDocument.Parse(Built).RootElement });
-        await File.WriteAllTextAsync(fake, "@echo off\r\nmore > \"%~dp0request.txt\"\r\necho " + envelope.Replace("%", "%%") + "\r\n");
+        var fake = await FakeCliAsync(envelope, keepRequest: true);
 
         var reply = await TemplateHelper.RunAsync(new ProcessRunner(), fake, Context(), [], "Build one from docs/PLAN.md", CancellationToken.None);
         Assert.Equal(TemplateHelperAction.Create, reply.Action);
@@ -364,8 +382,7 @@ public class TemplateHelperTests : IDisposable
     [Fact]
     public async Task An_error_from_the_cli_is_a_failure_with_its_message()
     {
-        var fake = Path.Combine(_root, "fake helper.cmd");
-        await File.WriteAllTextAsync(fake, "@echo off\r\nmore > nul\r\necho {\"type\":\"result\",\"is_error\":true,\"result\":\"Not signed in\"}\r\n");
+        var fake = await FakeCliAsync("{\"type\":\"result\",\"is_error\":true,\"result\":\"Not signed in\"}", keepRequest: false);
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => TemplateHelper.RunAsync(new ProcessRunner(), fake, Context(), [], "x", CancellationToken.None));
         Assert.Contains("Not signed in", ex.Message);
     }

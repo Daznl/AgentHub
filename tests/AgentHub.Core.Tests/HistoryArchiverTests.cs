@@ -26,7 +26,7 @@ public class HistoryArchiverTests : IDisposable
 
     private string WriteSource(string relative, string content)
     {
-        var path = Path.Combine(Source, relative);
+        var path = Path.Combine(Source, TestPaths.Relative(relative));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, content);
         return path;
@@ -40,8 +40,8 @@ public class HistoryArchiverTests : IDisposable
 
         var first = HistoryArchiver.Sync(Source, Archive);
         Assert.Equal(2, first.Copied);
-        Assert.Equal(Prompt + "\n", File.ReadAllText(Path.Combine(Archive, @"C--Work-Repo\s1.jsonl")));
-        Assert.True(File.Exists(Path.Combine(Archive, @"C--Work-Repo\s1\subagents\agent-a.jsonl")));
+        Assert.Equal(Prompt + "\n", File.ReadAllText(Path.Combine(Archive, TestPaths.Relative(@"C--Work-Repo\s1.jsonl"))));
+        Assert.True(File.Exists(Path.Combine(Archive, TestPaths.Relative(@"C--Work-Repo\s1\subagents\agent-a.jsonl"))));
 
         var second = HistoryArchiver.Sync(Source, Archive);
         Assert.Equal(0, second.Copied + second.Appended + second.Superseded);
@@ -59,7 +59,7 @@ public class HistoryArchiverTests : IDisposable
 
         Assert.Equal(1, result.Appended);
         Assert.Equal(Reply.Length + 1, result.BytesWritten);
-        Assert.Equal(File.ReadAllText(src), File.ReadAllText(Path.Combine(Archive, @"C--Work-Repo\live.jsonl")));
+        Assert.Equal(File.ReadAllText(src), File.ReadAllText(Path.Combine(Archive, TestPaths.Relative(@"C--Work-Repo\live.jsonl"))));
     }
 
     [Fact]

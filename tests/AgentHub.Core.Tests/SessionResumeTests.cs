@@ -24,11 +24,11 @@ public class SessionResumeTests : IDisposable
     [Fact]
     public void BuildCommand_UsesEachCliResumeSyntaxAndKeepsConfiguredFlags()
     {
-        var claude = Session(@"C:\x\C--Work\3a7acb60-8157-4ec1-a1c7-8975558e83c9.jsonl", ContextSource.ClaudeCode);
+        var claude = Session(TestPaths.Native(@"C:\x\C--Work\3a7acb60-8157-4ec1-a1c7-8975558e83c9.jsonl"), ContextSource.ClaudeCode);
         Assert.Equal("claude --model opus --resume 3a7acb60-8157-4ec1-a1c7-8975558e83c9",
             SessionResume.BuildCommand("claude --model opus", claude));
 
-        var codex = Session(@"C:\x\2026\10\29\rollout-2026-10-29T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl", ContextSource.Codex);
+        var codex = Session(TestPaths.Native(@"C:\x\2026\10\29\rollout-2026-10-29T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl"), ContextSource.Codex);
         Assert.Equal("5973b6c0-94b8-487b-a530-2aeb6098ae0e", SessionResume.SessionId(codex));
         Assert.Equal("codex resume 5973b6c0-94b8-487b-a530-2aeb6098ae0e", SessionResume.BuildCommand("codex", codex));
     }
@@ -79,7 +79,7 @@ public class SessionResumeTests : IDisposable
         Assert.Equal(rollout, SessionContextReader.FindResumedTranscript($"codex resume {id}", cwd, codexSessionsDir: Path.Combine(_root, "codex")));
     }
 
-    [Fact]
+    [WindowsFact("Linux cannot set a file's creation time; .NET sets its last write time instead, which this test needs to keep")]
     public void FindClaudeTranscript_CreatedSince_IgnoresAnOlderSessionStillBeingWritten()
     {
         var cwd = @"C:\Work\My Repo";

@@ -14,10 +14,9 @@ public class TickTimerTests
         timer.Start();
         await Until(() => Volatile.Read(ref ticks) >= 3);
 
-        timer.Stop();
-        await Task.Delay(60); // a tick already running when Stop came may still land
+        timer.Stop(); // waits for a tick under way; none starts after it
         var stoppedAt = Volatile.Read(ref ticks);
-        await Task.Delay(150);
+        await Task.Delay(200);
         Assert.Equal(stoppedAt, Volatile.Read(ref ticks));
     }
 

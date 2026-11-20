@@ -60,8 +60,8 @@ public class SessionFolderDiscoveryTests : IDisposable
     [Fact]
     public void Finds_every_folder_with_sessions_newest_first_and_counts_what_ListSessions_lists()
     {
-        const string repo = @"C:\Work\My Repo";
-        const string other = @"D:\Projects\other";
+        var repo = TestPaths.Native(@"C:\Work\My Repo");
+        var other = TestPaths.Native(@"D:\Projects\other");
         WriteClaude(Claude, repo, "a.jsonl", ClaudeSession(repo, "fix the build"), written: new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc));
         WriteClaude(Claude, repo, "b.jsonl", ClaudeSession(repo, "add tests"), written: new DateTime(2026, 10, 2, 0, 0, 0, DateTimeKind.Utc));
         WriteClaude(Claude, repo, "empty.jsonl", ["{\"type\":\"file-history-snapshot\"}"]); // opened, never used
@@ -96,7 +96,7 @@ public class SessionFolderDiscoveryTests : IDisposable
     [Fact]
     public void Archived_sessions_count_once_and_sessions_only_left_in_the_archive_count_too()
     {
-        const string repo = @"C:\Work\My Repo";
+        var repo = TestPaths.Native(@"C:\Work\My Repo");
         var lines = ClaudeSession(repo, "kept by the archive");
         WriteClaude(Claude, repo, "both.jsonl", lines);
         WriteClaude(HistoryArchiver.ClaudeArchiveDir(Archive), repo, "both.jsonl", lines);
@@ -114,7 +114,7 @@ public class SessionFolderDiscoveryTests : IDisposable
     [Fact]
     public void A_long_folder_shortened_by_Claude_Code_is_still_found()
     {
-        var deep = @"C:\Work\" + string.Join(@"\", Enumerable.Repeat("a rather long folder name", 10));
+        var deep = TestPaths.Native(@"C:\Work\" + string.Join(@"\", Enumerable.Repeat("a rather long folder name", 10)));
         var encoded = SessionContextReader.EncodeClaudeProjectName(deep);
         Assert.True(encoded.Length > 200);
         WriteClaude(Claude, deep, "a.jsonl", ClaudeSession(deep, "deep"), projectDir: encoded[..200] + "-1a2b3c");
@@ -129,7 +129,8 @@ public class SessionFolderDiscoveryTests : IDisposable
     public void A_session_filed_under_another_folder_is_not_credited_where_it_could_not_be_listed()
     {
         // Recorded folder and project folder disagree: listing the recorded folder would not find this session.
-        WriteClaude(Claude, @"C:\Work\Moved", "a.jsonl", ClaudeSession(@"C:\Work\Moved", "x"), projectDir: "C--Work-Elsewhere");
+        var moved = TestPaths.Native(@"C:\Work\Moved");
+        WriteClaude(Claude, moved, "a.jsonl", ClaudeSession(moved, "x"), projectDir: SessionContextReader.EncodeClaudeProjectName(TestPaths.Native(@"C:\Work\Elsewhere")));
 
         Assert.Empty(SessionFolderDiscovery.Discover(Claude, Codex));
     }
@@ -137,12 +138,13 @@ public class SessionFolderDiscoveryTests : IDisposable
     [Fact]
     public void The_folder_is_read_from_the_end_when_the_first_lines_are_too_long_to_probe()
     {
-        const string repo = @"C:\Work\Big Paste";
-        var huge = "{\"type\":\"user\",\"cwd\":\"C:\\\\Work\\\\Big Paste\"," + Ts(1) + ",\"message\":{\"content\":\"" + new string('x', 300_000) + "\"}}";
+        var repo = TestPaths.Native(@"C:\Work\Big Paste");
+        var cwd = JsonSerializer.Serialize(repo);
+        var huge = "{\"type\":\"user\",\"cwd\":" + cwd + "," + Ts(1) + ",\"message\":{\"content\":\"" + new string('x', 300_000) + "\"}}";
         WriteClaude(Claude, repo, "a.jsonl",
         [
             huge,
-            "{\"type\":\"assistant\",\"cwd\":\"C:\\\\Work\\\\Big Paste\"," + Ts(1) + ",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}",
+            "{\"type\":\"assistant\",\"cwd\":" + cwd + "," + Ts(1) + ",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}",
             "{\"type\":\"ai-title\",\"aiTitle\":\"Big paste\"}"
         ]);
 
@@ -164,7 +166,7 @@ public class SessionFolderDiscoveryTests : IDisposable
         Assert.True(SessionFolderDiscovery.IsTemporary(Path.Combine(profile, "AppData", "Roaming", "Claude", "scratch-workspaces", "x")));
         Assert.True(SessionFolderDiscovery.IsTemporary(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Temp", "y")));
         Assert.True(SessionFolderDiscovery.IsTemporary(_root));
-        Assert.False(SessionFolderDiscovery.IsTemporary(@"C:\Work\My Repo"));
+        Assert.False(SessionFolderDiscovery.IsTemporary(TestPaths.Native(@"C:\Work\My Repo")));
         Assert.False(SessionFolderDiscovery.IsTemporary(Path.Combine(profile, "AppDataBackup")));
         Assert.False(SessionFolderDiscovery.IsTemporary(Path.Combine(profile, ".claude")));
     }
@@ -175,10 +177,11 @@ public class SessionFolderDiscoveryTests : IDisposable
         Assert.True(SessionFolderDiscovery.IsAgentHubOwn(Path.Combine(AgentHub.Services.Orchestrator.PaneOrchestrator.DefaultSessionsRoot, "20261116-092607-raptor-project")));
         Assert.True(SessionFolderDiscovery.IsAgentHubOwn(AgentHub.Services.Orchestrator.TemplateHelper.WorkingDirectory));
         Assert.True(SessionFolderDiscovery.IsAgentHubOwn(AgentHub.Services.Instructions.ClaudePrint.WorkingDirectory));
-        Assert.True(SessionFolderDiscovery.IsAgentHubOwn(@"C:\data\agenthub\test-pane-live\pane-orchestrators\20261107-114829-alpha"));
-        Assert.True(SessionFolderDiscovery.IsAgentHubOwn(@"C:\data\agenthub\scratch\rules check\session"));
-        Assert.False(SessionFolderDiscovery.IsAgentHubOwn(@"C:\data\agenthub\worktrees\AgentHub\some-branch"));
-        Assert.False(SessionFolderDiscovery.IsAgentHubOwn(@"C:\data\agenthub-other\project"));
-        Assert.False(SessionFolderDiscovery.IsAgentHubOwn(@"C:\Work\My Repo"));
+        var data = SessionFolderDiscovery.AgentHubDataRoot;
+        Assert.True(SessionFolderDiscovery.IsAgentHubOwn(Path.Combine(data, "test-pane-live", "pane-orchestrators", "20261107-114829-alpha")));
+        Assert.True(SessionFolderDiscovery.IsAgentHubOwn(Path.Combine(data, "scratch", "rules check", "session")));
+        Assert.False(SessionFolderDiscovery.IsAgentHubOwn(Path.Combine(data, "worktrees", "AgentHub", "some-branch")));
+        Assert.False(SessionFolderDiscovery.IsAgentHubOwn(Path.Combine(data + "-other", "project")));
+        Assert.False(SessionFolderDiscovery.IsAgentHubOwn(TestPaths.Native(@"C:\Work\My Repo")));
     }
 }
