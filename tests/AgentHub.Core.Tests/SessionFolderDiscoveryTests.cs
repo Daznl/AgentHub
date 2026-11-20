@@ -180,7 +180,7 @@ public class SessionFolderDiscoveryTests : IDisposable
         var data = SessionFolderDiscovery.AgentHubDataRoot;
         Assert.True(SessionFolderDiscovery.IsAgentHubOwn(Path.Combine(data, "test-pane-live", "pane-orchestrators", "20261107-114829-alpha")));
         Assert.True(SessionFolderDiscovery.IsAgentHubOwn(Path.Combine(data, "scratch", "rules check", "session")));
-        Assert.False(SessionFolderDiscovery.IsAgentHubOwn(Path.Combine(data, "worktrees", "AgentHub", "some-branch")));
+        Assert.False(SessionFolderDiscovery.IsAgentHubOwn(Path.Combine(SessionFolderDiscovery.AgentHubWorktreesRoot, "AgentHub", "some-branch")));
         Assert.False(SessionFolderDiscovery.IsAgentHubOwn(Path.Combine(data + "-other", "project")));
         Assert.False(SessionFolderDiscovery.IsAgentHubOwn(TestPaths.Native(@"C:\Work\My Repo")));
     }
