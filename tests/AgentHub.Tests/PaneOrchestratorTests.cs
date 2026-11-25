@@ -528,16 +528,18 @@ public class PaneOrchestratorTests
         { TurnSettle = TimeSpan.Zero, LoopInterval = TimeSpan.FromMilliseconds(10), IdleNudge = TimeSpan.FromMilliseconds(30), MaxIdleNudges = 2 };
         await o.SendAsync("deploy");
         worker.EndTurn("Waiting on the deploy.");
-        await Until(() => brain.Messages.Count == 4);
-        Assert.Contains("worker_idle", brain.Messages[2]);
-        Assert.Contains("worker_idle", brain.Messages[3]);
-        Assert.DoesNotContain("[WORKER FINAL REPLY]", brain.Messages[2]);
+        // By content, not position: with a 10 ms loop an idle check can land before the turn end is reported.
+        List<string> AfterTurnEnd() => brain.Messages.ToList().SkipWhile(m => !m.Contains("worker_turn_ended")).Skip(1).ToList();
+        await Until(() => AfterTurnEnd().Count(m => m.Contains("worker_idle")) == 2);
+        Assert.All(AfterTurnEnd(), m => Assert.Contains("worker_idle", m));
+        Assert.All(AfterTurnEnd(), m => Assert.DoesNotContain("[WORKER FINAL REPLY]", m));
+        var settled = brain.Messages.Count;
         await Task.Delay(300);
-        Assert.Equal(4, brain.Messages.Count); // at most MaxIdleNudges for one silence
+        Assert.Equal(settled, brain.Messages.Count); // at most MaxIdleNudges for one silence
 
         await o.SendAsync("status?"); // anything new starts the count again
-        await Until(() => brain.Messages.Count == 6);
-        Assert.Contains("worker_idle", brain.Messages[5]);
+        await Until(() => brain.Messages.Count == settled + 2);
+        Assert.Contains("worker_idle", brain.Messages[^1]);
     }
 
     [Fact]

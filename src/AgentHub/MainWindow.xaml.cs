@@ -609,9 +609,12 @@ public partial class MainWindow : Window
 
     private readonly Dictionary<string, TodoWindow> _todoWindows = new(StringComparer.OrdinalIgnoreCase);
 
+    private void OpenTodo_Click(object sender, RoutedEventArgs e) => ShowTodo(TodoWindow.HomeFolder);
+
     // One to-do list window per folder, reused; not modal, so it sits beside the Cockpit.
     private void ShowTodo(string folder)
     {
+        folder = Path.TrimEndingDirectorySeparator(folder);
         if (!_todoWindows.TryGetValue(folder, out var window))
         {
             window = new TodoWindow { Owner = this };

@@ -53,7 +53,9 @@ public partial class TodoWindow : Window
     public bool ShowFolder(string folder)
     {
         if (Folder is not null && !string.Equals(Folder, folder, StringComparison.OrdinalIgnoreCase) && !ConfirmLeave()) return false;
-        var name = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } n ? n : folder;
+        // The home folder's list is the general one, not tied to a repository: the main window's To do opens it.
+        var name = IsHome(folder) ? "general"
+                 : Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } n ? n : folder;
         Folder = folder;
         Title = $"AgentHub - To do - {name}";
         HeadingText.Text = $"To do · {name}";
@@ -62,6 +64,12 @@ public partial class TodoWindow : Window
         _path = TodoDocument.FindPath(folder);
         return Load(null);
     }
+
+    /// <summary>The folder of the general to-do list: the user's home folder, where a 🏠 Home pane also runs.</summary>
+    public static string HomeFolder => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+    private static bool IsHome(string folder) =>
+        string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder)), Path.TrimEndingDirectorySeparator(HomeFolder), StringComparison.OrdinalIgnoreCase);
 
     private bool Load(string? status)
     {
