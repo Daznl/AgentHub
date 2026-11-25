@@ -59,6 +59,9 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     public event Action<TerminalPaneControl>? HistoryRequested;
     /// <summary>Raised by the header's Repo context button. See <see cref="ContextFolder"/> and <see cref="ContextCli"/>.</summary>
     public event Action<TerminalPaneControl>? RepoContextRequested;
+
+    /// <summary>Raised by the header's To do button: open the to-do list of <see cref="ContextFolder"/>.</summary>
+    public event Action<TerminalPaneControl>? TodoRequested;
     /// <summary>Raised by the header's 🌳 Timeline button. See <see cref="HistoryFolder"/>.</summary>
     public event Action<TerminalPaneControl>? TimelineRequested;
     private List<SshConnection> _sshConnections = [];
@@ -618,6 +621,7 @@ public partial class TerminalPaneControl : UserControl, IDisposable
     }
 
     private void RepoContext_Click(object sender, RoutedEventArgs e) => RepoContextRequested?.Invoke(this);
+    private void Todo_Click(object sender, RoutedEventArgs e) => TodoRequested?.Invoke(this);
 
     public void UpdateShellOptions(List<ShellOption> shells)
     {
