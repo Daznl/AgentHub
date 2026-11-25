@@ -238,11 +238,11 @@ Right-click it and choose **Pin to taskbar**, or **Send to → Desktop** to crea
 
 ### Updating a pinned install
 
-If your pinned icon points at a separate install folder, pulling and publishing do not update it. `scripts\Deploy-Taskbar.ps1` finds that folder from the shortcut, builds the current commit, backs up the old version to `C:\data\agenthub`, swaps it in, relaunches and confirms the installed commit. It needs a clean tree containing `origin/main`.
+If your pinned icon points at a separate install folder, pulling and publishing do not update it. `scripts\Deploy-Taskbar.ps1` finds that folder from the pinned shortcut (whatever Windows named it, `AgentHub (2)` included), builds the current commit, backs up the old version to `C:\data\agenthub`, swaps it in, relaunches and confirms the installed commit. It needs a tree containing `origin/main` with no uncommitted changes to tracked files or under `src`. `Deploy-Taskbar.cmd` runs it where the PowerShell execution policy blocks scripts.
 
 ```powershell
-.\scripts\Deploy-Taskbar.ps1 -Check          # is the taskbar app on the latest code?
-.\scripts\Deploy-Taskbar.ps1 -CloseRunning   # update it, closing the running app
+.\scripts\Deploy-Taskbar.cmd -Check          # is the taskbar app on the latest code?
+.\scripts\Deploy-Taskbar.cmd -CloseRunning   # update it, closing the running app
 ```
 
 ### First launch
@@ -379,7 +379,7 @@ Before switching agents, record the current task, completed work, next steps and
 AgentHub.sln
 bootstrap.cmd / bootstrap.ps1     prerequisite check, build and launch
 AGENTS.md / CLAUDE.md             rules for coding agents; CLAUDE.md also tells Claude Code how to install AgentHub
-scripts/Deploy-Taskbar.ps1        publish into the install folder and prove the installed commit
+scripts/Deploy-Taskbar.ps1/.cmd   publish into the install folder and prove the installed commit
 src/AgentHub/                     WPF application
   Models/                         settings, repository, account and usage models
   Services/                       Git, GitHub CLI, discovery, settings and agent launching

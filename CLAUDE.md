@@ -81,4 +81,14 @@ Then point them to **First launch** in `README.md`.
 
 ### Updating later
 
-After a `git pull`, run `.\scripts\Deploy-Taskbar.ps1 -Check`. If it says `OUT OF DATE`, ask the user whether AgentHub may close, then run `.\scripts\Deploy-Taskbar.ps1 -CloseRunning`. Without a pinned shortcut, pass the same `-InstallDir` as before.
+After a `git pull`, run `.\scripts\Deploy-Taskbar.cmd -Check`. If it says `OUT OF DATE`, ask the user whether AgentHub may close, then run `.\scripts\Deploy-Taskbar.cmd -CloseRunning`. Without a pinned shortcut, pass the same `-InstallDir` as before.
+
+### When the user asks to rebuild or install the app
+
+"Rebuild the executable", "put it on my taskbar", "install it", "deploy it": that is the go. Do this and nothing else:
+
+1. Commit the work (a branch is fine; the script needs `origin/main` merged in, so `git merge origin/main` first if behind).
+2. `.\scripts\Deploy-Taskbar.cmd -CloseRunning`. It finds the pinned shortcut whatever Windows named it (`AgentHub (2).lnk` and so on), builds, closes the app, installs and relaunches. Running sessions survive.
+3. Report the `DEPLOYED:` commit and folder.
+
+Do not ask again whether the app may close, do not create a desktop shortcut, and do not tell the user to pin it when a pin already exists. Use the `.cmd`, not the `.ps1`: the execution policy on this computer blocks PowerShell scripts.

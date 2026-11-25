@@ -35,6 +35,7 @@ AgentHub is a Windows-first personal control centre for GitHub repositories and 
 
 The pinned taskbar icon launches a separate install folder. `git pull`, `dotnet publish` and launching the publish output do not change it, so none of them count as updating the app.
 
-- Update it only with `scripts\Deploy-Taskbar.ps1`. If AgentHub is running, confirm with the user that it may close, then pass `-CloseRunning`.
+- Update it only with `scripts\Deploy-Taskbar.cmd -CloseRunning` (the `.cmd` gets past a blocked PowerShell execution policy). It finds the install folder from the taskbar pin, whatever the pin is called; on this owner's computer that is `C:\Apps\AgentHub`. Never make a desktop shortcut or ask the user to pin it again when a pin exists.
+- When the user asks to rebuild, install, deploy or "put on the taskbar", that request is the go to close the running app: run it, don't ask again. Ask first only when the deploy was not requested (say, offered at the end of other work).
 - Never tell the user they have the latest AgentHub until `scripts\Deploy-Taskbar.ps1 -Check` prints `UP TO DATE`, and say which commit is installed.
 - When "latest" looks wrong, compare the commit stamped in the installed `AgentHub.dll` with `origin/main` before searching branches.
