@@ -91,9 +91,15 @@ function Invoke-Git {
 $repo = Split-Path $PSScriptRoot -Parent
 
 if (-not $InstallDir) {
-    $link = Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\AgentHub.lnk'
-    if (-not (Test-Path -LiteralPath $link)) { throw "No pinned AgentHub shortcut at '$link'. Pass -InstallDir." }
-    $InstallDir = Split-Path (New-Object -ComObject WScript.Shell).CreateShortcut($link).TargetPath -Parent
+    # Windows names a re-pinned shortcut "AgentHub (2).lnk" and so on: find the pin by what it launches, not by its name.
+    $pins = Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar'
+    $shell = New-Object -ComObject WScript.Shell
+    $targets = @(Get-ChildItem -LiteralPath $pins -Filter *.lnk -ErrorAction SilentlyContinue |
+        ForEach-Object { $shell.CreateShortcut($_.FullName).TargetPath } |
+        Where-Object { $_ -and (Split-Path $_ -Leaf) -eq 'AgentHub.exe' } | Select-Object -Unique)
+    if ($targets.Count -eq 0) { throw "No pinned AgentHub shortcut in '$pins'. Pass -InstallDir (normally C:\Apps\AgentHub)." }
+    if ($targets.Count -gt 1) { throw "More than one pinned AgentHub shortcut: $($targets -join ', '). Pass -InstallDir." }
+    $InstallDir = Split-Path $targets[0] -Parent
 }
 
 Invoke-Git fetch origin --quiet | Out-Null
@@ -124,7 +130,10 @@ if ($Check) {
     exit 1
 }
 
-if (Invoke-Git status --porcelain) { throw 'Working tree has uncommitted changes; commit them so the installed build matches a real commit.' }
+# Tracked changes anywhere, or new files under src, would make the build differ from the commit. A stray untracked
+# file elsewhere (an image dropped in docs, say) cannot, so it does not block the install.
+$dirty = @(Invoke-Git status --porcelain --untracked-files=no) + @(Invoke-Git status --porcelain -- src)
+if ($dirty | Where-Object { $_ }) { throw "Working tree has uncommitted changes; commit them so the installed build matches a real commit:`n$($dirty -join "`n")" }
 & git -C $repo merge-base --is-ancestor $remote $head
 if ($LASTEXITCODE -ne 0) { throw "HEAD ($head) does not contain origin/main ($remote). Pull or rebase first." }
 
