@@ -231,7 +231,7 @@ public class WorldSnapshotTests
         using var _ = doc;
         var projects = doc!.RootElement.GetProperty("projects");
         Assert.True(projects.GetArrayLength() >= 1, service.Problem);
-        Assert.True(projects.EnumerateArray().Any(p => p.GetProperty("files").GetArrayLength() > 0));
+        Assert.Contains(projects.EnumerateArray(), p => p.GetProperty("files").GetArrayLength() > 0);
         Console.WriteLine($"first project after {clock.Elapsed.TotalSeconds:0.0}s");
         // AGENTHUB_WORLD_HOLD=<seconds> keeps the service running, to draw it in Godot meanwhile
         if (int.TryParse(Environment.GetEnvironmentVariable("AGENTHUB_WORLD_HOLD"), out var hold)) await Task.Delay(TimeSpan.FromSeconds(hold));

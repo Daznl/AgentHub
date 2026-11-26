@@ -32,7 +32,7 @@ Tests: `RunTreeViewTests`, `RunTreePanelTests` (renders off screen, checks green
 
 ## Side piece, 2026-11-18: 3D world (experiment)
 
-Branch `feature/world-3d` (pushed, no pull request yet), worktree `C:\data\agenthub\worktrees\AgentHub\world-3d`. The owner wants the coding space in 3D: every project's files, branches, sessions, APIs, frontends, Azure and Snowflake, all connected and explorable. Every running session should be a crab that moves with each tool call, and orchestrators should hover over their sessions.
+Merged to `main` 2026-11-26 at the owner's request; still marked experimental. The owner wants the coding space in 3D: every project's files, branches, sessions, APIs, frontends, Azure and Snowflake, all connected and explorable. Every running session should be a crab that moves with each tool call, and orchestrators should hover over their sessions.
 
 Built (see `docs/WORLD_3D.md`):
 - **🌐 World** in the main header (the Timeline's 🌐 3D opens the same world) starts `WorldService` and Godot.
@@ -71,8 +71,7 @@ Not done:
 - An orchestrator over a real run has not been seen (only in the sample).
 - The first read is slow on large repositories. Squash matching could be skipped for the world or done last.
 - Next is stage 5: resources found in the code, on the hub. See the Next section of `docs/WORLD_3D.md`.
-- Questions for the owner:
-  - Open a pull request, or keep this as an experiment branch?
+- Question for the owner:
   - Faster world refresh for live sessions?
 
 ## Side piece, 2026-11-18: headless AgentHub on Ubuntu (plan)
