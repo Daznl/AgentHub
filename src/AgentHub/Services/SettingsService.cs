@@ -18,9 +18,12 @@ public sealed class SettingsService
     /// %APPDATA%\AgentHub, or the folder in <c>AGENTHUB_SETTINGS_DIR</c> so a test copy of AgentHub keeps its own settings
     /// and pane layout instead of sharing (and overwriting) the main instance's.
     /// </summary>
-    public string SettingsDirectory { get; } =
-        Environment.GetEnvironmentVariable("AGENTHUB_SETTINGS_DIR") is { Length: > 0 } custom
-            ? custom
+    public string SettingsDirectory { get; }
+
+    /// <param name="settingsDirectory">A folder of its own, for tests; by default the one described above.</param>
+    public SettingsService(string? settingsDirectory = null) =>
+        SettingsDirectory = !string.IsNullOrWhiteSpace(settingsDirectory) ? settingsDirectory
+            : Environment.GetEnvironmentVariable("AGENTHUB_SETTINGS_DIR") is { Length: > 0 } custom ? custom
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AgentHub");
 
     public string SettingsPath => Path.Combine(SettingsDirectory, "settings.json");
@@ -28,34 +31,63 @@ public sealed class SettingsService
     public async Task<AppSettings> LoadAsync()
     {
         Directory.CreateDirectory(SettingsDirectory);
+        AppSettings settings;
         if (!File.Exists(SettingsPath))
         {
-            var defaults = new AppSettings();
-            await SaveAsync(defaults);
-            return defaults;
+            settings = new AppSettings();
+            await SaveAsync(settings);
         }
-
-        try
+        else
         {
-            await using var stream = File.OpenRead(SettingsPath);
-            var settings = await JsonSerializer.DeserializeAsync<AppSettings>(stream, JsonOptions)
-                   ?? new AppSettings();
-            if (settings.UsageProviders.Count == 0)
+            try
             {
-                settings.UsageProviders = new AppSettings().UsageProviders;
+                AppSettings? read;
+                await using (var stream = File.OpenRead(SettingsPath))
+                    read = await JsonSerializer.DeserializeAsync<AppSettings>(stream, JsonOptions);
+                settings = read ?? new AppSettings();
+                if (settings.UsageProviders.Count == 0)
+                {
+                    settings.UsageProviders = new AppSettings().UsageProviders;
+                    await SaveAsync(settings);
+                }
+            }
+            catch
+            {
+                var backup = SettingsPath + ".broken-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+                File.Copy(SettingsPath, backup, overwrite: true);
+                settings = new AppSettings();
                 await SaveAsync(settings);
             }
+        }
+
+        return await ApplyPendingImportAsync(settings);
+    }
+
+    /// <summary>
+    /// Settings brought from another computer (Settings → Move to another computer) are merged here, at start, before
+    /// anything reads them: the AgentHub that imported them saved its own on exit after the import.
+    /// </summary>
+    private async Task<AppSettings> ApplyPendingImportAsync(AppSettings settings)
+    {
+        try
+        {
+            if (Move.SettingsImport.ApplyPending(settings, SettingsDirectory, SettingsPath, JsonOptions) is not { } merged) return settings;
+            await SaveAsync(merged);
+            PendingImportApplied = true;
+            return merged;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        {
+            PendingImportError = ex.Message;
             return settings;
         }
-        catch
-        {
-            var backup = SettingsPath + ".broken-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
-            File.Copy(SettingsPath, backup, overwrite: true);
-            var defaults = new AppSettings();
-            await SaveAsync(defaults);
-            return defaults;
-        }
     }
+
+    /// <summary>The last <see cref="LoadAsync"/> merged settings imported from another computer.</summary>
+    public bool PendingImportApplied { get; private set; }
+
+    /// <summary>Why imported settings waiting to be merged could not be; they stay waiting for the next start.</summary>
+    public string? PendingImportError { get; private set; }
 
     public async Task SaveAsync(AppSettings settings)
     {

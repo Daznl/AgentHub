@@ -98,8 +98,31 @@ Then [install it as a taskbar app](#install-as-a-taskbar-app) so it runs from a 
 - Filter by kind with the chips, search the session, expand long tool output, and export what is shown as Markdown. **📄 Transcript file** shows the underlying file in Explorer.
 - The open session is followed live: new messages append as the agent writes them, and the view follows the bottom unless you have scrolled up (**↓ Latest** jumps back).
 - Each Cockpit pane's **🕘** button opens straight to that pane's session.
-- Read from the transcripts the CLIs already write (`~/.claude/projects`, `~/.codex/sessions`), so sessions started outside AgentHub appear too and nothing is scraped from the terminal. Antigravity is not covered yet. Sessions from another computer are not included: the CLIs keep them on the computer they ran on.
+- Read from the transcripts the CLIs already write (`~/.claude/projects`, `~/.codex/sessions`), so sessions started outside AgentHub appear too and nothing is scraped from the terminal. Antigravity is not covered yet. Sessions from another computer are not included: the CLIs keep them on the computer they ran on. To bring them over, use [Move to another computer](#move-to-another-computer).
 - **Permanent archive.** While AgentHub runs it copies every transcript (including sub-agent transcripts and saved tool output) into `C:\data\agenthub\history` at startup and every minute, appending only new bytes. Nothing is ever deleted from the archive; a transcript that was rewritten keeps its old copy as `*.superseded-<time>.jsonl`. Sessions the CLI has since deleted still appear in History, marked **archived**. Change the folder with `HistoryArchiveDirectory` or turn it off with `HistoryArchiveEnabled` in settings. Keep it outside OneDrive and Git: it can reach gigabytes and holds everything the agents saw. Claude Code still deletes its own copies after `cleanupPeriodDays` (default 30); raising that in `~/.claude/settings.json` also covers time when AgentHub is not running.
+
+### Move to another computer
+
+**⚙ Settings → 📦 Move to another computer…** packs everything AgentHub works from into one zip, and unpacks it in AgentHub on the other computer. Send the zip to yourself over OneDrive or Teams.
+
+- **📦 Pack this computer** lists what goes in, with sizes; untick what you do not want:
+  - AgentHub's settings (repositories, agents, usage cards, pane layout)
+  - Claude Code sessions (`~/.claude/projects`, with each project's memory), and sessions only AgentHub's history archive still has
+  - Claude Code setup: `CLAUDE.md`, settings, skills, plugins, plans, prompt history, file checkpoints
+  - Codex setup and sessions
+  - the general to-do list (`TODO.md` in your home folder)
+  - own workflows, template runs, pane orchestrators and Timeline reviews
+
+  The zip goes to `C:\data\agenthub\exports\` unless you choose another place.
+- **Never packed:** sign-ins and keys (`.credentials.json`, Codex `auth.json`, `*.pem`/`*.key`), Claude Code's MCP server settings (they can hold keys; their names are listed so you can add them again), caches, and running sessions.
+- **Keep the zip private.** Transcripts hold every prompt and reply and the output of every command and file read.
+- **📥 Unpack a package** shows where the zip came from and what is in it.
+  - **Paths are rewritten.** When your username or a folder differs, paths are changed in file contents and in Claude Code's session folder names (`C--Users-<name>-...`), so History, Resume and Context find the sessions. The folder pairs are shown and can be edited.
+  - **Nothing is overwritten.** Files this computer lacks are written and identical ones are left alone. A session this computer has only the start of is completed. Any other difference keeps this computer's copy and sets the imported one aside in `C:\data\agenthub\imports\<time>\conflicts\`, each with **Use the imported copy**, which first moves this computer's copy to `replaced\`.
+  - **AgentHub's own settings** are merged when AgentHub next starts (**↻ Restart AgentHub**; sessions keep running). The package's repositories and panes are added to this computer's. Panes from the other computer open on their folder with the resume offer. The settings from before the merge are kept as `settings.before-import-<time>.json`.
+  - **Missing repositories** are listed with **Clone**.
+  - A report (`import-report.md`) lists everything.
+- `AgentHub.exe --move <package.zip>` opens the unpack side with that package.
 
 ### Project timeline
 
