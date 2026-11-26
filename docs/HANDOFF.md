@@ -4,6 +4,18 @@ Written 2026-11-14 at the end of the session that built stage 6 (the Template he
 
 Read first: `AGENTS.md`, then `docs/ADVANCED_TEMPLATES.md` (what the feature is, how it is used, the file format, how a run works, editing, the build order). This file only adds what that one does not say: where things stand, what was decided, what to do next and what to watch for.
 
+## Side piece, 2026-11-26: move to another computer
+
+Branch `feature/move-computer`. The owner wants to move AgentHub, with all past sessions, to another computer by zipping it up and sending it over Teams. Built: ⚙ Settings is now a menu (📝 Edit settings.json, 📦 Move to another computer…) and `MoveWindow` packs or unpacks one zip. Design and rules are in `docs/ARCHITECTURE.md` ("Moving to another computer") and README. Measured on this computer: about 2.6 GB of source data, 2.5 GB of it Claude Code transcripts.
+
+Decisions taken without asking:
+- Sign-ins, keys and `~/.claude.json` (MCP server settings can hold keys) are never packed. MCP server names are listed so they can be added again.
+- Import never overwrites. Conflicts go to `C:\data\agenthub\imports\<time>\conflicts\`, with a button to use the imported copy that backs up this computer's copy first.
+- AgentHub's settings merge at the next start, because the running app saves its own on exit.
+- Packages go to `C:\data\agenthub\exports\` by default. The owner chooses where to send them.
+
+Not done: Antigravity sessions; `~/.claude.json` per-project trust. Not tried on a second real computer yet. The result screen has no screenshot yet (the screen was locked): run `testsImove-computer.ps1` (small made-up folders, seconds) and look at `C:datagenthubItestmove-unpacked.png`. Real-data run: 2.7 GB packed to 1.1 GB in about 5 minutes.
+
 ## Side piece, 2026-11-16: past sessions on a fresh install
 
 Separate from advanced templates, on branch `feature/discover-session-folders`. The owner noticed that a new user's earlier Claude sessions did not show. Cause: History and the pane launcher only looked in Home, registered repositories and browsed folders. Claude Code keeps sessions on the computer, not in the Claude account, so nothing can be fetched from an account. Now `SessionFolderDiscovery` lists every folder with sessions (from each transcript's recorded `cwd`). Those folders appear in launcher step ① and in History under "Past sessions on this computer", and History offers ➕ Add to repositories for a Git folder. Tests: `SessionFolderDiscoveryTests`, plus `tests/ui/found-folders.ps1` (passes on this computer against the real transcripts; screenshots in `C:\data\agenthub\uitest`).

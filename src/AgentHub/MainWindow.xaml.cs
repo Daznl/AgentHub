@@ -8,6 +8,7 @@ using AgentHub.Hosting;
 using AgentHub.Models;
 using AgentHub.Services;
 using AgentHub.Services.History;
+using AgentHub.Services.Move;
 using AgentHub.Services.Usage;
 using AgentHub.Services.Orchestrator;
 using AgentHub.Terminal;
@@ -123,6 +124,8 @@ public partial class MainWindow : Window
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         Activate();
+        var args = Environment.GetCommandLineArgs();
+        await WaitForPreviousInstanceAsync(args);
         _settings = await _settingsService.LoadAsync();
         Backdrop.SetAnimated(_settings.AnimatedBackground);
         Mascot.SetAnimated(_settings.AnimatedBackground && _settings.CrabMascot);  // always shown: it is the helper's button
@@ -139,7 +142,11 @@ public partial class MainWindow : Window
         RefreshRepoList();
         RefreshAgentList();
         ViewCockpitBtn_Click(this, new RoutedEventArgs());
-        StatusText.Text = $"Settings: {_settingsService.SettingsPath}";
+        StatusText.Text = _settingsService.PendingImportApplied
+            ? $"Settings from the other computer merged: {_settings.Repositories.Count} repositories. The settings before are kept beside {_settingsService.SettingsPath}."
+            : _settingsService.PendingImportError is { } importError
+                ? $"Settings from the other computer could not be merged ({importError}). They wait in {SettingsImport.PendingFileName} for the next start."
+                : $"Settings: {_settingsService.SettingsPath}";
         StartHistoryArchive();
         _ = RefreshFoundFoldersAsync();
         _foundFoldersTimer.Start();
@@ -151,8 +158,14 @@ public partial class MainWindow : Window
 
         _ = RefreshAllRepoSnapshotsAsync(fetchRemotes: false);
 
+        // "AgentHub.exe --move [<package.zip>]" opens Move to another computer, on the unpack side with that package.
+        var moveArg = Array.FindIndex(args, a => string.Equals(a, "--move", StringComparison.OrdinalIgnoreCase));
+        if (moveArg >= 0)
+        {
+            var window = ShowMove();
+            if (moveArg + 1 < args.Length && File.Exists(args[moveArg + 1])) window.ShowPackage(args[moveArg + 1]);
+        }
         // "AgentHub.exe --timeline <folder>" opens that folder's timeline straight away (handy from a shortcut or script).
-        var args = Environment.GetCommandLineArgs();
         var timelineArg = Array.FindIndex(args, a => string.Equals(a, "--timeline", StringComparison.OrdinalIgnoreCase));
         if (timelineArg >= 0 && timelineArg + 1 < args.Length && Directory.Exists(args[timelineArg + 1])) ShowTimeline(args[timelineArg + 1]);
         // "AgentHub.exe --world" opens the 3D world straight away.
@@ -1351,10 +1364,73 @@ public partial class MainWindow : Window
         StatusText.Text = "Repository removed from AgentHub";
     }
 
+    // ⚙ Settings: a menu, so moving to another computer sits beside editing settings.json.
     private void OpenSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var at = (Button)sender;
+        var menu = new ContextMenu { PlacementTarget = at, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        var edit = new MenuItem { Header = "📝 Edit settings.json", ToolTip = "Open the settings file in Notepad. Restart AgentHub after saving to reload agent commands." };
+        edit.Click += (_, _) => EditSettingsFile();
+        var move = new MenuItem { Header = "📦 Move to another computer…", ToolTip = "Pack AgentHub's settings, past sessions and Claude Code and Codex setup into one zip, or unpack one from another computer." };
+        move.Click += (_, _) => ShowMove();
+        menu.Items.Add(edit);
+        menu.Items.Add(move);
+        menu.IsOpen = true;
+    }
+
+    private void EditSettingsFile()
     {
         Process.Start(new ProcessStartInfo("notepad.exe", $"\"{_settingsService.SettingsPath}\"") { UseShellExecute = true });
         StatusText.Text = "Edit settings.json, save it, then restart AgentHub to reload agent commands.";
+    }
+
+    private MoveWindow? _moveWindow;
+
+    private MoveWindow ShowMove()
+    {
+        if (_moveWindow is null)
+        {
+            _moveWindow = new MoveWindow(_settings, _settingsService, _git, RestartAfterImport) { Owner = this };
+            _moveWindow.Closed += (_, _) => _moveWindow = null;
+            _moveWindow.Show();
+        }
+        else
+        {
+            if (_moveWindow.WindowState == WindowState.Minimized) _moveWindow.WindowState = WindowState.Normal;
+            _moveWindow.Activate();
+        }
+        return _moveWindow;
+    }
+
+    /// <summary>The panes as they are now, for a move package taken mid-session.</summary>
+    internal List<PaneLayoutEntry> CurrentPaneLayout() => _panes.Select(p => p.LayoutEntry()).ToList();
+
+    /// <summary>
+    /// Restarts AgentHub so settings imported from another computer are merged. The new copy waits until this one has
+    /// gone (it saves its settings on the way out), then merges. Hosted sessions keep running and are reattached.
+    /// </summary>
+    private void RestartAfterImport()
+    {
+        if (Environment.ProcessPath is not { } exe) return;
+        Process.Start(new ProcessStartInfo(exe, $"--after-exit {Environment.ProcessId}") { UseShellExecute = false, WorkingDirectory = AppContext.BaseDirectory });
+        Close();
+    }
+
+    /// <summary>"--after-exit &lt;pid&gt;": wait (at most a minute) for the AgentHub that started this one to close.</summary>
+    private static async Task WaitForPreviousInstanceAsync(string[] args)
+    {
+        var at = Array.FindIndex(args, a => string.Equals(a, "--after-exit", StringComparison.OrdinalIgnoreCase));
+        if (at < 0 || at + 1 >= args.Length || !int.TryParse(args[at + 1], out var pid)) return;
+        try
+        {
+            using var previous = Process.GetProcessById(pid);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+            await previous.WaitForExitAsync(timeout.Token);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or OperationCanceledException)
+        {
+            // Already gone, or still closing after a minute: carry on.
+        }
     }
 
     private string SelectedPath() => _selectedRepo?.LocalPath ?? throw new InvalidOperationException("No repository selected.");
