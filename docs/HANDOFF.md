@@ -30,6 +30,50 @@ Branch `feature/run-tree-panel`. Owner asked for the run tree next to the termin
 
 Tests: `RunTreeViewTests`, `RunTreePanelTests` (renders off screen, checks green and blue pixels; `AGENTHUB_RENDER_DIR` saves the PNG), `tests/ui/run-tree-panel.ps1` (24 checks pass). On-screen screenshots were not taken: the screen was locked; `Grab` and `advanced-template-run.ps1`'s menu shot now skip on a locked screen instead of failing. **To do:** look at it on screen with a real run (emoji icons do not show in the off-screen render).
 
+## Side piece, 2026-11-18: 3D world (experiment)
+
+Merged to `main` 2026-11-26 at the owner's request; still marked experimental. The owner wants the coding space in 3D: every project's files, branches, sessions, APIs, frontends, Azure and Snowflake, all connected and explorable. Every running session should be a crab that moves with each tool call, and orchestrators should hover over their sessions.
+
+Built (see `docs/WORLD_3D.md`):
+- **🌐 World** in the main header (the Timeline's 🌐 3D opens the same world) starts `WorldService` and Godot.
+- **The service:** it tails every live Claude Code and Codex transcript into `C:\data\agenthub\world\events-*.ndjson` and keeps `world.json` (schema 2) with all projects. Each project's island arrives as soon as its files are read; its git tree follows.
+- **Godot draws:**
+  - islands on a ring, each with a file city and its git tree;
+  - a hub with GitHub, Azure, Snowflake and the web;
+  - crabs (the mascot sprites) that hop to files, branches and landmarks per event;
+  - orchestrator crabs on clouds over their workers;
+  - a live feed.
+
+Checked on real data: 4 projects, 1,203 commits, 5 live crabs. Two parallel AgentHub sessions show as separate crabs, and the feed carries both. Screenshots are in `C:\data\agenthub\uitest\` (`world-real.png`, `world-real-crab.png`, `world-sample*.png`).
+
+**The owner's first try showed an empty world.** Two causes, both fixed:
+- The service resolved all 8 registered repositories one after another before drawing any of them.
+- The owner's Raptor session runs in a Cockpit pane but had been quiet for over 15 minutes, so it did not count as live.
+
+Now:
+- Every session whose AgentHub session host is still running counts as live, in any AgentHub copy. A quiet one starts as a sleeping crab.
+- Projects are resolved four at a time, live ones first, and each island appears as soon as its files are listed.
+- Godot's header lists the projects still being read.
+- `AgentHub.exe --world` opens the world at start-up.
+
+On this computer, the first islands and live crabs appear within about 20 s, and all 9 projects' trees within about 4 minutes. The slowest steps are squash matching (up to 96 s on contractor-management) and transcripts (49 s on Raptor). After that everything is cached. The service log `C:\data\agenthub\world\world-service.log` has the timings per step.
+
+**Testing it beside the normal AgentHub:** run the worktree's Debug build with `AGENTHUB_SETTINGS_DIR=C:\data\agenthub\world-test\settings` (a copy of the owner's settings with the pane layout cleared) and `--world`.
+
+Tests:
+- `WorldSnapshotTests` (live ones opt in), `TranscriptActionsTests`;
+- `world/tests/test_world.gd` (headless, passes).
+
+Owner's rule: the world hooks only into AgentHub. Snowflake, Azure and other connections are worked out from the repositories' code, never by connecting to those services.
+
+Not done:
+- The owner has not yet confirmed the fixed world looks right. It is not on the taskbar install.
+- An orchestrator over a real run has not been seen (only in the sample).
+- The first read is slow on large repositories. Squash matching could be skipped for the world or done last.
+- Next is stage 5: resources found in the code, on the hub. See the Next section of `docs/WORLD_3D.md`.
+- Question for the owner:
+  - Faster world refresh for live sessions?
+
 ## Side piece, 2026-11-18: headless AgentHub on Ubuntu (plan)
 
 Branch `docs/linux-headless-plan`. The owner wants AgentHub to run on Ubuntu over SSH for a colleague, with no windows, driven by Claude Code as a tool. Slice 0, the plan, is `docs/linux/PLAN.md`: decisions, the shape (`agenthub daemon` / `agenthub <command>` / `agenthub mcp`), what is Windows-bound, every Windows action with its command and MCP tool, the owner-only actions and how they are kept, how Windows stays unchanged, and slices 1 to 6. Kept in `docs/linux/` so the Windows helper (which packs `docs/*.md`) does not learn of it.

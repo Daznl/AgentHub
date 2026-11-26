@@ -155,6 +155,8 @@ public partial class MainWindow : Window
         var args = Environment.GetCommandLineArgs();
         var timelineArg = Array.FindIndex(args, a => string.Equals(a, "--timeline", StringComparison.OrdinalIgnoreCase));
         if (timelineArg >= 0 && timelineArg + 1 < args.Length && Directory.Exists(args[timelineArg + 1])) ShowTimeline(args[timelineArg + 1]);
+        // "AgentHub.exe --world" opens the 3D world straight away.
+        if (args.Any(a => string.Equals(a, "--world", StringComparison.OrdinalIgnoreCase))) OpenWorld();
         // "AgentHub.exe --advanced-templates <folder>" opens that project's advanced templates the same way.
         var advancedArg = Array.FindIndex(args, a => string.Equals(a, "--advanced-templates", StringComparison.OrdinalIgnoreCase));
         if (advancedArg >= 0 && advancedArg + 1 < args.Length) ShowAdvancedTemplates(args[advancedArg + 1]);
@@ -545,6 +547,7 @@ public partial class MainWindow : Window
             var next = _paneOrchestrators.TryGetValue(pane, out var attached) ? OrchestratorBoxView.For(attached) : null;
             if (next != pane.OrchestratorView) pane.ShowOrchestrator(next);
         }
+        NoteOrchestratorsForWorld();
     }
 
     /// <summary>The orchestration templates every 🧭 Orchestrate menu offers.</summary>
@@ -654,6 +657,7 @@ public partial class MainWindow : Window
         {
             window = new TimelineWindow(_runner, scope, HistoryArchiveRoot) { Owner = this };
             window.HistoryRequested += (sessionFolder, transcript) => ShowHistory(sessionFolder, transcript);
+            window.WorldRequested += OpenWorld;
             // The review's rules for the user-wide CLAUDE.md go to the global Context editor as tickable changes.
             window.SuggestionsRequested += suggestion =>
             {
@@ -2468,6 +2472,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _usageRefreshTimer.Stop();
+        StopWorld(); // Godot keeps showing the last state; the files just stop changing
         // Runs under way are kept as paused: their sessions live on without AgentHub, their orchestrators do not.
         foreach (var run in _paneRuns.Values) run.Recorder.Close("AgentHub was closed while this run was under way.");
         _paneRuns.Clear();

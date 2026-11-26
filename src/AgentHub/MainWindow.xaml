@@ -45,6 +45,7 @@
                             <Button Click="ManageReposBtn_Click" Content="🔧 Manage GitHub Repos" FontWeight="SemiBold" />
                             <Button Click="OpenHistory_Click" Content="🕘 History" FontWeight="SemiBold" ToolTip="Every Claude Code and Codex session per repository: each prompt, reply, thinking step, tool call and result" />
                             <Button Click="OpenContext_Click" Content="📄 Context" FontWeight="SemiBold" ToolTip="View and edit the user-wide instruction file of each CLI: Claude Code CLAUDE.md, Codex AGENTS.md, Gemini / Antigravity GEMINI.md" />
+                            <Button x:Name="WorldBtn" Click="OpenWorld_Click" Content="🌐 World" FontWeight="SemiBold" ToolTip="Every project in one 3D world (Godot, experimental): files as a city, branches as a tree, and a crab for each running session that hops to every file it reads or edits and every command it runs. Orchestrators hover over their sessions." />
                             <Button Click="OpenTodo_Click" Content="✅ To do" FontWeight="SemiBold" ToolTip="Your general to-do list, not tied to a repository (TODO.md in your home folder): view, tick, edit and reorder tasks to set the priority" />
                         </StackPanel>
                         <Button Click="OpenSettings_Click" Content="⚙ Settings" Margin="0,0,0,8" />
