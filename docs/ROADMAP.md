@@ -86,6 +86,10 @@
 
 See [WORLD_3D.md](WORLD_3D.md). Stage 1 (git, sessions, pull requests, worktrees, live panes) is built. Next layers, each worked out by AgentHub from the repositories' own code, never by connecting to the services: files and folders, then APIs and frontends, then data stores (Snowflake) and cloud resources (Azure), then links between repositories.
 
+## Headless on Ubuntu (planned, nothing built)
+
+- [ ] AgentHub without windows on an Ubuntu computer reached over SSH, driven by Claude Code through an MCP server and an `agenthub` command-line tool; same functionality as the Windows app, the owner still answers the owner's questions; the Windows app unchanged. Plan, decisions and slices: `docs/linux/PLAN.md` (slice 0 of 6)
+
 ## Later
 
 - Notifications when an agent exits or needs attention via Windows Toast

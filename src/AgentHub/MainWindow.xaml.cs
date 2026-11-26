@@ -255,6 +255,7 @@ public partial class MainWindow : Window
         pane.SshManageRequested += () => ManageSsh_Click(pane, new RoutedEventArgs());
         pane.HistoryRequested += p => ShowHistory(p.HistoryFolder, p.TranscriptPath);
         pane.RepoContextRequested += p => ShowContext(p.ContextFolder, p.ContextCli);
+        pane.TodoRequested += p => ShowTodo(p.ContextFolder);
         pane.TimelineRequested += p => ShowTimeline(p.HistoryFolder);
         pane.UpdateShellOptions(_shellOptions);
         pane.OrchestratorAttachRequested += (p, at) => { _ = OfferPaneOrchestratorAsync(p, at); };
@@ -603,6 +604,26 @@ public partial class MainWindow : Window
                 _repoContextWindow = window;
                 window.Closed += (_, _) => _repoContextWindow = null;
             }
+            window.Show();
+        }
+        if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
+        window.Activate();
+    }
+
+    private readonly Dictionary<string, TodoWindow> _todoWindows = new(StringComparer.OrdinalIgnoreCase);
+
+    private void OpenTodo_Click(object sender, RoutedEventArgs e) => ShowTodo(TodoWindow.HomeFolder);
+
+    // One to-do list window per folder, reused; not modal, so it sits beside the Cockpit.
+    private void ShowTodo(string folder)
+    {
+        folder = Path.TrimEndingDirectorySeparator(folder);
+        if (!_todoWindows.TryGetValue(folder, out var window))
+        {
+            window = new TodoWindow { Owner = this };
+            if (!window.ShowFolder(folder)) return;
+            window.Closed += (_, _) => _todoWindows.Remove(folder);
+            _todoWindows[folder] = window;
             window.Show();
         }
         if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;

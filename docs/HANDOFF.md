@@ -75,6 +75,12 @@ Not done:
   - Open a pull request, or keep this as an experiment branch?
   - Faster world refresh for live sessions?
 
+## Side piece, 2026-11-18: headless AgentHub on Ubuntu (plan)
+
+Branch `docs/linux-headless-plan`. The owner wants AgentHub to run on Ubuntu over SSH for a colleague, with no windows, driven by Claude Code as a tool. Slice 0, the plan, is `docs/linux/PLAN.md`: decisions, the shape (`agenthub daemon` / `agenthub <command>` / `agenthub mcp`), what is Windows-bound, every Windows action with its command and MCP tool, the owner-only actions and how they are kept, how Windows stays unchanged, and slices 1 to 6. Kept in `docs/linux/` so the Windows helper (which packs `docs/*.md`) does not learn of it.
+
+Owner's decisions: same functionality without a user interface; the owner answers the owner's questions; one user per computer; the install steps ask where the data folder goes; the simplest install (Ubuntu's `dotnet-sdk-8.0`, build from the clone); the Windows app must not change. **Next:** slice 1, the Core split. Open: version scheme, the `posix_spawn` pseudo-terminal spike, confirming `dotnet-sdk-8.0` in the Ubuntu archive.
+
 ## What the owner asked for
 
 An orchestrator that follows a planned sequence instead of improvising one: a tree of stages and steps (instruct the worker, wait for it, ask the owner, new session, close session, handoff, create branch, commit, merge, move work to a branch, open a pull request), shown like the Timeline tree but forward-looking; ticked off live; pausable at any time and resumable later; editable, also for later steps while a run is under way; and a helper crab that builds the sequence from a written plan.
